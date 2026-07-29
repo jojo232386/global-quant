@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import subprocess
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -44,9 +43,8 @@ def make_bars(instrument, bar_type, start_price: float):
     return BarDataWrangler(bar_type, instrument).process(frame)
 
 
-def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
-    tmp_path,
-) -> None:
+def main() -> int:
+    output_root = Path(sys.argv[1])
     btc = TestInstrumentProvider.btcusdt_perp_binance()
     eth = TestInstrumentProvider.ethusdt_perp_binance()
     btc_bar_type = BarType.from_str(
@@ -54,6 +52,32 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
     )
     eth_bar_type = BarType.from_str(
         "ETHUSDT-PERP.BINANCE-1-MINUTE-LAST-EXTERNAL",
+    )
+    ledger_path = output_root / "uncertain-events.jsonl"
+    source_hash = hashlib.sha256(
+        (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
+    ).hexdigest()
+    config_hash = hashlib.sha256(
+        (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
+    ).hexdigest()
+    coordinator = EventSourcedCoordinator(
+        ledger=AppendOnlyLedger(ledger_path),
+        initial_wallet=Decimal("10000"),
+        strategy_id="GATE1A",
+        run_id="crashed-run",
+        process_start_id="crashed-process",
+        source_hash=source_hash,
+        config_hash=config_hash,
+    )
+    uncertain = coordinator.request_target(
+        "precrash-decision",
+        str(btc.id),
+        Decimal("0.02"),
+    )
+    assert uncertain is not None
+    coordinator.mark_submitted(
+        uncertain.client_order_id,
+        source_event_id="submit-side-effect-before-crash",
     )
 
     engine = BacktestEngine(
@@ -73,14 +97,6 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
     engine.add_instrument(eth)
     engine.add_data(make_bars(btc, btc_bar_type, 50_000.0))
     engine.add_data(make_bars(eth, eth_bar_type, 3_000.0))
-
-    ledger_path = tmp_path / "nautilus-events.jsonl"
-    source_hash = hashlib.sha256(
-        (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
-    ).hexdigest()
-    config_hash = hashlib.sha256(
-        (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
-    ).hexdigest()
     strategy = FixedTargetStrategy(
         FixedTargetConfig(
             btc_instrument_id=btc.id,
@@ -95,56 +111,24 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
         ),
     )
     engine.add_strategy(strategy)
-
     engine.run()
 
-    ledger = AppendOnlyLedger(ledger_path)
-    assert all(event.source_hash == source_hash for event in ledger.read_all())
-    assert all(event.config_hash == config_hash for event in ledger.read_all())
-    replayed = EventSourcedCoordinator.replay(
-        ledger=ledger,
+    assert {action.kind for action in strategy.recovery_actions} == {
+        "RECONCILE_ORDER",
+    }
+    assert engine.cache.orders() == []
+    recovered = EventSourcedCoordinator.replay(
+        ledger=AppendOnlyLedger(ledger_path),
         initial_wallet=Decimal("10000"),
     )
-    replayed.assert_invariants()
-    assert replayed.position(str(btc.id)).quantity == 0
-    assert replayed.position(str(eth.id)).quantity == 0
-    assert len(replayed.decisions) == 10
-    assert {order.side for order in replayed.orders.values()} == {"BUY", "SELL"}
-    assert {
-        order.role for order in replayed.orders.values()
-    } == {"TARGET", "PROTECTION_STOP", "PROTECTION_TAKE"}
-    first_btc_target = replayed.decisions[("schedule-1", str(btc.id))]
-    first_eth_target = replayed.decisions[("schedule-1", str(eth.id))]
-    assert Decimal("990") <= first_btc_target * Decimal("50001") <= Decimal("1010")
-    assert Decimal("990") <= abs(first_eth_target) * Decimal("3001") <= Decimal("1010")
-    assert all(
-        order.status in {"FILLED", "CANCELED", "REJECTED"}
-        for order in replayed.orders.values()
-    )
-    protection_orders = [
-        order
-        for order in replayed.orders.values()
-        if order.protection_group_id is not None
-    ]
-    assert protection_orders
-    assert all(order.reduce_only for order in protection_orders)
-    account = engine.cache.account_for_venue(Venue("BINANCE"))
-    assert account is not None
-    assert account.balance_total(USDT).as_decimal() == replayed.wallet_balance
-    assert engine.cache.positions_open() == []
-
+    assert set(recovered.decisions) == {
+        ("precrash-decision", str(btc.id)),
+    }
+    assert list(recovered.orders) == [uncertain.client_order_id]
+    assert recovered.orders[uncertain.client_order_id].status == "SUBMITTED"
     engine.dispose()
+    return 0
 
 
-def test_real_strategy_start_pauses_on_uncertain_submitted_order(tmp_path) -> None:
-    worker = ROOT / "tests/helpers/nautilus_uncertain_worker.py"
-    completed = subprocess.run(
-        [str(ROOT / ".venv/bin/python"), str(worker), str(tmp_path)],
-        cwd=ROOT,
-        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+if __name__ == "__main__":
+    raise SystemExit(main())
