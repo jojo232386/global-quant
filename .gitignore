@@ -11,11 +11,9 @@ build/
 
 # Gate evidence is generated locally. Only curated evidence is committed.
 evidence/runtime/
-gate_1a_verdict.json
 
 # Secrets are forbidden in this repository.
 .env
 .env.*
 *.pem
 *.key
-
