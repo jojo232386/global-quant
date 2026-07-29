@@ -13,6 +13,7 @@ from global_quant.gate1a.coordinator import UnexplainedEventError
 from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.recovery import CheckpointIntegrityError
 from global_quant.gate1a.recovery import CheckpointStore
+from global_quant.gate1a.scenario_oracle import validate_scenario_payloads
 
 
 BTC = "BTCUSDT-PERP.BINANCE"
@@ -46,17 +47,25 @@ class ScenarioResult:
     status: str
     initial_state: dict
     input_events: list[str]
+    observed_orders: list[str]
+    observed_fills: list[str]
     expected_orders: list[str]
     expected_fills: list[str]
     final_positions: dict
+    expected_final_positions: dict
     final_wallet: str
+    expected_final_wallet: str
     protection_state: dict
+    expected_protection_state: dict
     exit_code: int
+    expected_exit_code: int
     fail_closed: bool
     expected_failure: str | None
     observed_events: list[str]
     ledger_hash: str
     business_hash: str
+    oracle_version: str | None
+    validation_errors: list[str]
     error: str | None = None
 
     def to_dict(self) -> dict:
@@ -119,31 +128,44 @@ def _result(
     *,
     initial_state: dict,
     input_events: list[str],
-    expected_orders: list[str],
-    expected_fills: list[str],
     expected_failure: str | None = None,
 ) -> ScenarioResult:
     coordinator.assert_invariants()
     snapshot = coordinator.business_snapshot()
+    events = coordinator.ledger.read_all()
     return ScenarioResult(
         name=name,
-        status="PASS",
+        status="UNVALIDATED",
         initial_state=initial_state,
         input_events=input_events,
-        expected_orders=expected_orders,
-        expected_fills=expected_fills,
+        observed_orders=[
+            event.client_order_id
+            for event in events
+            if event.event_type == "ORDER_INTENT"
+            and event.client_order_id is not None
+        ],
+        observed_fills=[
+            event.fill["fill_id"]
+            for event in events
+            if event.event_type == "FILL" and event.fill is not None
+        ],
+        expected_orders=[],
+        expected_fills=[],
         final_positions=snapshot["positions"],
+        expected_final_positions={},
         final_wallet=snapshot["wallet_balance"],
+        expected_final_wallet="",
         protection_state=_protection_state(coordinator),
+        expected_protection_state={},
         exit_code=0,
+        expected_exit_code=-1,
         fail_closed=coordinator.fail_closed,
         expected_failure=expected_failure,
-        observed_events=[
-            event.event_type
-            for event in coordinator.ledger.read_all()
-        ],
+        observed_events=[event.event_type for event in events],
         ledger_hash=coordinator.ledger.last_event_hash,
         business_hash=coordinator.business_hash(),
+        oracle_version=None,
+        validation_errors=[],
     )
 
 
@@ -160,8 +182,6 @@ def _new_order_rejected(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["decision", "submit", "reject"],
-        expected_orders=[order.client_order_id],
-        expected_fills=[],
     )
 
 
@@ -176,8 +196,6 @@ def _submitted_unacknowledged(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["decision", "submit"],
-        expected_orders=[order.client_order_id],
-        expected_fills=[],
     )
 
 
@@ -207,8 +225,6 @@ def _partial_then_complete(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["decision", "submit", "accept", "partial_fill", "final_fill"],
-        expected_orders=[order.client_order_id],
-        expected_fills=["fill-1", "fill-2"],
     )
 
 
@@ -234,8 +250,6 @@ def _partial_then_cancel(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["decision", "submit", "accept", "partial_fill", "cancel"],
-        expected_orders=[order.client_order_id],
-        expected_fills=["fill-1"],
     )
 
 
@@ -268,8 +282,6 @@ def _cancel_reject_fill_race(root: Path) -> ScenarioResult:
             "cancel_request",
             "fill_before_cancel_confirmation",
         ],
-        expected_orders=[order.client_order_id],
-        expected_fills=["race-fill"],
     )
 
 
@@ -301,8 +313,6 @@ def _reversal_before_old_close(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "2", "wallet": "9999.90"},
         input_events=["reverse_decision", "partial_close", "final_close"],
-        expected_orders=[close.client_order_id, opening[0].client_order_id],
-        expected_fills=["close-partial", "close-final"],
     )
 
 
@@ -330,8 +340,6 @@ def _protection_fill_cancels_sibling(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "1", "wallet": "9999.90"},
         input_events=["create_protection", "stop_fill", "sibling_cancel"],
-        expected_orders=[stop.client_order_id, take.client_order_id],
-        expected_fills=["stop-fill"],
     )
 
 
@@ -364,12 +372,6 @@ def _main_close_cancels_protection(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "1", "wallet": "9999.90"},
         input_events=["create_protection", "main_close", "cancel_protection"],
-        expected_orders=[
-            stop.client_order_id,
-            take.client_order_id,
-            close.client_order_id,
-        ],
-        expected_fills=["close-fill"],
     )
 
 
@@ -395,8 +397,6 @@ def _duplicate_events(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["duplicate_decision", "duplicate_fill", "duplicate_replay"],
-        expected_orders=[order_id],
-        expected_fills=["fill-open"],
     )
 
 
@@ -419,8 +419,6 @@ def _out_of_order_events(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["submit", "fill", "late_accept"],
-        expected_orders=[order.client_order_id],
-        expected_fills=["fill-before-ack"],
     )
 
 
@@ -444,15 +442,13 @@ def _unknown_external_event(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["unknown_external_fill"],
-        expected_orders=[],
-        expected_fills=[],
         expected_failure="UnexplainedEventError",
     )
 
 
 def _snapshot_replay_mismatch(root: Path) -> ScenarioResult:
     coordinator = _coordinator(root, "snapshot_replay_mismatch")
-    order_id = _open_long(coordinator)
+    _open_long(coordinator)
     path = root / "snapshot_replay_mismatch" / "checkpoint.json"
     store = CheckpointStore(path)
     store.save(coordinator)
@@ -470,8 +466,6 @@ def _snapshot_replay_mismatch(root: Path) -> ScenarioResult:
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
         input_events=["write_checkpoint", "corrupt_checkpoint", "validate"],
-        expected_orders=[order_id],
-        expected_fills=["fill-open"],
         expected_failure="CheckpointIntegrityError",
     )
 
@@ -502,23 +496,34 @@ def run_all_scenarios(root: Path | str) -> list[ScenarioResult]:
             results.append(
                 ScenarioResult(
                     name=name,
-                    status="STOP",
+                    status="UNVALIDATED",
                     initial_state={"declared": True},
                     input_events=["scenario_failed"],
+                    observed_orders=[],
+                    observed_fills=[],
                     expected_orders=[],
                     expected_fills=[],
                     final_positions={},
+                    expected_final_positions={},
                     final_wallet="UNKNOWN",
+                    expected_final_wallet="",
                     protection_state={},
+                    expected_protection_state={},
                     exit_code=1,
+                    expected_exit_code=-1,
                     fail_closed=True,
                     expected_failure=None,
                     observed_events=[],
                     ledger_hash="",
                     business_hash="",
+                    oracle_version=None,
+                    validation_errors=[],
                     error=f"{type(exc).__name__}: {exc}",
                 ),
             )
         else:
             results.append(result)
-    return results
+    validated = validate_scenario_payloads(
+        [result.to_dict() for result in results],
+    )
+    return [ScenarioResult(**payload) for payload in validated]
