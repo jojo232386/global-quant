@@ -1,0 +1,21 @@
+.DS_Store
+.idea/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+build/
+*.egg-info/
+
+# Gate evidence is generated locally. Only curated evidence is committed.
+evidence/runtime/
+gate_1a_verdict.json
+
+# Secrets are forbidden in this repository.
+.env
+.env.*
+*.pem
+*.key
+

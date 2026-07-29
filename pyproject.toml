@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "global-quant"
+version = "0.1.0"
+description = "Evidence-gated global and crypto quant research"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "nautilus-trader==1.230.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.1",
+    "pytest-timeout==2.4.0",
+    "ruff==0.12.7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/global_quant"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.uv]
+required-version = "==0.11.23"
+
