@@ -6,6 +6,7 @@ import json
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
@@ -38,6 +39,19 @@ RESTART_NAMES = (
     "sibling_cancel_unpersisted",
     "checkpoint_corruption_and_replay_crash",
 )
+MINIMUM_TESTS = {
+    "full_seed_1_rep_1": 67,
+    "full_seed_20260730_rep_1": 67,
+    "full_seed_1_rep_2": 67,
+    "full_seed_20260730_rep_2": 67,
+    "full_seed_1_rep_3": 67,
+    "full_seed_20260730_rep_3": 67,
+    "network_matrix": 11,
+    "crash_matrix": 14,
+    "nautilus_backtest": 1,
+    "scenario_matrix_test": 3,
+    "determinism_matrix_test": 1,
+}
 
 
 def sha256(path: Path) -> str:
@@ -68,12 +82,43 @@ def parse_commands(path: Path, evidence_root: Path) -> list[dict]:
                 "exit_code": record.get("exit_code"),
                 "log_path": str((evidence_root / f"{name}.log").resolve()),
                 "junit_path": str((evidence_root / f"{name}.xml").resolve()),
+                "minimum_tests": MINIMUM_TESTS[name],
                 "started_at": record.get("started_at"),
                 "completed_at": record.get("completed_at"),
                 "command": record.get("command"),
             },
         )
     return commands
+
+
+def junit_case_names(path: Path) -> set[str]:
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (ElementTree.ParseError, OSError):
+        return set()
+    return {
+        case.attrib.get("name", "")
+        for case in root.iter("testcase")
+        if not list(case)
+    }
+
+
+def has_case(cases: set[str], marker: str) -> bool:
+    return any(marker in case for case in cases)
+
+
+def restart_case_passed(cases: set[str], name: str) -> bool:
+    if name != "checkpoint_corruption_and_replay_crash":
+        return has_case(cases, name)
+    return all(
+        has_case(cases, marker)
+        for marker in (
+            "corrupted_checkpoint",
+            "second_crash_during_replay",
+            "checkpoint_matches_replay",
+            "reversal_target_survives_restart",
+        )
+    )
 
 
 def main() -> int:
@@ -90,6 +135,8 @@ def main() -> int:
     scenario_path = evidence_root / "scenario_results.json"
     determinism_path = evidence_root / "determinism" / "determinism_summary.json"
     commands = parse_commands(commands_path, evidence_root)
+    network_cases = junit_case_names(evidence_root / "network_matrix.xml")
+    crash_cases = junit_case_names(evidence_root / "crash_matrix.xml")
     scenario_payload = json.loads(scenario_path.read_text(encoding="utf-8"))
     determinism = json.loads(determinism_path.read_text(encoding="utf-8"))
 
@@ -131,17 +178,40 @@ def main() -> int:
         "required_commands": list(REQUIRED_COMMANDS),
         "test_commands": commands,
         "network_block_status": {
-            "universal_network_blocked": next(
-                (
-                    command["exit_code"] == 0
-                    for command in commands
-                    if command["name"] == "network_matrix"
-                ),
-                False,
+            "universal_network_blocked": (
+                next(
+                    (
+                        command["exit_code"] == 0
+                        for command in commands
+                        if command["name"] == "network_matrix"
+                    ),
+                    False,
+                )
+                and all(
+                    has_case(network_cases, marker)
+                    for marker in (
+                        "[connect]",
+                        "[child]",
+                        "[dns]",
+                        "without_python_guard[ipv4]",
+                        "without_python_guard[ipv6]",
+                    )
+                )
             ),
             "probes": {
-                name: "PASS"
-                for name in ("parent", "child", "dns", "ipv4", "ipv6")
+                "parent": "PASS" if has_case(network_cases, "[connect]") else "STOP",
+                "child": "PASS" if has_case(network_cases, "[child]") else "STOP",
+                "dns": "PASS" if has_case(network_cases, "[dns]") else "STOP",
+                "ipv4": (
+                    "PASS"
+                    if has_case(network_cases, "without_python_guard[ipv4]")
+                    else "STOP"
+                ),
+                "ipv6": (
+                    "PASS"
+                    if has_case(network_cases, "without_python_guard[ipv6]")
+                    else "STOP"
+                ),
             },
             "scope": "processes launched by scripts/run_offline.sh",
         },
@@ -149,18 +219,7 @@ def main() -> int:
         "restart_results": [
             {
                 "name": name,
-                "status": (
-                    "PASS"
-                    if next(
-                        (
-                            command["exit_code"] == 0
-                            for command in commands
-                            if command["name"] == "crash_matrix"
-                        ),
-                        False,
-                    )
-                    else "STOP"
-                ),
+                "status": "PASS" if restart_case_passed(crash_cases, name) else "STOP",
             }
             for name in RESTART_NAMES
         ],
@@ -191,4 +250,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

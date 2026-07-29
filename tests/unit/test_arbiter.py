@@ -67,6 +67,7 @@ def passing_manifest(tmp_path: Path) -> dict:
                 "exit_code": 0,
                 "log_path": str(log),
                 "junit_path": str(junit),
+                "minimum_tests": 48,
             },
         ],
         "network_block_status": {
@@ -183,6 +184,21 @@ def test_skipped_junit_test_is_stop(tmp_path) -> None:
     assert any("skipped" in failure for failure in verdict["failures"])
 
 
+def test_fewer_tests_than_frozen_minimum_is_stop(tmp_path) -> None:
+    manifest = passing_manifest(tmp_path)
+    junit = Path(manifest["test_commands"][0]["junit_path"])
+    junit.write_text(
+        '<testsuites tests="47" failures="0" errors="0" skipped="0"></testsuites>',
+        encoding="utf-8",
+    )
+    manifest["evidence_paths"][str(junit)] = hashlib.sha256(junit.read_bytes()).hexdigest()
+
+    verdict = GateArbiter(require_workbuddy=True).decide(manifest)
+
+    assert verdict["verdict"] == "STOP"
+    assert any("fewer tests" in failure for failure in verdict["failures"])
+
+
 def test_checksum_mismatch_is_stop(tmp_path) -> None:
     manifest = passing_manifest(tmp_path)
     evidence_path = next(iter(manifest["evidence_paths"]))
@@ -201,4 +217,3 @@ def test_candidate_mode_does_not_require_workbuddy(tmp_path) -> None:
     verdict = GateArbiter(require_workbuddy=False).decide(manifest)
 
     assert verdict["verdict"] == "PASS"
-

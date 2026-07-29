@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import socket
 import subprocess
@@ -19,8 +20,8 @@ def raw_os_probe(mode: str) -> int:
     connection = socket.socket(family, socket.SOCK_STREAM)
     result = connection.connect_ex(address)
     connection.close()
-    if result == 0:
-        print("os_network_denied=FAIL")
+    if result not in {errno.EPERM, errno.EACCES}:
+        print(f"os_network_denied=FAIL errno={result}")
         return 2
     print(f"os_network_denied=PASS errno={result}")
     return 0
@@ -63,4 +64,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

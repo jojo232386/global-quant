@@ -107,10 +107,21 @@ class GateArbiter:
             if not junit_path.is_file():
                 failures.append(f"missing JUnit evidence: {name}")
                 continue
-            self._check_junit(name, junit_path, failures)
+            self._check_junit(
+                name,
+                junit_path,
+                failures,
+                minimum_tests=int(command.get("minimum_tests", 1)),
+            )
 
     @staticmethod
-    def _check_junit(name: str, path: Path, failures: list[str]) -> None:
+    def _check_junit(
+        name: str,
+        path: Path,
+        failures: list[str],
+        *,
+        minimum_tests: int,
+    ) -> None:
         try:
             root = ElementTree.parse(path).getroot()
         except (ElementTree.ParseError, OSError) as exc:
@@ -128,6 +139,11 @@ class GateArbiter:
         skipped = sum(int(suite.attrib.get("skipped", 0)) for suite in suites)
         if tests <= 0:
             failures.append(f"JUnit contains no tests: {name}")
+        elif tests < minimum_tests:
+            failures.append(
+                f"JUnit contains fewer tests than frozen minimum: {name} "
+                f"({tests} < {minimum_tests})",
+            )
         if failures_count or errors:
             failures.append(f"JUnit failures or errors: {name}")
         if skipped:

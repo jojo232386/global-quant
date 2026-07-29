@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -21,6 +23,9 @@ from global_quant.gate1a.coordinator import EventSourcedCoordinator
 from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.strategy import FixedTargetConfig
 from global_quant.gate1a.strategy import FixedTargetStrategy
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def make_bars(instrument, bar_type, start_price: float):
@@ -68,6 +73,12 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
     engine.add_data(make_bars(eth, eth_bar_type, 3_000.0))
 
     ledger_path = tmp_path / "nautilus-events.jsonl"
+    source_hash = hashlib.sha256(
+        (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
+    ).hexdigest()
+    config_hash = hashlib.sha256(
+        (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
+    ).hexdigest()
     strategy = FixedTargetStrategy(
         FixedTargetConfig(
             btc_instrument_id=btc.id,
@@ -79,8 +90,8 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
             decision_interval_bars=2,
             ledger_path=str(ledger_path),
             initial_wallet=Decimal("10000"),
-            source_hash="source-hash",
-            config_hash="config-hash",
+            source_hash=source_hash,
+            config_hash=config_hash,
         ),
     )
     engine.add_strategy(strategy)
@@ -88,6 +99,8 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
     engine.run()
 
     ledger = AppendOnlyLedger(ledger_path)
+    assert all(event.source_hash == source_hash for event in ledger.read_all())
+    assert all(event.config_hash == config_hash for event in ledger.read_all())
     replayed = EventSourcedCoordinator.replay(
         ledger=ledger,
         initial_wallet=Decimal("10000"),

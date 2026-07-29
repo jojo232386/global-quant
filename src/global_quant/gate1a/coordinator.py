@@ -169,6 +169,8 @@ class EventSourcedCoordinator:
         instrument_id: str,
         target_quantity: Decimal,
     ) -> OrderState | None:
+        if self.fail_closed:
+            raise UnexplainedEventError("coordinator is fail-closed")
         target = self._decimal(target_quantity)
         decision_key = (decision_id, instrument_id)
         if decision_key in self.decisions:
@@ -179,8 +181,61 @@ class EventSourcedCoordinator:
                     instrument_id=instrument_id,
                 )
                 raise UnexplainedEventError("decision target changed")
+            relevant_orders = [
+                order
+                for order in self.orders.values()
+                if order.decision_id == decision_id
+                and order.instrument_id == instrument_id
+            ]
+            if not relevant_orders:
+                return self._plan_target(decision_id, instrument_id, target)
+            current = self.position(instrument_id).quantity
+            if current != target and not any(
+                order.status in ACTIVE_ORDER_STATES
+                for order in relevant_orders
+            ):
+                reversal_closed = any(
+                    order.role == "REVERSAL_CLOSE" and order.status == "FILLED"
+                    for order in relevant_orders
+                )
+                reversal_opened = any(
+                    order.role == "REVERSAL_OPEN"
+                    for order in relevant_orders
+                )
+                if reversal_closed and not reversal_opened and current == 0:
+                    return self._create_order(
+                        decision_id=decision_id,
+                        instrument_id=instrument_id,
+                        side="BUY" if target > 0 else "SELL",
+                        quantity=abs(target),
+                        role="REVERSAL_OPEN",
+                        reduce_only=False,
+                    )
             return None
 
+        self.persist_decision(decision_id, instrument_id, target)
+        return self._plan_target(decision_id, instrument_id, target)
+
+    def persist_decision(
+        self,
+        decision_id: str,
+        instrument_id: str,
+        target_quantity: Decimal,
+    ) -> bool:
+        if self.fail_closed:
+            raise UnexplainedEventError("coordinator is fail-closed")
+        target = self._decimal(target_quantity)
+        decision_key = (decision_id, instrument_id)
+        existing = self.decisions.get(decision_key)
+        if existing is not None:
+            if existing != target:
+                self._record_anomaly(
+                    f"decision {decision_id} changed target for {instrument_id}",
+                    decision_id=decision_id,
+                    instrument_id=instrument_id,
+                )
+                raise UnexplainedEventError("decision target changed")
+            return False
         decision_event = self._event(
             event_type="DECISION",
             event_id=f"decision:{decision_id}:{instrument_id}",
@@ -192,7 +247,14 @@ class EventSourcedCoordinator:
             order_intent={"target_quantity": str(target)},
         )
         self._append_and_reduce(decision_event)
+        return True
 
+    def _plan_target(
+        self,
+        decision_id: str,
+        instrument_id: str,
+        target: Decimal,
+    ) -> OrderState | None:
         current = self.position(instrument_id).quantity
         if current == target:
             return None
@@ -429,7 +491,10 @@ class EventSourcedCoordinator:
             return False
 
         if order.protection_group_id:
-            self._cancel_protection_siblings(order)
+            if order.status == "FILLED":
+                self._cancel_protection_siblings(order)
+        elif self.position(order.instrument_id).quantity != 0:
+            self._resize_protection_orders(order.instrument_id)
         if self.position(order.instrument_id).quantity == 0:
             self._cancel_orphan_protection(order.instrument_id)
         if order.role == "REVERSAL_CLOSE" and order.status == "FILLED":
@@ -482,6 +547,58 @@ class EventSourcedCoordinator:
             take.client_order_id,
         }
         return stop, take
+
+    def _resize_protection_orders(self, instrument_id: str) -> None:
+        position_quantity = abs(self.position(instrument_id).quantity)
+        if position_quantity == 0:
+            return
+        for order in sorted(
+            self.orders.values(),
+            key=lambda value: value.client_order_id,
+        ):
+            if (
+                order.instrument_id != instrument_id
+                or not order.protection_group_id
+                or order.status not in ACTIVE_ORDER_STATES
+            ):
+                continue
+            desired_quantity = order.filled_quantity + position_quantity
+            if desired_quantity == order.quantity:
+                continue
+            event = self._event(
+                event_type="PROTECTION_RESIZE",
+                event_id=(
+                    f"resize:{order.client_order_id}:{desired_quantity}:"
+                    f"{self.ledger.next_sequence}"
+                ),
+                source_event_id=(
+                    f"resize:{order.client_order_id}:{desired_quantity}:"
+                    f"{self.ledger.next_sequence}"
+                ),
+                dedupe_key=(
+                    f"resize:{order.client_order_id}:{desired_quantity}:"
+                    f"{self.ledger.next_sequence}"
+                ),
+                decision_id=order.decision_id,
+                instrument_id=instrument_id,
+                client_order_id=order.client_order_id,
+                venue_order_id=order.venue_order_id,
+                correlation_id=order.protection_group_id,
+                causation_id=f"position:{instrument_id}",
+                order_transition={
+                    "from_quantity": str(order.quantity),
+                    "to_quantity": str(desired_quantity),
+                    "status": order.status,
+                },
+                protection_group_id=order.protection_group_id,
+            )
+            self._append_and_reduce(event)
+
+    def reconcile_protection_quantities(self) -> None:
+        if self.fail_closed:
+            raise UnexplainedEventError("coordinator is fail-closed")
+        for instrument_id in sorted(self.positions):
+            self._resize_protection_orders(instrument_id)
 
     def _cancel_protection_siblings(self, filled_order: OrderState) -> None:
         group = self.protection_groups.get(filled_order.protection_group_id or "", set())
@@ -581,6 +698,16 @@ class EventSourcedCoordinator:
             order.status = next_status
             if event.venue_order_id:
                 order.venue_order_id = event.venue_order_id
+            return
+        if event.event_type == "PROTECTION_RESIZE":
+            assert event.client_order_id and event.order_transition
+            order = self.orders[event.client_order_id]
+            resized = Decimal(event.order_transition["to_quantity"])
+            if resized < order.filled_quantity:
+                raise UnexplainedEventError(
+                    "protection resize violates filled quantity",
+                )
+            order.quantity = resized
             return
         if event.event_type == "FILL":
             assert event.client_order_id and event.fill and event.fee is not None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import sys
@@ -12,6 +13,13 @@ from global_quant.gate1a.recovery import CheckpointStore
 
 
 BTC = "BTCUSDT-PERP.BINANCE"
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE_HASH = hashlib.sha256(
+    (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
+).hexdigest()
+CONFIG_HASH = hashlib.sha256(
+    (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
+).hexdigest()
 
 
 def kill_now() -> None:
@@ -25,8 +33,8 @@ def new_coordinator(root: Path) -> EventSourcedCoordinator:
         strategy_id="gate1a",
         run_id="crash-run",
         process_start_id=f"process-{os.getpid()}",
-        source_hash="source-hash",
-        config_hash="config-hash",
+        source_hash=SOURCE_HASH,
+        config_hash=CONFIG_HASH,
     )
 
 
@@ -142,4 +150,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

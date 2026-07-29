@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -15,6 +16,13 @@ from global_quant.gate1a.recovery import CheckpointStore
 
 
 BTC = "BTCUSDT-PERP.BINANCE"
+ROOT = Path(__file__).resolve().parents[3]
+SOURCE_HASH = hashlib.sha256(
+    (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
+).hexdigest()
+CONFIG_HASH = hashlib.sha256(
+    (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
+).hexdigest()
 
 REQUIRED_SCENARIOS = (
     "new_order_rejected",
@@ -62,8 +70,8 @@ def _coordinator(root: Path, scenario: str) -> EventSourcedCoordinator:
         strategy_id="gate1a",
         run_id=f"scenario-{scenario}",
         process_start_id=f"process-{scenario}",
-        source_hash="source-hash",
-        config_hash="config-hash",
+        source_hash=SOURCE_HASH,
+        config_hash=CONFIG_HASH,
     )
 
 
@@ -514,4 +522,3 @@ def run_all_scenarios(root: Path | str) -> list[ScenarioResult]:
         else:
             results.append(result)
     return results
-

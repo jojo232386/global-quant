@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from pathlib import Path
 
@@ -67,13 +68,16 @@ class FixedTargetStrategy(Strategy):
                 ledger=ledger,
                 initial_wallet=self._gate_config.initial_wallet,
             )
+            if self._coordinator.fail_closed:
+                raise RuntimeError("durable coordinator state is fail-closed")
+            self._coordinator.reconcile_protection_quantities()
         else:
             self._coordinator = EventSourcedCoordinator(
                 ledger=ledger,
                 initial_wallet=self._gate_config.initial_wallet,
                 strategy_id="GATE1A",
                 run_id=str(self.id),
-                process_start_id=str(self.id),
+                process_start_id=f"pid-{os.getpid()}",
                 source_hash=self._gate_config.source_hash,
                 config_hash=self._gate_config.config_hash,
             )
@@ -81,6 +85,8 @@ class FixedTargetStrategy(Strategy):
         self.subscribe_bars(self._gate_config.eth_bar_type)
 
     def on_bar(self, bar: Bar) -> None:
+        if self._require_coordinator().fail_closed:
+            return
         if bar.bar_type != self._gate_config.btc_bar_type:
             return
         self._bar_count += 1

@@ -205,6 +205,17 @@ def test_partial_entry_protection_quantity_tracks_only_filled_position(
     assert stop.quantity == Decimal("0.4")
     assert take.quantity == Decimal("0.4")
 
+    coordinator.apply_fill(
+        order.client_order_id,
+        fill_id="remaining-entry",
+        quantity=Decimal("0.6"),
+        price=Decimal("101"),
+        fee=Decimal("0.0606"),
+    )
+
+    assert coordinator.orders[stop.client_order_id].quantity == Decimal("1")
+    assert coordinator.orders[take.client_order_id].quantity == Decimal("1")
+
 
 def test_second_protection_fill_before_cancel_ack_fails_closed_without_reopening(
     coordinator,
@@ -239,6 +250,39 @@ def test_second_protection_fill_before_cancel_ack_fails_closed_without_reopening
 
     assert coordinator.position(BTC).quantity == 0
     assert coordinator.fail_closed is True
+
+
+def test_decision_persisted_without_intent_recovers_one_deterministic_order(
+    coordinator,
+) -> None:
+    coordinator.persist_decision("decision-only", BTC, Decimal("1"))
+    assert coordinator.orders == {}
+
+    recovered = EventSourcedCoordinator.replay(
+        ledger=coordinator.ledger,
+        initial_wallet=Decimal("10000"),
+    )
+    order = recovered.request_target("decision-only", BTC, Decimal("1"))
+
+    assert order is not None
+    assert len(recovered.orders) == 1
+    assert recovered.request_target("decision-only", BTC, Decimal("1")) is None
+
+
+def test_fail_closed_state_refuses_new_target(coordinator) -> None:
+    with pytest.raises(UnexplainedEventError):
+        coordinator.apply_fill(
+            "external-order",
+            fill_id="external-fill",
+            quantity=Decimal("1"),
+            price=Decimal("100"),
+            fee=Decimal("0"),
+        )
+
+    with pytest.raises(UnexplainedEventError, match="fail-closed"):
+        coordinator.request_target("decision-after-anomaly", BTC, Decimal("1"))
+
+    assert coordinator.orders == {}
 
 
 def test_unknown_fill_is_persisted_and_fails_closed(coordinator) -> None:
