@@ -100,6 +100,7 @@ class FixedTargetStrategy(Strategy):
                 source_hash=self._gate_config.source_hash,
                 config_hash=self._gate_config.config_hash,
             )
+        self._step = self._next_schedule_step()
         self.subscribe_bars(self._gate_config.btc_bar_type)
         self.subscribe_bars(self._gate_config.eth_bar_type)
         if self._recovery_actions and not self._reconciliation_required:
@@ -172,6 +173,21 @@ class FixedTargetStrategy(Strategy):
                 self._gate_config.eth_instrument_id,
             )
         )
+
+    def _next_schedule_step(self) -> int:
+        coordinator = self._require_coordinator()
+        instruments = (
+            str(self._gate_config.btc_instrument_id),
+            str(self._gate_config.eth_instrument_id),
+        )
+        for step in range(len(self.TARGETS)):
+            decision_id = f"schedule-{step}"
+            if not all(
+                (decision_id, instrument_id) in coordinator.decisions
+                for instrument_id in instruments
+            ):
+                return step
+        return len(self.TARGETS)
 
     def _submit_pending_intents(self) -> None:
         coordinator = self._require_coordinator()

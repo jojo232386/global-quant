@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -43,8 +44,7 @@ def make_bars(instrument, bar_type, start_price: float):
     return BarDataWrangler(bar_type, instrument).process(frame)
 
 
-def main() -> int:
-    output_root = Path(sys.argv[1])
+def build_engine(output_root: Path):
     btc = TestInstrumentProvider.btcusdt_perp_binance()
     eth = TestInstrumentProvider.ethusdt_perp_binance()
     btc_bar_type = BarType.from_str(
@@ -53,33 +53,13 @@ def main() -> int:
     eth_bar_type = BarType.from_str(
         "ETHUSDT-PERP.BINANCE-1-MINUTE-LAST-EXTERNAL",
     )
-    ledger_path = output_root / "uncertain-events.jsonl"
+    ledger_path = output_root / "events.jsonl"
     source_hash = hashlib.sha256(
         (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
     ).hexdigest()
     config_hash = hashlib.sha256(
         (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
     ).hexdigest()
-    coordinator = EventSourcedCoordinator(
-        ledger=AppendOnlyLedger(ledger_path),
-        initial_wallet=Decimal("10000"),
-        strategy_id="GATE1A",
-        run_id="crashed-run",
-        process_start_id="crashed-process",
-        source_hash=source_hash,
-        config_hash=config_hash,
-    )
-    uncertain = coordinator.request_target(
-        "precrash-decision",
-        str(btc.id),
-        Decimal("0.02"),
-    )
-    assert uncertain is not None
-    coordinator.mark_submitted(
-        uncertain.client_order_id,
-        source_event_id="submit-side-effect-before-crash",
-    )
-
     engine = BacktestEngine(
         config=BacktestEngineConfig(
             logging=LoggingConfig(log_level="ERROR"),
@@ -111,21 +91,94 @@ def main() -> int:
         ),
     )
     engine.add_strategy(strategy)
+    return engine, strategy, ledger_path, btc
+
+
+def seed_uncertain_order(ledger_path: Path, btc, source_hash: str, config_hash: str):
+    coordinator = EventSourcedCoordinator(
+        ledger=AppendOnlyLedger(ledger_path),
+        initial_wallet=Decimal("10000"),
+        strategy_id="GATE1A",
+        run_id="crashed-run",
+        process_start_id="crashed-process",
+        source_hash=source_hash,
+        config_hash=config_hash,
+    )
+    uncertain = coordinator.request_target(
+        "precrash-decision",
+        str(btc.id),
+        Decimal("0.02"),
+    )
+    assert uncertain is not None
+    coordinator.mark_submitted(
+        uncertain.client_order_id,
+        source_event_id="submit-side-effect-before-crash",
+    )
+    return uncertain
+
+
+def main() -> int:
+    output_root = Path(sys.argv[1])
+    mode = sys.argv[2] if len(sys.argv) > 2 else "uncertain"
+    source_hash = hashlib.sha256(
+        (ROOT / "src/global_quant/gate1a/strategy.py").read_bytes(),
+    ).hexdigest()
+    config_hash = hashlib.sha256(
+        (ROOT / "protocols/NT_GATE_1A.md").read_bytes(),
+    ).hexdigest()
+    engine, strategy, ledger_path, btc = build_engine(output_root)
+    uncertain = None
+    if mode == "uncertain":
+        uncertain = seed_uncertain_order(
+            ledger_path,
+            btc,
+            source_hash,
+            config_hash,
+        )
     engine.run()
 
-    assert {action.kind for action in strategy.recovery_actions} == {
-        "RECONCILE_ORDER",
-    }
-    assert engine.cache.orders() == []
     recovered = EventSourcedCoordinator.replay(
         ledger=AppendOnlyLedger(ledger_path),
         initial_wallet=Decimal("10000"),
     )
-    assert set(recovered.decisions) == {
-        ("precrash-decision", str(btc.id)),
-    }
-    assert list(recovered.orders) == [uncertain.client_order_id]
-    assert recovered.orders[uncertain.client_order_id].status == "SUBMITTED"
+    if mode == "uncertain":
+        assert uncertain is not None
+        assert {action.kind for action in strategy.recovery_actions} == {
+            "RECONCILE_ORDER",
+        }
+        assert engine.cache.orders() == []
+        assert set(recovered.decisions) == {
+            ("precrash-decision", str(btc.id)),
+        }
+        assert list(recovered.orders) == [uncertain.client_order_id]
+        assert recovered.orders[uncertain.client_order_id].status == "SUBMITTED"
+    elif mode == "complete":
+        assert strategy.recovery_actions == ()
+        baseline = {
+            "business_hash": recovered.business_hash(),
+            "decision_keys": sorted(
+                f"{decision}|{instrument}"
+                for decision, instrument in recovered.decisions
+            ),
+            "order_ids": sorted(recovered.orders),
+        }
+        (output_root / "restart_baseline.json").write_text(
+            json.dumps(baseline, sort_keys=True),
+            encoding="utf-8",
+        )
+    elif mode == "restart":
+        assert strategy.recovery_actions == ()
+        baseline = json.loads(
+            (output_root / "restart_baseline.json").read_text(encoding="utf-8"),
+        )
+        assert recovered.business_hash() == baseline["business_hash"]
+        assert sorted(recovered.orders) == baseline["order_ids"]
+        assert sorted(
+            f"{decision}|{instrument}"
+            for decision, instrument in recovered.decisions
+        ) == baseline["decision_keys"]
+    else:
+        raise ValueError(f"unknown mode {mode}")
     engine.dispose()
     return 0
 

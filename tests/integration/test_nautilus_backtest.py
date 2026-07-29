@@ -148,3 +148,21 @@ def test_real_strategy_start_pauses_on_uncertain_submitted_order(tmp_path) -> No
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_clean_restart_recovers_schedule_progress_without_duplicate_decisions(
+    tmp_path,
+) -> None:
+    worker = ROOT / "tests/helpers/nautilus_uncertain_worker.py"
+    environment = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    for mode in ("complete", "restart"):
+        completed = subprocess.run(
+            [str(ROOT / ".venv/bin/python"), str(worker), str(tmp_path), mode],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
