@@ -379,16 +379,53 @@ def _main_close_cancels_protection(root: Path) -> ScenarioResult:
 
 def _duplicate_events(root: Path) -> ScenarioResult:
     coordinator = _coordinator(root, "duplicate_events")
-    order_id = _open_long(coordinator)
+    order = coordinator.request_target("open", BTC, Decimal("1"))
+    assert order is not None
+    assert coordinator.request_target("open", BTC, Decimal("1")) is None
+    assert coordinator.mark_submitted(
+        order.client_order_id,
+        source_event_id="submit-open",
+    )
+    assert not coordinator.mark_submitted(
+        order.client_order_id,
+        source_event_id="submit-open",
+    )
+    assert coordinator.mark_accepted(
+        order.client_order_id,
+        "venue-open",
+        source_event_id="accept-open",
+    )
+    assert not coordinator.mark_accepted(
+        order.client_order_id,
+        "venue-open",
+        source_event_id="accept-open",
+    )
+    assert coordinator.apply_fill(
+        order.client_order_id,
+        fill_id="fill-open",
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        fee=Decimal("0.10"),
+    )
     assert (
         coordinator.apply_fill(
-            order_id,
+            order.client_order_id,
             fill_id="fill-open",
             quantity=Decimal("1"),
             price=Decimal("100"),
             fee=Decimal("0.10"),
         )
         is False
+    )
+    assert coordinator.reconcile_account_snapshot(
+        source_event_id="account-position-snapshot",
+        wallet_balance=Decimal("9999.90"),
+        positions={BTC: Decimal("1")},
+    )
+    assert not coordinator.reconcile_account_snapshot(
+        source_event_id="account-position-snapshot",
+        wallet_balance=Decimal("9999.90"),
+        positions={BTC: Decimal("1")},
     )
     before = coordinator.business_hash()
     for event in coordinator.ledger.read_all():
@@ -398,7 +435,13 @@ def _duplicate_events(root: Path) -> ScenarioResult:
         "duplicate_events",
         coordinator,
         initial_state={"position": "0", "wallet": "10000"},
-        input_events=["duplicate_decision", "duplicate_fill", "duplicate_replay"],
+        input_events=[
+            "duplicate_decision",
+            "duplicate_order",
+            "duplicate_fill",
+            "duplicate_account_position",
+            "duplicate_replay",
+        ],
     )
 
 
@@ -518,6 +561,7 @@ def run_all_scenarios(root: Path | str) -> list[ScenarioResult]:
                     observed_events=[],
                     ledger_hash="",
                     business_hash="",
+                    expected_business_hash="",
                     oracle_version=None,
                     validation_errors=[],
                     error=f"{type(exc).__name__}: {exc}",
