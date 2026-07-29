@@ -29,6 +29,9 @@ found before the implementation snapshot was frozen.
   Python guard and did not independently prove the OS sandbox.
 - `red/nautilus_strategy_red_after_impl.log`: the first shared Strategy config
   layout was incompatible with Nautilus `StrategyConfig`.
+- `red/self_review_red.log`: self-review proved that partial-fill protection
+  was not resized, decision-only recovery was absent, and fail-closed state
+  still accepted a new target.
 
 These failures are evidence that the tests detected the intended defect. They
 are not PASS evidence. Final PASS or STOP is decided only from the separately
@@ -43,4 +46,3 @@ No network exception was granted. The bounded remedy removed unused lint and
 timeout packages, aligned the lock to the already cached `pytest==9.1.1`, and
 kept `nautilus-trader==1.230.0` unchanged. Final evidence records the actual
 versions.
-

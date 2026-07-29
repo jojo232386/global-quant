@@ -1,0 +1,80 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+______ test_partial_entry_protection_quantity_tracks_only_filled_position ______
+
+coordinator = <global_quant.gate1a.coordinator.EventSourcedCoordinator object at 0x106b53050>
+
+    def test_partial_entry_protection_quantity_tracks_only_filled_position(
+        coordinator,
+    ) -> None:
+        order = coordinator.request_target("decision-1", BTC, Decimal("1"))
+        assert order is not None
+        coordinator.mark_submitted(order.client_order_id)
+        coordinator.mark_accepted(order.client_order_id, "venue-1")
+        coordinator.apply_fill(
+            order.client_order_id,
+            fill_id="partial-entry",
+            quantity=Decimal("0.4"),
+            price=Decimal("100"),
+            fee=Decimal("0.04"),
+        )
+    
+        stop, take = coordinator.create_protection_group(
+            group_id="protect-partial",
+            instrument_id=BTC,
+            quantity=Decimal("1"),
+        )
+    
+        assert stop.quantity == Decimal("0.4")
+        assert take.quantity == Decimal("0.4")
+    
+        coordinator.apply_fill(
+            order.client_order_id,
+            fill_id="remaining-entry",
+            quantity=Decimal("0.6"),
+            price=Decimal("101"),
+            fee=Decimal("0.0606"),
+        )
+    
+>       assert coordinator.orders[stop.client_order_id].quantity == Decimal("1")
+E       AssertionError: assert Decimal('0.4') == Decimal('1')
+E        +  where Decimal('0.4') = OrderState(client_order_id='G1A-f5c52e29256d7e3cb2f7f868', decision_id='protection:protect-partial', instrument_id='BT...e_only=True, protection_group_id='protect-partial', venue_order_id=None, status='INTENT', filled_quantity=Decimal('0')).quantity
+E        +  and   Decimal('1') = Decimal('1')
+
+tests/unit/test_coordinator.py:216: AssertionError
+___ test_decision_persisted_without_intent_recovers_one_deterministic_order ____
+
+coordinator = <global_quant.gate1a.coordinator.EventSourcedCoordinator object at 0x106b51160>
+
+    def test_decision_persisted_without_intent_recovers_one_deterministic_order(
+        coordinator,
+    ) -> None:
+>       coordinator.persist_decision("decision-only", BTC, Decimal("1"))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'EventSourcedCoordinator' object has no attribute 'persist_decision'
+
+tests/unit/test_coordinator.py:258: AttributeError
+__________________ test_fail_closed_state_refuses_new_target ___________________
+
+coordinator = <global_quant.gate1a.coordinator.EventSourcedCoordinator object at 0x106b67110>
+
+    def test_fail_closed_state_refuses_new_target(coordinator) -> None:
+        with pytest.raises(UnexplainedEventError):
+            coordinator.apply_fill(
+                "external-order",
+                fill_id="external-fill",
+                quantity=Decimal("1"),
+                price=Decimal("100"),
+                fee=Decimal("0"),
+            )
+    
+>       with pytest.raises(UnexplainedEventError, match="fail-closed"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UnexplainedEventError
+
+tests/unit/test_coordinator.py:282: Failed
+=========================== short test summary info ============================
+FAILED tests/unit/test_coordinator.py::test_partial_entry_protection_quantity_tracks_only_filled_position
+FAILED tests/unit/test_coordinator.py::test_decision_persisted_without_intent_recovers_one_deterministic_order
+FAILED tests/unit/test_coordinator.py::test_fail_closed_state_refuses_new_target
+3 failed, 9 deselected in 0.10s
