@@ -10,6 +10,8 @@ if [ "${1:-}" = "--without-python-guard" ]; then
     exec /usr/bin/sandbox-exec -p "$PROFILE" /usr/bin/env \
         -u GLOBAL_QUANT_OFFLINE \
         -u PYTHONPATH \
+        GLOBAL_QUANT_MACOS_SANDBOX=network-deny \
+        GLOBAL_QUANT_PYTHON_GUARD=disabled-for-os-probe \
         "$@"
 fi
 
@@ -21,5 +23,7 @@ fi
 
 exec /usr/bin/sandbox-exec -p "$PROFILE" /usr/bin/env \
     GLOBAL_QUANT_OFFLINE=1 \
+    GLOBAL_QUANT_MACOS_SANDBOX=network-deny \
+    GLOBAL_QUANT_PYTHON_GUARD=enabled \
     PYTHONPATH="$GUARDED_PYTHONPATH" \
     "$@"

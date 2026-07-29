@@ -11,8 +11,34 @@ from datetime import datetime
 from pathlib import Path
 
 
+RUN_OFFLINE = (Path(__file__).resolve().parent / "run_offline.sh").resolve()
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def network_controls(command: list[str]) -> dict[str, dict[str, str]]:
+    launcher = Path(command[0]).resolve() if command else None
+    if launcher != RUN_OFFLINE:
+        return {
+            "macos_sandbox": {"status": "MISSING", "launcher": ""},
+            "python_guard": {"status": "MISSING"},
+        }
+    no_guard_probe = len(command) > 1 and command[1] == "--without-python-guard"
+    return {
+        "macos_sandbox": {
+            "status": "ENABLED",
+            "launcher": str(RUN_OFFLINE),
+        },
+        "python_guard": {
+            "status": (
+                "DISABLED_FOR_OS_PROBE"
+                if no_guard_probe
+                else "ENABLED"
+            ),
+        },
+    }
 
 
 def main() -> int:
@@ -55,6 +81,7 @@ def main() -> int:
         "exit_code": completed.returncode,
         "python_hash_seed": os.environ.get("PYTHONHASHSEED"),
         "output_log": str(output_path.resolve()),
+        "network_controls": network_controls(command),
     }
     command_path = Path(args.command_log)
     command_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
