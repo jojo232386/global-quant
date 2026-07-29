@@ -1,0 +1,19 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+____________ test_all_frozen_scenarios_pass_with_complete_evidence _____________
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-572/test_all_frozen_scenarios_pass0')
+
+    def test_all_frozen_scenarios_pass_with_complete_evidence(tmp_path) -> None:
+        results = run_all_scenarios(tmp_path)
+    
+        assert [result.name for result in results] == list(REQUIRED_SCENARIOS)
+        assert len(results) == 12
+>       assert all(result.status == "PASS" for result in results)
+E       assert False
+E        +  where False = all(<generator object test_all_frozen_scenarios_pass_with_complete_evidence.<locals>.<genexpr> at 0x10ae13920>)
+
+tests/integration/test_scenario_matrix.py:12: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_scenario_matrix.py::test_all_frozen_scenarios_pass_with_complete_evidence
+1 failed, 2 passed in 0.06s

@@ -1,0 +1,26 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_appended_event_cannot_be_mutated_through_caller_or_reader ________
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-592/test_appended_event_cannot_be_0')
+
+    def test_appended_event_cannot_be_mutated_through_caller_or_reader(tmp_path) -> None:
+        path = tmp_path / "events.jsonl"
+        ledger = AppendOnlyLedger(path)
+        event = make_event()
+        ledger.append(event)
+        original_hash = ledger.business_hash()
+    
+        event.order_intent["quantity"] = "999"
+        ledger.read_all()[0].order_intent["quantity"] = "888"
+    
+>       assert ledger.business_hash() == original_hash
+E       AssertionError: assert '3c46e09f8e92...851687eb0fc37' == 'aa46902605a3...8c059e9f6ea40'
+E         
+E         - aa46902605a3827cc131e6816ab34b6ff01e97f29056cc40f598c059e9f6ea40
+E         + 3c46e09f8e92eb6d051d7892c614f95e95e767b9ef4e926ff57851687eb0fc37
+
+tests/unit/test_ledger.py:122: AssertionError
+=========================== short test summary info ============================
+FAILED tests/unit/test_ledger.py::test_appended_event_cannot_be_mutated_through_caller_or_reader
+1 failed, 6 deselected in 0.02s

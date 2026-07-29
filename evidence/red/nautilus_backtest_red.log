@@ -1,0 +1,56 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___ test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat ____
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-582/test_same_strategy_source_runs0')
+
+    def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
+        tmp_path,
+    ) -> None:
+        btc = TestInstrumentProvider.btcusdt_perp_binance()
+        eth = TestInstrumentProvider.ethusdt_perp_binance()
+        btc_bar_type = BarType.from_str(
+            "BTCUSDT-PERP.BINANCE-1-MINUTE-LAST-EXTERNAL",
+        )
+        eth_bar_type = BarType.from_str(
+            "ETHUSDT-PERP.BINANCE-1-MINUTE-LAST-EXTERNAL",
+        )
+    
+        engine = BacktestEngine(
+            config=BacktestEngineConfig(
+                logging=LoggingConfig(log_level="ERROR"),
+            ),
+        )
+        engine.add_venue(
+            venue=Venue("BINANCE"),
+            oms_type=OmsType.NETTING,
+            account_type=AccountType.MARGIN,
+            starting_balances=[Money(10_000, USDT)],
+            base_currency=USDT,
+            default_leverage=Decimal("1"),
+        )
+        engine.add_instrument(btc)
+        engine.add_instrument(eth)
+>       engine.add_data(make_bars(btc, btc_bar_type, 50_000.0))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_nautilus_backtest.py:68: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_nautilus_backtest.py:38: in make_bars
+    return BarDataWrangler(bar_type, instrument).process(frame)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+nautilus_trader/persistence/wranglers.pyx:771: in nautilus_trader.persistence.wranglers.BarDataWrangler.process
+    ???
+nautilus_trader/persistence/wranglers.pyx:779: in nautilus_trader.persistence.wranglers.BarDataWrangler._build_bar
+    ???
+<stringsource>:673: in View.MemoryView.memoryview_cwrapper
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+>   ???
+E   ValueError: buffer source array is read-only
+
+<stringsource>:360: ValueError
+=========================== short test summary info ============================
+FAILED tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+1 failed in 2.11s

@@ -1,0 +1,47 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_three_repetitions_across_two_hash_seeds_are_business_identical ______
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-577/test_three_repetitions_across_0')
+
+    def test_three_repetitions_across_two_hash_seeds_are_business_identical(
+        tmp_path,
+    ) -> None:
+        observed: list[dict] = []
+        for repetition in range(3):
+            for seed in ("1", "20260730"):
+                output = tmp_path / f"result-{repetition}-{seed}.json"
+                scenario_root = tmp_path / f"scenario-{repetition}-{seed}"
+                environment = {
+                    **os.environ,
+                    "PYTHONHASHSEED": seed,
+                }
+                completed = subprocess.run(
+                    [
+                        str(RUN_OFFLINE),
+                        str(ROOT / ".venv" / "bin" / "python"),
+                        str(RUNNER),
+                        "--scenario-root",
+                        str(scenario_root),
+                        "--output",
+                        str(output),
+                        "--repetition",
+                        str(repetition),
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+>               assert completed.returncode == 0, completed.stderr
+E               AssertionError: /Users/ASUS/Desktop/global-quant/.venv/bin/python: can't open file '/Users/ASUS/Desktop/global-quant/scripts/run_scenario_matrix.py': [Errno 2] No such file or directory
+E                 
+E               assert 2 == 0
+E                +  where 2 = CompletedProcess(args=['/Users/ASUS/Desktop/global-quant/scripts/run_offline.sh', '/Users/ASUS/Desktop/global-quant/.v...'t open file '/Users/ASUS/Desktop/global-quant/scripts/run_scenario_matrix.py': [Errno 2] No such file or directory\n").returncode
+
+tests/integration/test_determinism_matrix.py:67: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_determinism_matrix.py::test_three_repetitions_across_two_hash_seeds_are_business_identical
+1 failed in 1.42s

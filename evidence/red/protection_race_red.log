@@ -1,0 +1,36 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+_ test_second_protection_fill_before_cancel_ack_fails_closed_without_reopening _
+
+coordinator = <global_quant.gate1a.coordinator.EventSourcedCoordinator object at 0x10ab1bad0>
+
+    def test_second_protection_fill_before_cancel_ack_fails_closed_without_reopening(
+        coordinator,
+    ) -> None:
+        open_long(coordinator)
+        stop, take = coordinator.create_protection_group(
+            group_id="protect-race",
+            instrument_id=BTC,
+            quantity=Decimal("1"),
+        )
+        coordinator.mark_submitted(stop.client_order_id)
+        coordinator.mark_accepted(stop.client_order_id, "venue-stop")
+        coordinator.mark_submitted(take.client_order_id)
+        coordinator.mark_accepted(take.client_order_id, "venue-take")
+        coordinator.apply_fill(
+            stop.client_order_id,
+            fill_id="stop-fill",
+            quantity=Decimal("1"),
+            price=Decimal("95"),
+            fee=Decimal("0.095"),
+        )
+        assert coordinator.orders[take.client_order_id].status == "CANCEL_PENDING"
+    
+>       with pytest.raises(UnexplainedEventError, match="reduce-only"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE UnexplainedEventError
+
+tests/unit/test_coordinator.py:231: Failed
+=========================== short test summary info ============================
+FAILED tests/unit/test_coordinator.py::test_second_protection_fill_before_cancel_ack_fails_closed_without_reopening
+1 failed, 1 passed, 8 deselected in 0.05s

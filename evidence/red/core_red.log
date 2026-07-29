@@ -1,0 +1,38 @@
+
+==================================== ERRORS ====================================
+__________________ ERROR collecting tests/unit/test_ledger.py __________________
+ImportError while importing test module '/Users/ASUS/Desktop/global-quant/tests/unit/test_ledger.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_ledger.py:8: in <module>
+    from global_quant.gate1a.ledger import AppendOnlyLedger
+E   ModuleNotFoundError: No module named 'global_quant'
+_______________ ERROR collecting tests/unit/test_coordinator.py ________________
+ImportError while importing test module '/Users/ASUS/Desktop/global-quant/tests/unit/test_coordinator.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_coordinator.py:7: in <module>
+    from global_quant.gate1a.coordinator import EventSourcedCoordinator
+E   ModuleNotFoundError: No module named 'global_quant'
+____________ ERROR collecting tests/unit/test_strategy_contract.py _____________
+ImportError while importing test module '/Users/ASUS/Desktop/global-quant/tests/unit/test_strategy_contract.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/unit/test_strategy_contract.py:10: in <module>
+    from global_quant.gate1a.strategy import FixedTargetConfig
+E   ModuleNotFoundError: No module named 'global_quant'
+=========================== short test summary info ============================
+ERROR tests/unit/test_ledger.py
+ERROR tests/unit/test_coordinator.py
+ERROR tests/unit/test_strategy_contract.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+3 errors in 63.53s (0:01:03)
