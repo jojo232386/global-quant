@@ -132,6 +132,9 @@ def main() -> int:
         if phase == "protection_update":
             kill_now()
 
+        if phase == "ledger_before_checkpoint":
+            CheckpointStore(root / "checkpoint.json").save(coordinator)
+
         coordinator.apply_fill(
             stop.client_order_id,
             fill_id="stop-fill",

@@ -87,6 +87,9 @@ def test_sigkill_recovery_is_durable_idempotent_and_order_unique(
         "ledger_before_checkpoint",
     }:
         assert any(kind == "RECONCILE_CANCEL" for kind, _ in actions)
+    if phase == "ledger_before_checkpoint":
+        checkpoint = CheckpointStore(tmp_path / "checkpoint.json").load()
+        assert checkpoint["last_ledger_sequence"] < len(replayed.ledger.read_all())
     if phase == "protection_update":
         assert sum(kind == "RECONCILE_ORDER" for kind, _ in actions) >= 2
     if phase == "execution_confirm_unpersisted":

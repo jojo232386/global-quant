@@ -160,13 +160,36 @@ class CheckpointStore:
         coordinator: EventSourcedCoordinator,
     ) -> dict[str, Any]:
         payload = self.load()
-        if payload["last_ledger_sequence"] != len(coordinator.ledger.read_all()):
+        events = coordinator.ledger.read_all()
+        checkpoint_sequence = payload["last_ledger_sequence"]
+        if (
+            not isinstance(checkpoint_sequence, int)
+            or checkpoint_sequence <= 0
+            or checkpoint_sequence > len(events)
+        ):
             raise CheckpointIntegrityError("checkpoint ledger sequence mismatch")
-        if payload["last_event_hash"] != coordinator.ledger.last_event_hash:
+        checkpoint_event = events[checkpoint_sequence - 1]
+        if payload["last_event_hash"] != checkpoint_event.event_hash:
             raise CheckpointIntegrityError("checkpoint event hash mismatch")
-        if payload["business_hash"] != coordinator.business_hash():
+
+        checkpoint_state = coordinator
+        if checkpoint_sequence < len(events):
+            checkpoint_state = coordinator.__class__(
+                ledger=coordinator.ledger,
+                initial_wallet=coordinator.initial_wallet,
+                strategy_id=coordinator.strategy_id,
+                run_id=coordinator.run_id,
+                process_start_id=coordinator.process_start_id,
+                source_hash=coordinator.source_hash,
+                config_hash=coordinator.config_hash,
+            )
+            for event in events[:checkpoint_sequence]:
+                checkpoint_state._reduce(event)
+            checkpoint_state.assert_invariants()
+
+        if payload["business_hash"] != checkpoint_state.business_hash():
             raise CheckpointIntegrityError("checkpoint business hash mismatch")
-        if payload["business_snapshot"] != coordinator.business_snapshot():
+        if payload["business_snapshot"] != checkpoint_state.business_snapshot():
             raise CheckpointIntegrityError("checkpoint snapshot mismatch")
         return payload
 
