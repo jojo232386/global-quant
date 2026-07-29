@@ -30,6 +30,14 @@ from global_quant.gate1a.strategy import FixedTargetStrategy
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def child_environment() -> dict[str, str]:
+    inherited_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = str(ROOT / "src")
+    if inherited_pythonpath:
+        pythonpath = f"{pythonpath}{os.pathsep}{inherited_pythonpath}"
+    return {**os.environ, "PYTHONPATH": pythonpath}
+
+
 def make_bars(instrument, bar_type, start_price: float):
     prices = start_price + np.arange(18, dtype=float) * 0.1
     frame = pd.DataFrame(
@@ -141,7 +149,7 @@ def test_real_strategy_start_pauses_on_uncertain_submitted_order(tmp_path) -> No
     completed = subprocess.run(
         [str(ROOT / ".venv/bin/python"), str(worker), str(tmp_path)],
         cwd=ROOT,
-        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        env=child_environment(),
         capture_output=True,
         text=True,
         timeout=20,
@@ -154,7 +162,7 @@ def test_clean_restart_recovers_schedule_progress_without_duplicate_decisions(
     tmp_path,
 ) -> None:
     worker = ROOT / "tests/helpers/nautilus_uncertain_worker.py"
-    environment = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    environment = child_environment()
     for mode in ("complete", "restart"):
         completed = subprocess.run(
             [str(ROOT / ".venv/bin/python"), str(worker), str(tmp_path), mode],

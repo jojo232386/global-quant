@@ -34,9 +34,13 @@ CRASH_POINTS = [
 
 
 def run_worker(root: Path, phase: str) -> subprocess.CompletedProcess[str]:
+    inherited_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = str(ROOT / "src")
+    if inherited_pythonpath:
+        pythonpath = f"{pythonpath}{os.pathsep}{inherited_pythonpath}"
     environment = {
         **os.environ,
-        "PYTHONPATH": str(ROOT / "src"),
+        "PYTHONPATH": pythonpath,
     }
     return subprocess.run(
         [str(ROOT / ".venv" / "bin" / "python"), str(WORKER), str(root), phase],
