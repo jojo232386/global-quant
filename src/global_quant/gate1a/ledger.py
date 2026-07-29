@@ -7,6 +7,8 @@ import os
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import fields
+from decimal import Decimal
+from decimal import InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,138 @@ class LedgerIntegrityError(RuntimeError):
 
 def _canonical_json(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+_SCHEMA_VERSION = "1.0"
+_SETTLEMENT_CURRENCY = "USDT"
+_QUANTITY_PRECISION = 8
+_PRICE_PRECISION = 2
+
+_REQUIRED_EVENT_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "DECISION": (
+        ("decision_id",),
+        ("instrument_id",),
+        ("order_intent", "target_quantity"),
+    ),
+    "ORDER_INTENT": (
+        ("decision_id",),
+        ("instrument_id",),
+        ("client_order_id",),
+        ("order_intent", "side"),
+        ("order_intent", "quantity"),
+        ("order_intent", "role"),
+        ("order_intent", "reduce_only"),
+        ("order_intent", "trigger_price"),
+    ),
+    "STALE_ORDER_EVENT": (
+        ("instrument_id",),
+        ("client_order_id",),
+        ("order_transition", "from"),
+        ("order_transition", "attempted"),
+    ),
+    "ORDER_TRANSITION": (
+        ("instrument_id",),
+        ("client_order_id",),
+        ("order_transition", "from"),
+        ("order_transition", "to"),
+    ),
+    "FILL": (
+        ("instrument_id",),
+        ("client_order_id",),
+        ("fill", "fill_id"),
+        ("fill", "side"),
+        ("fill", "quantity"),
+        ("fill", "signed_quantity"),
+        ("fill", "price"),
+        ("fee",),
+        ("position_transition", "quantity_before"),
+        ("position_transition", "signed_fill_quantity"),
+        ("balance_transition", "fee"),
+    ),
+    "PROTECTION_RESIZE": (
+        ("instrument_id",),
+        ("client_order_id",),
+        ("order_transition", "from_quantity"),
+        ("order_transition", "to_quantity"),
+        ("order_transition", "status"),
+        ("protection_group_id",),
+    ),
+    "MARK_PRICE": (
+        ("instrument_id",),
+        ("fill", "price"),
+    ),
+    "RECONCILIATION": (
+        ("balance_transition", "wallet_balance"),
+        ("balance_transition", "positions"),
+    ),
+    "ANOMALY": (("fill", "message"),),
+}
+
+_NULLABLE_REQUIRED_PATHS = {
+    ("ORDER_INTENT", "order_intent", "trigger_price"),
+}
+
+_DECIMAL_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "DECISION": (
+        ("order_intent", "target_quantity"),
+    ),
+    "ORDER_INTENT": (
+        ("order_intent", "quantity"),
+        ("order_intent", "trigger_price"),
+    ),
+    "FILL": (
+        ("fill", "quantity"),
+        ("fill", "signed_quantity"),
+        ("fill", "price"),
+        ("fee",),
+        ("position_transition", "quantity_before"),
+        ("position_transition", "signed_fill_quantity"),
+        ("balance_transition", "fee"),
+    ),
+    "PROTECTION_RESIZE": (
+        ("order_transition", "from_quantity"),
+        ("order_transition", "to_quantity"),
+    ),
+    "MARK_PRICE": (
+        ("fill", "price"),
+    ),
+    "RECONCILIATION": (
+        ("balance_transition", "wallet_balance"),
+    ),
+}
+
+
+def _path_value(raw: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = raw
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise LedgerIntegrityError(
+                f"required economic field missing: {'.'.join(path)}",
+            )
+        value = value[key]
+    return value
+
+
+def _validate_decimal(
+    value: Any,
+    *,
+    path: tuple[str, ...],
+) -> None:
+    label = ".".join(path)
+    if not isinstance(value, str):
+        raise LedgerIntegrityError(f"{label} must be a canonical Decimal string")
+    try:
+        decimal_value = Decimal(value)
+    except InvalidOperation as exc:
+        raise LedgerIntegrityError(
+            f"{label} must be a canonical Decimal string",
+        ) from exc
+    if (
+        not decimal_value.is_finite()
+        or str(decimal_value) != value
+        or (decimal_value.is_zero() and decimal_value.is_signed())
+    ):
+        raise LedgerIntegrityError(f"{label} must be a canonical Decimal string")
 
 
 @dataclass
@@ -64,12 +198,85 @@ class LedgerEvent:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> LedgerEvent:
+        if not isinstance(raw, dict):
+            raise LedgerIntegrityError("ledger event must be a JSON object")
         expected = set(cls.required_fields())
         actual = set(raw)
         if actual != expected:
             missing = sorted(expected - actual)
             extra = sorted(actual - expected)
             raise LedgerIntegrityError(f"ledger schema mismatch missing={missing} extra={extra}")
+
+        if raw["schema_version"] != _SCHEMA_VERSION:
+            raise LedgerIntegrityError(
+                f"unknown schema_version {raw['schema_version']!r}",
+            )
+        if raw["settlement_currency"] != _SETTLEMENT_CURRENCY:
+            raise LedgerIntegrityError(
+                f"settlement_currency must be {_SETTLEMENT_CURRENCY}",
+            )
+        if (
+            type(raw["quantity_precision"]) is not int
+            or raw["quantity_precision"] != _QUANTITY_PRECISION
+        ):
+            raise LedgerIntegrityError(
+                f"quantity_precision must be {_QUANTITY_PRECISION}",
+            )
+        if (
+            type(raw["price_precision"]) is not int
+            or raw["price_precision"] != _PRICE_PRECISION
+        ):
+            raise LedgerIntegrityError(
+                f"price_precision must be {_PRICE_PRECISION}",
+            )
+
+        event_type = raw["event_type"]
+        if not isinstance(event_type, str) or event_type not in _REQUIRED_EVENT_PATHS:
+            raise LedgerIntegrityError(f"unknown event_type {event_type!r}")
+
+        for identity_field in (
+            "source_hash",
+            "config_hash",
+            "strategy_id",
+            "account_id",
+        ):
+            value = raw[identity_field]
+            if not isinstance(value, str) or not value:
+                raise LedgerIntegrityError(f"{identity_field} must be a non-empty string")
+
+        for path in _REQUIRED_EVENT_PATHS[event_type]:
+            value = _path_value(raw, path)
+            nullable_path = (event_type, *path) in _NULLABLE_REQUIRED_PATHS
+            if value is None and not nullable_path:
+                raise LedgerIntegrityError(
+                    f"required economic field missing: {'.'.join(path)}",
+                )
+
+        for path in _DECIMAL_PATHS.get(event_type, ()):
+            value = _path_value(raw, path)
+            if value is None and (event_type, *path) in _NULLABLE_REQUIRED_PATHS:
+                continue
+            _validate_decimal(
+                value,
+                path=path,
+            )
+
+        if event_type == "RECONCILIATION":
+            positions = _path_value(raw, ("balance_transition", "positions"))
+            if not isinstance(positions, dict):
+                raise LedgerIntegrityError(
+                    "required economic field missing: balance_transition.positions",
+                )
+            for instrument_id, quantity in positions.items():
+                if not isinstance(instrument_id, str) or not instrument_id:
+                    raise LedgerIntegrityError(
+                        "reconciliation position instrument must be a non-empty string",
+                    )
+                _validate_decimal(
+                    quantity,
+                    path=("balance_transition", "positions", instrument_id),
+                )
+
         return cls(**raw)
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,12 +306,19 @@ class AppendOnlyLedger:
         "previous_event_hash",
         "event_hash",
     }
+    _IDENTITY_FIELDS = (
+        "source_hash",
+        "config_hash",
+        "strategy_id",
+        "account_id",
+    )
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._events: list[LedgerEvent] = []
         self._by_event_id: dict[str, LedgerEvent] = {}
+        self._identity: tuple[str, ...] | None = None
         if self.path.exists():
             self._load()
 
@@ -142,9 +356,35 @@ class AppendOnlyLedger:
                 raise LedgerIntegrityError(f"event hash mismatch at ledger line {line_number}")
             if event.event_id in self._by_event_id:
                 raise LedgerIntegrityError(f"duplicate event id at ledger line {line_number}")
+            self._validate_identity(event)
             self._events.append(event)
             self._by_event_id[event.event_id] = event
+            self._identity = self._event_identity(event)
             previous_hash = event.event_hash
+
+    @classmethod
+    def _event_identity(cls, event: LedgerEvent) -> tuple[str, ...]:
+        return tuple(getattr(event, field) for field in cls._IDENTITY_FIELDS)
+
+    def _validate_identity(self, event: LedgerEvent) -> None:
+        if self._identity is None:
+            return
+        candidate = self._event_identity(event)
+        if candidate == self._identity:
+            return
+        mismatches = [
+            field
+            for field, expected, actual in zip(
+                self._IDENTITY_FIELDS,
+                self._identity,
+                candidate,
+                strict=True,
+            )
+            if actual != expected
+        ]
+        raise LedgerIntegrityError(
+            f"ledger identity mismatch fields={mismatches}",
+        )
 
     @staticmethod
     def _calculate_event_hash(event: LedgerEvent) -> str:
@@ -153,6 +393,7 @@ class AppendOnlyLedger:
         return hashlib.sha256(_canonical_json(raw).encode()).hexdigest()
 
     def append(self, event: LedgerEvent) -> bool:
+        LedgerEvent.from_dict(event.to_dict())
         existing = self._by_event_id.get(event.event_id)
         if existing is not None:
             if existing.semantic_fingerprint() != event.semantic_fingerprint():
@@ -161,6 +402,7 @@ class AppendOnlyLedger:
                 )
             return False
 
+        self._validate_identity(event)
         expected_sequence = self.next_sequence
         if event.event_sequence != expected_sequence:
             raise LedgerIntegrityError(
@@ -190,6 +432,7 @@ class AppendOnlyLedger:
         stored = LedgerEvent.from_dict(json.loads(payload))
         self._events.append(stored)
         self._by_event_id[stored.event_id] = stored
+        self._identity = self._event_identity(stored)
         return True
 
     def read_all(self) -> list[LedgerEvent]:
