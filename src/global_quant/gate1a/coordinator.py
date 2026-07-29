@@ -18,6 +18,14 @@ ACTIVE_ORDER_STATES = {
     "PARTIALLY_FILLED",
     "CANCEL_PENDING",
 }
+TERMINAL_ORDER_STATES = {"FILLED", "CANCELED", "REJECTED"}
+VALID_ORDER_TRANSITIONS = {
+    "INTENT": {"SUBMITTED", "REJECTED", "CANCELED"},
+    "SUBMITTED": {"ACCEPTED", "REJECTED", "CANCEL_PENDING", "CANCELED"},
+    "ACCEPTED": {"REJECTED", "CANCEL_PENDING", "CANCELED"},
+    "PARTIALLY_FILLED": {"CANCEL_PENDING", "CANCELED"},
+    "CANCEL_PENDING": {"ACCEPTED", "PARTIALLY_FILLED", "CANCELED"},
+}
 
 
 class UnexplainedEventError(RuntimeError):
@@ -33,6 +41,7 @@ class OrderState:
     quantity: Decimal
     role: str
     reduce_only: bool
+    trigger_price: Decimal | None = None
     protection_group_id: str | None = None
     venue_order_id: str | None = None
     status: str = "INTENT"
@@ -82,6 +91,7 @@ class EventSourcedCoordinator:
         self.wallet_balance = self.initial_wallet
         self.fail_closed = False
         self._seen_fill_ids: set[str] = set()
+        self._seen_source_event_ids: set[str] = set()
         self._applied_event_ids: set[str] = set()
 
     @staticmethod
@@ -291,6 +301,7 @@ class EventSourcedCoordinator:
         role: str,
         reduce_only: bool,
         protection_group_id: str | None = None,
+        trigger_price: Decimal | None = None,
     ) -> OrderState:
         client_order_id = self._deterministic_order_id(
             decision_id,
@@ -314,6 +325,9 @@ class EventSourcedCoordinator:
                 "quantity": str(quantity),
                 "role": role,
                 "reduce_only": reduce_only,
+                "trigger_price": (
+                    str(trigger_price) if trigger_price is not None else None
+                ),
             },
             protection_group_id=protection_group_id,
         )
@@ -335,6 +349,33 @@ class EventSourcedCoordinator:
         source_id = source_event_id or (
             f"{status}:{client_order_id}:{self.ledger.next_sequence}"
         )
+        if source_id in self._seen_source_event_ids:
+            return False
+        if order.status in TERMINAL_ORDER_STATES:
+            event = self._event(
+                event_type="STALE_ORDER_EVENT",
+                event_id=f"stale-transition:{source_id}",
+                source_event_id=source_id,
+                dedupe_key=f"stale-transition:{source_id}",
+                decision_id=order.decision_id,
+                instrument_id=order.instrument_id,
+                client_order_id=client_order_id,
+                venue_order_id=venue_order_id or order.venue_order_id,
+                correlation_id=order.decision_id,
+                causation_id=f"intent:{client_order_id}",
+                order_transition={"from": order.status, "attempted": status},
+                protection_group_id=order.protection_group_id,
+            )
+            return self._append_and_reduce(event)
+        allowed = VALID_ORDER_TRANSITIONS.get(order.status, set())
+        if status not in allowed:
+            self._record_anomaly(
+                f"invalid order transition {order.status}->{status} for {client_order_id}",
+                decision_id=order.decision_id,
+                instrument_id=order.instrument_id,
+                source_event_id=source_id,
+            )
+            raise UnexplainedEventError("invalid order transition")
         event = self._event(
             event_type="ORDER_TRANSITION",
             event_id=f"transition:{source_id}",
@@ -517,6 +558,8 @@ class EventSourcedCoordinator:
         group_id: str,
         instrument_id: str,
         quantity: Decimal,
+        stop_trigger_price: Decimal | None = None,
+        take_trigger_price: Decimal | None = None,
     ) -> tuple[OrderState, OrderState]:
         position = self.position(instrument_id)
         if position.quantity == 0:
@@ -532,6 +575,7 @@ class EventSourcedCoordinator:
             role="PROTECTION_STOP",
             reduce_only=True,
             protection_group_id=group_id,
+            trigger_price=stop_trigger_price,
         )
         take = self._create_order(
             decision_id=decision_id,
@@ -541,6 +585,7 @@ class EventSourcedCoordinator:
             role="PROTECTION_TAKE",
             reduce_only=True,
             protection_group_id=group_id,
+            trigger_price=take_trigger_price,
         )
         self.protection_groups[group_id] = {
             stop.client_order_id,
@@ -629,6 +674,51 @@ class EventSourcedCoordinator:
         )
         self._append_and_reduce(event)
 
+    def reconcile_account_snapshot(
+        self,
+        *,
+        source_event_id: str,
+        wallet_balance: Decimal,
+        positions: dict[str, Decimal],
+    ) -> bool:
+        if source_event_id in self._seen_source_event_ids:
+            return False
+        observed_wallet = self._decimal(wallet_balance)
+        observed_positions = {
+            instrument_id: self._decimal(quantity)
+            for instrument_id, quantity in positions.items()
+        }
+        expected_positions = {
+            instrument_id: position.quantity
+            for instrument_id, position in self.positions.items()
+            if position.quantity != 0 or instrument_id in observed_positions
+        }
+        if (
+            observed_wallet != self.wallet_balance
+            or observed_positions != expected_positions
+        ):
+            self._record_anomaly(
+                "account snapshot mismatch",
+                source_event_id=source_event_id,
+            )
+            raise UnexplainedEventError("account snapshot mismatch")
+        event = self._event(
+            event_type="RECONCILIATION",
+            event_id=f"reconciliation:{source_event_id}",
+            source_event_id=source_event_id,
+            dedupe_key=f"reconciliation:{source_event_id}",
+            correlation_id=source_event_id,
+            causation_id=source_event_id,
+            balance_transition={
+                "wallet_balance": str(observed_wallet),
+                "positions": {
+                    key: str(value)
+                    for key, value in sorted(observed_positions.items())
+                },
+            },
+        )
+        return self._append_and_reduce(event)
+
     def _record_anomaly(
         self,
         message: str,
@@ -652,6 +742,8 @@ class EventSourcedCoordinator:
         if event.event_id in self._applied_event_ids:
             return
         self._applied_event_ids.add(event.event_id)
+        if event.source_event_id:
+            self._seen_source_event_ids.add(event.source_event_id)
         if event.event_type == "DECISION":
             assert event.decision_id and event.instrument_id and event.order_intent
             self.decisions[(event.decision_id, event.instrument_id)] = Decimal(
@@ -668,6 +760,11 @@ class EventSourcedCoordinator:
                 quantity=Decimal(event.order_intent["quantity"]),
                 role=event.order_intent["role"],
                 reduce_only=bool(event.order_intent["reduce_only"]),
+                trigger_price=(
+                    Decimal(event.order_intent["trigger_price"])
+                    if event.order_intent.get("trigger_price") is not None
+                    else None
+                ),
                 protection_group_id=event.protection_group_id,
             )
             if event.protection_group_id:
@@ -689,15 +786,15 @@ class EventSourcedCoordinator:
             assert event.client_order_id and event.order_transition
             order = self.orders[event.client_order_id]
             next_status = event.order_transition["to"]
-            if order.status in {"FILLED", "CANCELED", "REJECTED"} and next_status in {
-                "SUBMITTED",
-                "ACCEPTED",
-                "CANCEL_PENDING",
-            }:
-                return
+            if event.order_transition["from"] != order.status:
+                raise UnexplainedEventError("order transition source state mismatch")
+            if next_status not in VALID_ORDER_TRANSITIONS.get(order.status, set()):
+                raise UnexplainedEventError("invalid durable order transition")
             order.status = next_status
             if event.venue_order_id:
                 order.venue_order_id = event.venue_order_id
+            return
+        if event.event_type in {"STALE_ORDER_EVENT", "RECONCILIATION"}:
             return
         if event.event_type == "PROTECTION_RESIZE":
             assert event.client_order_id and event.order_transition
@@ -719,6 +816,19 @@ class EventSourcedCoordinator:
             quantity = Decimal(event.fill["quantity"])
             price = Decimal(event.fill["price"])
             fee = Decimal(event.fee)
+            signed_quantity = quantity if order.side == "BUY" else -quantity
+            position = self.position(order.instrument_id)
+            if (
+                event.fill.get("signed_quantity") != str(signed_quantity)
+                or event.position_transition is None
+                or event.position_transition.get("quantity_before")
+                != str(position.quantity)
+                or event.position_transition.get("signed_fill_quantity")
+                != str(signed_quantity)
+                or event.balance_transition is None
+                or event.balance_transition.get("fee") != str(fee)
+            ):
+                raise UnexplainedEventError("fill economic transition mismatch")
             self._apply_account_fill(order, quantity, price, fee)
             order.filled_quantity += quantity
             order.status = (
@@ -828,6 +938,11 @@ class EventSourcedCoordinator:
                     "filled_quantity": str(value.filled_quantity),
                     "role": value.role,
                     "reduce_only": value.reduce_only,
+                    "trigger_price": (
+                        str(value.trigger_price)
+                        if value.trigger_price is not None
+                        else None
+                    ),
                     "status": value.status,
                     "venue_order_id": value.venue_order_id,
                     "protection_group_id": value.protection_group_id,

@@ -85,8 +85,6 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
             eth_instrument_id=eth.id,
             btc_bar_type=btc_bar_type,
             eth_bar_type=eth_bar_type,
-            btc_quantity=Decimal("0.001"),
-            eth_quantity=Decimal("0.01"),
             decision_interval_bars=2,
             ledger_path=str(ledger_path),
             initial_wallet=Decimal("10000"),
@@ -110,10 +108,27 @@ def test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat(
     assert replayed.position(str(eth.id)).quantity == 0
     assert len(replayed.decisions) == 10
     assert {order.side for order in replayed.orders.values()} == {"BUY", "SELL"}
-    assert {order.role for order in replayed.orders.values()} == {"TARGET"}
+    assert {
+        order.role for order in replayed.orders.values()
+    } == {"TARGET", "PROTECTION_STOP", "PROTECTION_TAKE"}
+    first_btc_target = replayed.decisions[("schedule-1", str(btc.id))]
+    first_eth_target = replayed.decisions[("schedule-1", str(eth.id))]
+    assert Decimal("990") <= first_btc_target * Decimal("50001") <= Decimal("1010")
+    assert Decimal("990") <= abs(first_eth_target) * Decimal("3001") <= Decimal("1010")
     assert all(
         order.status in {"FILLED", "CANCELED", "REJECTED"}
         for order in replayed.orders.values()
     )
+    protection_orders = [
+        order
+        for order in replayed.orders.values()
+        if order.protection_group_id is not None
+    ]
+    assert protection_orders
+    assert all(order.reduce_only for order in protection_orders)
+    account = engine.cache.account_for_venue(Venue("BINANCE"))
+    assert account is not None
+    assert account.balance_total(USDT).as_decimal() == replayed.wallet_balance
+    assert engine.cache.positions_open() == []
 
     engine.dispose()

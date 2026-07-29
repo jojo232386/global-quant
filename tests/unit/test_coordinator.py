@@ -73,6 +73,72 @@ def test_duplicate_fill_changes_position_and_wallet_once(coordinator) -> None:
     coordinator.assert_invariants()
 
 
+def test_duplicate_public_order_event_is_idempotent(coordinator) -> None:
+    order = coordinator.request_target("decision-1", BTC, Decimal("1"))
+    assert order is not None
+
+    first = coordinator.mark_submitted(
+        order.client_order_id,
+        source_event_id="venue-event-submit-1",
+    )
+    duplicate = coordinator.mark_submitted(
+        order.client_order_id,
+        source_event_id="venue-event-submit-1",
+    )
+
+    assert first is True
+    assert duplicate is False
+    assert coordinator.orders[order.client_order_id].status == "SUBMITTED"
+
+
+def test_late_cancel_cannot_change_filled_order(coordinator) -> None:
+    order_id = open_long(coordinator)
+
+    applied = coordinator.mark_canceled(
+        order_id,
+        source_event_id="late-cancel-after-fill",
+    )
+
+    assert applied is True
+    assert coordinator.orders[order_id].status == "FILLED"
+    assert coordinator.ledger.read_all()[-1].event_type == "STALE_ORDER_EVENT"
+    assert coordinator.fail_closed is False
+
+
+def test_matching_account_snapshot_is_idempotent(coordinator) -> None:
+    open_long(coordinator)
+    positions = {BTC: Decimal("1")}
+
+    first = coordinator.reconcile_account_snapshot(
+        source_event_id="account-snapshot-1",
+        wallet_balance=coordinator.wallet_balance,
+        positions=positions,
+    )
+    duplicate = coordinator.reconcile_account_snapshot(
+        source_event_id="account-snapshot-1",
+        wallet_balance=coordinator.wallet_balance,
+        positions=positions,
+    )
+
+    assert first is True
+    assert duplicate is False
+    assert coordinator.fail_closed is False
+
+
+def test_account_snapshot_mismatch_is_persisted_and_fails_closed(coordinator) -> None:
+    open_long(coordinator)
+
+    with pytest.raises(UnexplainedEventError, match="account snapshot mismatch"):
+        coordinator.reconcile_account_snapshot(
+            source_event_id="account-snapshot-bad",
+            wallet_balance=coordinator.wallet_balance,
+            positions={BTC: Decimal("2")},
+        )
+
+    assert coordinator.fail_closed is True
+    assert coordinator.ledger.read_all()[-1].event_type == "ANOMALY"
+
+
 def test_perpetual_accounting_identity_after_close(coordinator) -> None:
     open_long(coordinator, price=Decimal("100"))
     close_order = coordinator.request_target("decision-2", BTC, Decimal("0"))

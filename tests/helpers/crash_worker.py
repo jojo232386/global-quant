@@ -10,6 +10,7 @@ from pathlib import Path
 from global_quant.gate1a.coordinator import EventSourcedCoordinator
 from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.recovery import CheckpointStore
+from global_quant.gate1a.recovery import DurableInbox
 
 
 BTC = "BTCUSDT-PERP.BINANCE"
@@ -74,9 +75,15 @@ def main() -> int:
         kill_now()
 
     if phase == "execution_confirm_unpersisted":
-        (root / "execution_inbox.json").write_text(
-            '{"fill_id":"pending-fill","quantity":"1","price":"100","fee":"0.1"}',
-            encoding="utf-8",
+        DurableInbox(root / "execution_inbox.jsonl").append(
+            {
+                "event_type": "FILL",
+                "source_event_id": "pending-fill",
+                "client_order_id": order.client_order_id,
+                "quantity": "1",
+                "price": "100",
+                "fee": "0.1",
+            },
         )
         kill_now()
 

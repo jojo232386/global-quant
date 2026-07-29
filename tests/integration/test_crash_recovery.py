@@ -13,6 +13,7 @@ from global_quant.gate1a.coordinator import EventSourcedCoordinator
 from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.recovery import CheckpointIntegrityError
 from global_quant.gate1a.recovery import CheckpointStore
+from global_quant.gate1a.recovery import RecoverySupervisor
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,47 +57,73 @@ def test_sigkill_recovery_is_durable_idempotent_and_order_unique(
     completed = run_worker(tmp_path, phase)
     assert completed.returncode == -signal.SIGKILL
 
-    ledger = AppendOnlyLedger(tmp_path / "events.jsonl")
-    replayed = EventSourcedCoordinator.replay(
-        ledger=ledger,
+    recovery = RecoverySupervisor(
+        ledger=AppendOnlyLedger(tmp_path / "events.jsonl"),
         initial_wallet=Decimal("10000"),
-    )
+        checkpoint_path=tmp_path / "checkpoint.json",
+        inbox_path=tmp_path / "execution_inbox.jsonl",
+    ).recover()
+    replayed = recovery.coordinator
+    actions = {
+        (action.kind, action.client_order_id)
+        for action in recovery.actions
+    }
+    if phase == "decision_and_intent_persisted":
+        assert any(kind == "SUBMIT_ORDER" for kind, _ in actions)
+    if phase in {
+        "order_submitted",
+        "order_acknowledged",
+        "partial_fill",
+        "submit_side_effect_unconfirmed",
+    }:
+        assert any(kind == "RECONCILE_ORDER" for kind, _ in actions)
+    if phase in {
+        "cancel_requested",
+        "sibling_cancel_unpersisted",
+        "ledger_before_checkpoint",
+    }:
+        assert any(kind == "RECONCILE_CANCEL" for kind, _ in actions)
+    if phase == "protection_update":
+        assert sum(kind == "RECONCILE_ORDER" for kind, _ in actions) >= 2
+    if phase == "execution_confirm_unpersisted":
+        assert any(
+            event.source_event_id == "pending-fill"
+            for event in replayed.ledger.read_all()
+        )
+        assert replayed.position("BTCUSDT-PERP.BINANCE").quantity == Decimal("1")
+
     if phase == "submit_side_effect_unconfirmed":
         marker = (tmp_path / "submit_side_effect.marker").read_text(encoding="utf-8")
-        assert marker in replayed.orders
-        assert replayed.orders[marker].status == "SUBMITTED"
-        assert len(replayed.orders) == 1
-    if phase == "execution_confirm_unpersisted":
-        pending = json.loads(
-            (tmp_path / "execution_inbox.json").read_text(encoding="utf-8"),
-        )
-        order_id = next(iter(replayed.orders))
-        assert replayed.apply_fill(
-            order_id,
-            fill_id=pending["fill_id"],
-            quantity=Decimal(pending["quantity"]),
-            price=Decimal(pending["price"]),
-            fee=Decimal(pending["fee"]),
-        )
-        assert not replayed.apply_fill(
-            order_id,
-            fill_id=pending["fill_id"],
-            quantity=Decimal(pending["quantity"]),
-            price=Decimal(pending["price"]),
-            fee=Decimal(pending["fee"]),
-        )
+        assert ("RECONCILE_ORDER", marker) in actions
     if phase == "sibling_cancel_unpersisted":
         sibling_id = (tmp_path / "sibling_cancel.marker").read_text(encoding="utf-8")
-        assert replayed.orders[sibling_id].status == "CANCEL_PENDING"
+        assert ("RECONCILE_CANCEL", sibling_id) in actions
+
     before = replayed.business_hash()
     client_order_ids = list(replayed.orders)
+    durable_events = replayed.ledger.read_all()
 
-    for event in ledger.read_all():
+    for event in durable_events:
         replayed._reduce(event)
 
     assert replayed.business_hash() == before
     assert len(client_order_ids) == len(set(client_order_ids))
     replayed.assert_invariants()
+
+
+def test_strategy_recovery_supervisor_refuses_corrupt_checkpoint(tmp_path) -> None:
+    completed = run_worker(tmp_path, "write_checkpoint")
+    assert completed.returncode == 0
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text('{"business_hash":"truncated"', encoding="utf-8")
+
+    with pytest.raises(CheckpointIntegrityError):
+        RecoverySupervisor(
+            ledger=AppendOnlyLedger(tmp_path / "events.jsonl"),
+            initial_wallet=Decimal("10000"),
+            checkpoint_path=checkpoint,
+            inbox_path=tmp_path / "execution_inbox.jsonl",
+        ).recover()
 
 
 def test_corrupted_checkpoint_is_fatal_and_never_silently_rebuilt(tmp_path) -> None:
