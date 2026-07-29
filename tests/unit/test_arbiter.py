@@ -14,16 +14,16 @@ from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
 
 REQUIRED_COMMANDS = {
-    "full_seed_1_rep_1": 67,
-    "full_seed_20260730_rep_1": 67,
-    "full_seed_1_rep_2": 67,
-    "full_seed_20260730_rep_2": 67,
-    "full_seed_1_rep_3": 67,
-    "full_seed_20260730_rep_3": 67,
+    "full_seed_1_rep_1": 145,
+    "full_seed_20260730_rep_1": 145,
+    "full_seed_1_rep_2": 145,
+    "full_seed_20260730_rep_2": 145,
+    "full_seed_1_rep_3": 145,
+    "full_seed_20260730_rep_3": 145,
     "network_matrix": 11,
-    "crash_matrix": 14,
-    "nautilus_backtest": 1,
-    "scenario_matrix_test": 3,
+    "crash_matrix": 17,
+    "nautilus_backtest": 3,
+    "scenario_matrix_test": 12,
     "determinism_matrix_test": 1,
 }
 NETWORK_CASES = (
@@ -62,6 +62,18 @@ CRASH_CASES = (
 SOURCE_PATHS = {
     "strategy": "src/global_quant/gate1a/strategy.py",
     "state_machine": "src/global_quant/gate1a/coordinator.py",
+    "ledger": "src/global_quant/gate1a/ledger.py",
+    "recovery": "src/global_quant/gate1a/recovery.py",
+    "scenario_runner": "src/global_quant/gate1a/scenarios.py",
+    "scenario_oracle": "src/global_quant/gate1a/scenario_oracle.py",
+    "scenario_fixture": (
+        "src/global_quant/gate1a/fixtures/nt_gate_1a_scenario_oracle_v1.json"
+    ),
+    "arbiter": "src/global_quant/gate1a/arbiter.py",
+    "manifest_builder": "scripts/build_gate_manifest.py",
+    "command_logger": "scripts/run_logged.py",
+    "offline_launcher": "scripts/run_offline.sh",
+    "evidence_runner": "scripts/run_gate_1a_evidence.sh",
     "config": "protocols/NT_GATE_1A.md",
 }
 
@@ -87,7 +99,32 @@ def git(repo: Path, *args: str) -> str:
 def make_tested_repository(root: Path) -> tuple[Path, str, dict[str, dict[str, str]]]:
     repo = root / "repository"
     for key, relative_path in SOURCE_PATHS.items():
-        write(repo / relative_path, f"{key} frozen content\n")
+        if key == "scenario_fixture":
+            scenarios = {}
+            for name in REQUIRED_SCENARIOS:
+                business_hash = hashlib.sha256(
+                    f"business:{name}".encode(),
+                ).hexdigest()
+                scenarios[name] = {
+                    "business_hash": business_hash,
+                    "exit_code": 0,
+                    "fills": [],
+                    "final_positions": {},
+                    "final_wallet": "10000",
+                    "orders": [],
+                    "protection_state": {},
+                }
+            content = json.dumps(
+                {
+                    "oracle_version": "TEST-ORACLE-1",
+                    "protocol_version": "1.1",
+                    "scenarios": scenarios,
+                },
+                sort_keys=True,
+            )
+        else:
+            content = f"{key} frozen content\n"
+        write(repo / relative_path, content)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(
         ["git", "config", "user.email", "gate1a@example.invalid"],
@@ -126,40 +163,38 @@ def scenario_item(name: str) -> dict:
         expected_failure = "UnexplainedEventError"
     elif name == "snapshot_replay_mismatch":
         expected_failure = "CheckpointIntegrityError"
+    business_hash = hashlib.sha256(f"business:{name}".encode()).hexdigest()
     return {
         "name": name,
         "status": "PASS",
         "initial_state": {"wallet": "10000"},
         "input_events": ["event"],
+        "observed_orders": [],
+        "observed_fills": [],
         "expected_orders": [],
         "expected_fills": [],
         "final_positions": {},
+        "expected_final_positions": {},
         "final_wallet": "10000",
+        "expected_final_wallet": "10000",
         "protection_state": {},
+        "expected_protection_state": {},
         "exit_code": 0,
+        "expected_exit_code": 0,
         "fail_closed": name == "unknown_external_event",
         "expected_failure": expected_failure,
         "observed_events": ["DECISION_RECORDED"],
         "ledger_hash": hashlib.sha256(f"ledger:{name}".encode()).hexdigest(),
-        "business_hash": hashlib.sha256(f"business:{name}".encode()).hexdigest(),
+        "business_hash": business_hash,
+        "expected_business_hash": business_hash,
+        "oracle_version": "TEST-ORACLE-1",
+        "validation_errors": [],
         "error": None,
     }
 
 
 def canonical_scenarios(results: list[dict]) -> list[dict]:
-    fields = (
-        "name",
-        "status",
-        "expected_orders",
-        "expected_fills",
-        "final_positions",
-        "final_wallet",
-        "protection_state",
-        "fail_closed",
-        "observed_events",
-        "business_hash",
-    )
-    return [{field: item[field] for field in fields} for item in results]
+    return [dict(item) for item in results]
 
 
 def scenario_payload(seed: str, repetition: int) -> dict:
@@ -226,6 +261,10 @@ def passing_manifest(tmp_path: Path) -> dict:
                 },
                 "python_guard": {"status": "ENABLED"},
             },
+            "repository": str(repo),
+            "branch": "gate1a-test",
+            "commit": commit,
+            "dirty_worktree": False,
         }
         command_records.append(record)
         commands.append(
@@ -239,6 +278,10 @@ def passing_manifest(tmp_path: Path) -> dict:
                 "completed_at": record["completed_at"],
                 "command": record["command"],
                 "network_controls": record["network_controls"],
+                "repository": record["repository"],
+                "branch": record["branch"],
+                "commit": record["commit"],
+                "dirty_worktree": record["dirty_worktree"],
             },
         )
 
@@ -288,6 +331,18 @@ def passing_manifest(tmp_path: Path) -> dict:
     for source in source_objects.values():
         path = repo / source["path"]
         evidence[str(path)] = sha256_bytes(path.read_bytes())
+    workbuddy_review = evidence_root / "workbuddy_review.json"
+    review_payload = {
+        "verdict": "PASS",
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "tested_commit": commit,
+    }
+    evidence[str(workbuddy_review)] = write(
+        workbuddy_review,
+        json.dumps(review_payload, sort_keys=True) + "\n",
+    )
 
     return {
         "started_at": "2026-07-30T06:26:32+08:00",
@@ -331,7 +386,8 @@ def passing_manifest(tmp_path: Path) -> dict:
         "unresolved_P1": [],
         "unresolved_P2": [],
         "evidence_paths": evidence,
-        "workbuddy_review": {"verdict": "PASS", "P0": 0, "P1": 0},
+        "workbuddy_review": review_payload,
+        "workbuddy_review_path": str(workbuddy_review),
     }
 
 
@@ -394,6 +450,31 @@ def test_scenario_summary_cannot_hide_failed_machine_evidence(tmp_path) -> None:
 
     assert verdict["verdict"] == "STOP"
     assert any("scenario machine evidence" in item for item in verdict["failures"])
+
+
+def test_forged_pass_and_matrix_hash_cannot_override_frozen_oracle(
+    tmp_path,
+) -> None:
+    manifest = passing_manifest(tmp_path)
+    path = Path(manifest["machine_evidence"]["scenario_results_path"])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    item = payload["scenario_results"][0]
+    item["observed_orders"] = ["FORGED"]
+    item["expected_orders"] = ["FORGED"]
+    payload["matrix_business_hash"] = sha256_bytes(
+        json.dumps(
+            canonical_scenarios(payload["scenario_results"]),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode(),
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    refresh_checksum(manifest, path)
+
+    verdict = GateArbiter(require_workbuddy=True).decide(manifest)
+
+    assert verdict["verdict"] == "STOP"
+    assert any("frozen scenario oracle" in item for item in verdict["failures"])
 
 
 @pytest.mark.parametrize(
@@ -476,6 +557,26 @@ def test_every_command_requires_recorded_network_controls(
     assert any(expected in item for item in verdict["failures"])
 
 
+def test_each_command_must_be_bound_to_tested_commit(tmp_path) -> None:
+    manifest = passing_manifest(tmp_path)
+    command_log = Path(manifest["machine_evidence"]["command_log_path"])
+    records = [
+        json.loads(line)
+        for line in command_log.read_text(encoding="utf-8").splitlines()
+    ]
+    records[0]["commit"] = "f" * 40
+    command_log.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    refresh_checksum(manifest, command_log)
+
+    verdict = GateArbiter(require_workbuddy=True).decide(manifest)
+
+    assert verdict["verdict"] == "STOP"
+    assert any("tested commit" in item for item in verdict["failures"])
+
+
 def test_no_guard_status_requires_explicit_probe_launcher_argument(tmp_path) -> None:
     manifest = passing_manifest(tmp_path)
     command_log = Path(manifest["machine_evidence"]["command_log_path"])
@@ -548,7 +649,7 @@ def test_skipped_junit_test_is_stop(tmp_path) -> None:
     manifest = passing_manifest(tmp_path)
     junit = Path(manifest["test_commands"][0]["junit_path"])
     junit.write_text(
-        '<testsuite tests="67" failures="0" errors="0" skipped="1"></testsuite>',
+        '<testsuite tests="145" failures="0" errors="0" skipped="1"></testsuite>',
         encoding="utf-8",
     )
     refresh_checksum(manifest, junit)

@@ -70,3 +70,19 @@ def test_manifest_sidecar_detects_manifest_drift(tmp_path) -> None:
     manifest_path.write_text(json.dumps({"tampered": True}), encoding="utf-8")
     with pytest.raises(ValueError, match="checksum mismatch"):
         decider.verify_manifest_checksum(manifest_path, checksum_path)
+
+
+def test_verdict_is_written_with_detached_checksum(tmp_path) -> None:
+    decider = load_script(DECIDE_SCRIPT, "gate_verdict_checksum_writer")
+    verdict_path = tmp_path / "gate_1a_verdict.json"
+
+    checksum_path = decider.write_verdict(
+        verdict_path,
+        {"verdict": "STOP", "failures": ["test"]},
+    )
+
+    assert checksum_path == Path(f"{verdict_path}.sha256")
+    assert decider.verify_manifest_checksum(
+        verdict_path,
+        checksum_path,
+    ) == hashlib.sha256(verdict_path.read_bytes()).hexdigest()

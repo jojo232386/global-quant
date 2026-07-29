@@ -41,6 +41,47 @@ def network_controls(command: list[str]) -> dict[str, dict[str, str]]:
     }
 
 
+def git_state(cwd: Path) -> dict[str, object]:
+    try:
+        repository = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        branch = subprocess.check_output(
+            ["git", "branch", "--show-current"],
+            cwd=cwd,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=cwd,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {
+            "repository": "",
+            "branch": "",
+            "commit": "",
+            "dirty_worktree": True,
+        }
+    return {
+        "repository": str(Path(repository).resolve()),
+        "branch": branch,
+        "commit": commit,
+        "dirty_worktree": bool(status.strip()),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
@@ -54,11 +95,13 @@ def main() -> int:
     if not command:
         parser.error("a command is required after --")
 
+    cwd = Path.cwd()
+    repository_state = git_state(cwd)
     started_at = utc_now()
     started_monotonic = time.monotonic()
     completed = subprocess.run(
         command,
-        cwd=Path.cwd(),
+        cwd=cwd,
         env=os.environ,
         capture_output=True,
         text=True,
@@ -76,12 +119,13 @@ def main() -> int:
         "started_at": started_at,
         "completed_at": completed_at,
         "duration_seconds": round(time.monotonic() - started_monotonic, 6),
-        "cwd": str(Path.cwd()),
+        "cwd": str(cwd),
         "command": command,
         "exit_code": completed.returncode,
         "python_hash_seed": os.environ.get("PYTHONHASHSEED"),
         "output_log": str(output_path.resolve()),
         "network_controls": network_controls(command),
+        **repository_state,
     }
     command_path = Path(args.command_log)
     command_path.parent.mkdir(parents=True, exist_ok=True)

@@ -14,16 +14,16 @@ from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
 GATE_TIME_LIMIT_SECONDS = 12 * 60 * 60
 REQUIRED_COMMAND_MINIMUMS = {
-    "full_seed_1_rep_1": 67,
-    "full_seed_20260730_rep_1": 67,
-    "full_seed_1_rep_2": 67,
-    "full_seed_20260730_rep_2": 67,
-    "full_seed_1_rep_3": 67,
-    "full_seed_20260730_rep_3": 67,
+    "full_seed_1_rep_1": 145,
+    "full_seed_20260730_rep_1": 145,
+    "full_seed_1_rep_2": 145,
+    "full_seed_20260730_rep_2": 145,
+    "full_seed_1_rep_3": 145,
+    "full_seed_20260730_rep_3": 145,
     "network_matrix": 11,
-    "crash_matrix": 14,
-    "nautilus_backtest": 1,
-    "scenario_matrix_test": 3,
+    "crash_matrix": 17,
+    "nautilus_backtest": 3,
+    "scenario_matrix_test": 12,
     "determinism_matrix_test": 1,
 }
 NETWORK_EVIDENCE_CASES = {
@@ -60,6 +60,18 @@ RESTART_EVIDENCE_CASES["checkpoint_corruption_and_replay_crash"] = (
 SOURCE_OBJECT_PATHS = {
     "strategy": "src/global_quant/gate1a/strategy.py",
     "state_machine": "src/global_quant/gate1a/coordinator.py",
+    "ledger": "src/global_quant/gate1a/ledger.py",
+    "recovery": "src/global_quant/gate1a/recovery.py",
+    "scenario_runner": "src/global_quant/gate1a/scenarios.py",
+    "scenario_oracle": "src/global_quant/gate1a/scenario_oracle.py",
+    "scenario_fixture": (
+        "src/global_quant/gate1a/fixtures/nt_gate_1a_scenario_oracle_v1.json"
+    ),
+    "arbiter": "src/global_quant/gate1a/arbiter.py",
+    "manifest_builder": "scripts/build_gate_manifest.py",
+    "command_logger": "scripts/run_logged.py",
+    "offline_launcher": "scripts/run_offline.sh",
+    "evidence_runner": "scripts/run_gate_1a_evidence.sh",
     "config": "protocols/NT_GATE_1A.md",
 }
 SOURCE_HASH_FIELDS = {
@@ -72,30 +84,54 @@ SCENARIO_FIELDS = {
     "status",
     "initial_state",
     "input_events",
+    "observed_orders",
+    "observed_fills",
     "expected_orders",
     "expected_fills",
     "final_positions",
+    "expected_final_positions",
     "final_wallet",
+    "expected_final_wallet",
     "protection_state",
+    "expected_protection_state",
     "exit_code",
+    "expected_exit_code",
     "fail_closed",
     "expected_failure",
     "observed_events",
     "ledger_hash",
     "business_hash",
+    "expected_business_hash",
+    "oracle_version",
+    "validation_errors",
     "error",
 }
 CANONICAL_SCENARIO_FIELDS = (
     "name",
     "status",
+    "initial_state",
+    "input_events",
+    "observed_orders",
+    "observed_fills",
     "expected_orders",
     "expected_fills",
     "final_positions",
+    "expected_final_positions",
     "final_wallet",
+    "expected_final_wallet",
     "protection_state",
+    "expected_protection_state",
+    "exit_code",
+    "expected_exit_code",
     "fail_closed",
+    "expected_failure",
     "observed_events",
+    "ledger_hash",
     "business_hash",
+    "expected_business_hash",
+    "oracle_version",
+    "validation_errors",
+    "error",
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
@@ -111,6 +147,7 @@ class GateArbiter:
         self._scenario_results: list[dict[str, str]] = []
         self._restart_results: list[dict[str, str]] = []
         self._ledger_replay_hash: str | None = None
+        self._manifest: dict[str, Any] = {}
 
     def decide(
         self,
@@ -124,6 +161,7 @@ class GateArbiter:
         self._scenario_results = []
         self._restart_results = []
         self._ledger_replay_hash = None
+        self._manifest = manifest
 
         self._check_evidence_hashes(manifest, failures)
         self._check_identity(manifest, failures)
@@ -285,9 +323,10 @@ class GateArbiter:
                 failures.append(f"git show could not read frozen source: {name}")
                 continue
             content_hash = hashlib.sha256(content).hexdigest()
-            if (
-                item.get("sha256") != content_hash
-                or manifest.get(SOURCE_HASH_FIELDS[name]) != content_hash
+            hash_field = SOURCE_HASH_FIELDS.get(name)
+            if item.get("sha256") != content_hash or (
+                hash_field is not None
+                and manifest.get(hash_field) != content_hash
             ):
                 failures.append(f"git show SHA-256 mismatch: {name}")
             if item.get("blob_hash") != blob_hash:
@@ -347,6 +386,10 @@ class GateArbiter:
                 ("completed_at", "completed_at"),
                 ("command", "command"),
                 ("network_controls", "network_controls"),
+                ("repository", "repository"),
+                ("branch", "branch"),
+                ("commit", "commit"),
+                ("dirty_worktree", "dirty_worktree"),
             )
             for command_key, record_key in comparable:
                 if command.get(command_key) != record.get(record_key):
@@ -354,6 +397,16 @@ class GateArbiter:
                         f"command evidence disagrees with raw log: {name}",
                     )
                     break
+            if self._resolved(record.get("repository")) != self._resolved(
+                manifest.get("repository"),
+            ):
+                failures.append(f"command repository disagrees: {name}")
+            if record.get("branch") != manifest.get("branch"):
+                failures.append(f"command branch disagrees: {name}")
+            if record.get("commit") != manifest.get("commit"):
+                failures.append(f"command tested commit disagrees: {name}")
+            if record.get("dirty_worktree") is not False:
+                failures.append(f"command ran from dirty worktree: {name}")
             if command.get("minimum_tests") != minimum_tests:
                 failures.append(f"frozen JUnit minimum changed: {name}")
             if command.get("exit_code") != 0:
@@ -708,6 +761,10 @@ class GateArbiter:
             return None
 
         valid = True
+        frozen_oracle = self._load_frozen_scenario_oracle(label, failures)
+        if frozen_oracle is None:
+            return None
+        expected_by_name = frozen_oracle["scenarios"]
         for item in results:
             name = str(item["name"])
             if set(item) != SCENARIO_FIELDS:
@@ -738,6 +795,40 @@ class GateArbiter:
                 or not self._valid_sha256(item.get("business_hash"))
             ):
                 failures.append(f"{label} has invalid concrete fields: {name}")
+                valid = False
+                continue
+            expected = expected_by_name.get(name)
+            if expected is None:
+                failures.append(f"{label} scenario absent from frozen oracle: {name}")
+                valid = False
+                continue
+            oracle_pairs = (
+                ("observed_orders", "orders"),
+                ("expected_orders", "orders"),
+                ("observed_fills", "fills"),
+                ("expected_fills", "fills"),
+                ("final_positions", "final_positions"),
+                ("expected_final_positions", "final_positions"),
+                ("final_wallet", "final_wallet"),
+                ("expected_final_wallet", "final_wallet"),
+                ("protection_state", "protection_state"),
+                ("expected_protection_state", "protection_state"),
+                ("exit_code", "exit_code"),
+                ("expected_exit_code", "exit_code"),
+                ("business_hash", "business_hash"),
+                ("expected_business_hash", "business_hash"),
+            )
+            if any(
+                item.get(actual_field) != expected.get(expected_field)
+                for actual_field, expected_field in oracle_pairs
+            ):
+                failures.append(f"{label} disagrees with frozen scenario oracle: {name}")
+                valid = False
+            if (
+                item.get("oracle_version") != frozen_oracle.get("oracle_version")
+                or item.get("validation_errors") != []
+            ):
+                failures.append(f"{label} oracle validation is invalid: {name}")
                 valid = False
         special_failures = {
             "unknown_external_event": "UnexplainedEventError",
@@ -773,6 +864,35 @@ class GateArbiter:
             failures.append(f"{label} status is not PASS")
             valid = False
         return (results, canonical) if valid else None
+
+    def _load_frozen_scenario_oracle(
+        self,
+        label: str,
+        failures: list[str],
+    ) -> dict[str, Any] | None:
+        repository = Path(str(self._manifest.get("repository", "")))
+        commit = str(self._manifest.get("commit", ""))
+        path = SOURCE_OBJECT_PATHS["scenario_fixture"]
+        try:
+            raw = self._git_bytes(repository, "show", f"{commit}:{path}")
+            payload = json.loads(raw)
+        except (
+            OSError,
+            subprocess.CalledProcessError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            failures.append(f"{label} frozen scenario oracle is unreadable: {exc}")
+            return None
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get("oracle_version"), str)
+            or not isinstance(payload.get("scenarios"), dict)
+            or set(payload["scenarios"]) != set(REQUIRED_SCENARIOS)
+        ):
+            failures.append(f"{label} frozen scenario oracle schema is invalid")
+            return None
+        return payload
 
     @staticmethod
     def _check_findings(manifest: dict[str, Any], failures: list[str]) -> None:
@@ -863,3 +983,13 @@ class GateArbiter:
             or review.get("P1") != 0
         ):
             failures.append("WorkBuddy review is not PASS with P0=0 and P1=0")
+        if review.get("tested_commit") != manifest.get("commit"):
+            failures.append("WorkBuddy review is for a different tested commit")
+        review_path = manifest.get("workbuddy_review_path")
+        if not review_path:
+            failures.append("WorkBuddy review evidence path is missing")
+        elif self._resolved(review_path) not in {
+            self._resolved(path)
+            for path in manifest.get("evidence_paths", {})
+        }:
+            failures.append("WorkBuddy review evidence is not checksum-covered")

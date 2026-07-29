@@ -16,18 +16,7 @@ def canonical_business_payload(result: dict) -> dict:
     return {
         "matrix_business_hash": result["matrix_business_hash"],
         "scenario_results": [
-            {
-                "name": item["name"],
-                "status": item["status"],
-                "expected_orders": item["expected_orders"],
-                "expected_fills": item["expected_fills"],
-                "final_positions": item["final_positions"],
-                "final_wallet": item["final_wallet"],
-                "protection_state": item["protection_state"],
-                "fail_closed": item["fail_closed"],
-                "observed_events": item["observed_events"],
-                "business_hash": item["business_hash"],
-            }
+            dict(item)
             for item in result["scenario_results"]
         ],
     }

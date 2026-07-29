@@ -10,18 +10,7 @@ from global_quant.gate1a.scenarios import run_all_scenarios
 
 
 def canonical_result(raw: dict) -> dict:
-    return {
-        "name": raw["name"],
-        "status": raw["status"],
-        "expected_orders": raw["expected_orders"],
-        "expected_fills": raw["expected_fills"],
-        "final_positions": raw["final_positions"],
-        "final_wallet": raw["final_wallet"],
-        "protection_state": raw["protection_state"],
-        "fail_closed": raw["fail_closed"],
-        "observed_events": raw["observed_events"],
-        "business_hash": raw["business_hash"],
-    }
+    return dict(raw)
 
 
 def main() -> int:
@@ -57,4 +46,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

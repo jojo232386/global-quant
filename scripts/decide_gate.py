@@ -31,12 +31,19 @@ def verify_manifest_checksum(
     return observed
 
 
-def write_verdict(path: Path, verdict: dict) -> None:
+def write_verdict(path: Path, verdict: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(verdict, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    content = (
+        json.dumps(verdict, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    path.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    checksum_path = Path(f"{path}.sha256")
+    checksum_path.write_text(
+        f"{digest}  {path.name}\n",
+        encoding="ascii",
     )
+    return checksum_path
 
 
 def main() -> int:

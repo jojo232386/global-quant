@@ -118,6 +118,10 @@ def parse_commands(path: Path, evidence_root: Path) -> list[dict]:
                 "completed_at": record.get("completed_at"),
                 "command": record.get("command"),
                 "network_controls": record.get("network_controls"),
+                "repository": record.get("repository"),
+                "branch": record.get("branch"),
+                "commit": record.get("commit"),
+                "dirty_worktree": record.get("dirty_worktree"),
             },
         )
     return commands
@@ -157,11 +161,11 @@ def main() -> int:
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--tested-commit", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--workbuddy-review")
     args = parser.parse_args()
     evidence_root = Path(args.evidence_root).resolve()
     output = Path(args.output).resolve()
 
-    preflight = evidence_root / "preflight_status.txt"
     commands_path = evidence_root / "commands.jsonl"
     scenario_path = evidence_root / "scenario_results.json"
     determinism_path = (
@@ -170,6 +174,11 @@ def main() -> int:
         / "determinism_summary.json"
     )
     run_paths = determinism_run_paths(evidence_root)
+    workbuddy_review_path = (
+        Path(args.workbuddy_review).resolve()
+        if args.workbuddy_review
+        else None
+    )
     commands = parse_commands(commands_path, evidence_root)
     network_cases = junit_case_names(evidence_root / "network_matrix.xml")
     crash_cases = junit_case_names(evidence_root / "crash_matrix.xml")
@@ -177,6 +186,12 @@ def main() -> int:
     determinism = json.loads(determinism_path.read_text(encoding="utf-8"))
 
     commit = resolve_tested_commit(ROOT, args.tested_commit)
+    head_commit = resolve_tested_commit(ROOT, "HEAD")
+    if commit != head_commit:
+        raise ValueError("tested commit must equal repository HEAD")
+    actual_status = git("status", "--porcelain=v1", "--untracked-files=all")
+    if actual_status:
+        raise ValueError("repository must be clean when building Gate evidence")
     source_objects = git_source_evidence(ROOT, commit)
     source_paths = [
         ROOT / relative_path
@@ -193,6 +208,8 @@ def main() -> int:
         if path.is_file() and path not in {output, checksum_path}
     ]
     evidence_files.extend(source_paths)
+    if workbuddy_review_path is not None:
+        evidence_files.append(workbuddy_review_path)
     evidence_paths = {
         str(path.resolve()): sha256(path)
         for path in sorted(set(evidence_files))
@@ -223,9 +240,7 @@ def main() -> int:
         "repository": str(ROOT),
         "branch": git("branch", "--show-current"),
         "commit": commit,
-        "dirty_worktree": bool(
-            preflight.read_text(encoding="utf-8").strip(),
-        ),
+        "dirty_worktree": False,
         "strategy_hash": source_objects["strategy"]["sha256"],
         "state_machine_hash": source_objects["state_machine"]["sha256"],
         "config_hash": source_objects["config"]["sha256"],
@@ -278,6 +293,12 @@ def main() -> int:
             "uv": "0.11.23",
         },
     }
+    if workbuddy_review_path is not None:
+        review = json.loads(workbuddy_review_path.read_text(encoding="utf-8"))
+        if not isinstance(review, dict):
+            raise ValueError("WorkBuddy review must be a JSON object")
+        manifest["workbuddy_review"] = review
+        manifest["workbuddy_review_path"] = str(workbuddy_review_path)
     write_manifest_with_checksum(output, manifest)
     return 0
 

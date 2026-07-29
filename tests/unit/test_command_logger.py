@@ -12,6 +12,13 @@ RUN_OFFLINE = ROOT / "scripts" / "run_offline.sh"
 
 
 def test_logger_records_command_timestamps_output_and_numeric_exit(tmp_path) -> None:
+    expected_dirty = bool(
+        subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            text=True,
+        ).strip(),
+    )
     command_log = tmp_path / "commands.jsonl"
     stdout_log = tmp_path / "success.log"
     completed = subprocess.run(
@@ -48,6 +55,10 @@ def test_logger_records_command_timestamps_output_and_numeric_exit(tmp_path) -> 
         },
         "python_guard": {"status": "ENABLED"},
     }
+    assert record["repository"] == str(ROOT)
+    assert len(record["commit"]) == 40
+    assert record["branch"]
+    assert record["dirty_worktree"] is expected_dirty
     assert stdout_log.read_text(encoding="utf-8") == "ok\n"
 
 
