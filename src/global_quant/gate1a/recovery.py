@@ -204,11 +204,15 @@ class RecoverySupervisor:
         initial_wallet: Decimal,
         checkpoint_path: Path | str,
         inbox_path: Path | str,
+        expected_source_hash: str | None = None,
+        expected_config_hash: str | None = None,
     ) -> None:
         self.ledger = ledger
         self.initial_wallet = Decimal(initial_wallet)
         self.checkpoint_path = Path(checkpoint_path)
         self.inbox = DurableInbox(inbox_path)
+        self.expected_source_hash = expected_source_hash
+        self.expected_config_hash = expected_config_hash
 
     def recover(self) -> RecoveryResult:
         from global_quant.gate1a.coordinator import EventSourcedCoordinator
@@ -217,6 +221,18 @@ class RecoverySupervisor:
             ledger=self.ledger,
             initial_wallet=self.initial_wallet,
         )
+        if (
+            self.expected_source_hash is not None
+            and coordinator.source_hash != self.expected_source_hash
+        ):
+            raise RecoveryBlockedError("durable source hash does not match current code")
+        if (
+            self.expected_config_hash is not None
+            and coordinator.config_hash != self.expected_config_hash
+        ):
+            raise RecoveryBlockedError(
+                "durable config hash does not match current protocol",
+            )
         if self.checkpoint_path.exists():
             CheckpointStore(self.checkpoint_path).validate_against(coordinator)
         if coordinator.fail_closed:

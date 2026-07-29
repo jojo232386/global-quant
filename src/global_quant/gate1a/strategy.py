@@ -83,6 +83,8 @@ class FixedTargetStrategy(Strategy):
                 inbox_path=Path(self._gate_config.ledger_path).with_suffix(
                     ".inbox.jsonl",
                 ),
+                expected_source_hash=self._gate_config.source_hash,
+                expected_config_hash=self._gate_config.config_hash,
             ).recover()
             self._coordinator = recovery.coordinator
             self._recovery_actions = recovery.actions

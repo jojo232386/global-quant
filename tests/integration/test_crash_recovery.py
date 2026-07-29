@@ -14,6 +14,7 @@ from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.recovery import CheckpointIntegrityError
 from global_quant.gate1a.recovery import CheckpointStore
 from global_quant.gate1a.recovery import RecoverySupervisor
+from global_quant.gate1a.recovery import RecoveryBlockedError
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -130,6 +131,33 @@ def test_strategy_recovery_supervisor_refuses_corrupt_checkpoint(tmp_path) -> No
             initial_wallet=Decimal("10000"),
             checkpoint_path=checkpoint,
             inbox_path=tmp_path / "execution_inbox.jsonl",
+        ).recover()
+
+
+@pytest.mark.parametrize(
+    ("field", "source_hash", "config_hash"),
+    [
+        ("source", "wrong-source", None),
+        ("config", None, "wrong-config"),
+    ],
+)
+def test_recovery_refuses_durable_state_from_different_code_or_protocol(
+    tmp_path,
+    field,
+    source_hash,
+    config_hash,
+) -> None:
+    completed = run_worker(tmp_path, "write_checkpoint")
+    assert completed.returncode == 0
+
+    with pytest.raises(RecoveryBlockedError, match=field):
+        RecoverySupervisor(
+            ledger=AppendOnlyLedger(tmp_path / "events.jsonl"),
+            initial_wallet=Decimal("10000"),
+            checkpoint_path=tmp_path / "checkpoint.json",
+            inbox_path=tmp_path / "execution_inbox.jsonl",
+            expected_source_hash=source_hash,
+            expected_config_hash=config_hash,
         ).recover()
 
 
