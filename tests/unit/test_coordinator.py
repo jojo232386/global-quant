@@ -73,6 +73,22 @@ def test_duplicate_fill_changes_position_and_wallet_once(coordinator) -> None:
     coordinator.assert_invariants()
 
 
+def test_conflicting_duplicate_fill_fails_closed(coordinator) -> None:
+    order_id = open_long(coordinator)
+
+    with pytest.raises(UnexplainedEventError, match="conflicting duplicate fill"):
+        coordinator.apply_fill(
+            order_id,
+            fill_id="fill-decision-1",
+            quantity=Decimal("0.5"),
+            price=Decimal("100"),
+            fee=Decimal("0.05"),
+        )
+
+    assert coordinator.fail_closed is True
+    assert coordinator.position(BTC).quantity == Decimal("1")
+
+
 def test_duplicate_public_order_event_is_idempotent(coordinator) -> None:
     order = coordinator.request_target("decision-1", BTC, Decimal("1"))
     assert order is not None
@@ -89,6 +105,24 @@ def test_duplicate_public_order_event_is_idempotent(coordinator) -> None:
     assert first is True
     assert duplicate is False
     assert coordinator.orders[order.client_order_id].status == "SUBMITTED"
+
+
+def test_conflicting_reuse_of_order_source_event_id_fails_closed(coordinator) -> None:
+    order = coordinator.request_target("decision-1", BTC, Decimal("1"))
+    assert order is not None
+    coordinator.mark_submitted(
+        order.client_order_id,
+        source_event_id="venue-event-1",
+    )
+
+    with pytest.raises(UnexplainedEventError, match="conflicting duplicate order event"):
+        coordinator.mark_accepted(
+            order.client_order_id,
+            "venue-1",
+            source_event_id="venue-event-1",
+        )
+
+    assert coordinator.fail_closed is True
 
 
 def test_late_cancel_cannot_change_filled_order(coordinator) -> None:
@@ -123,6 +157,24 @@ def test_matching_account_snapshot_is_idempotent(coordinator) -> None:
     assert first is True
     assert duplicate is False
     assert coordinator.fail_closed is False
+
+
+def test_conflicting_duplicate_account_snapshot_fails_closed(coordinator) -> None:
+    open_long(coordinator)
+    coordinator.reconcile_account_snapshot(
+        source_event_id="account-snapshot-1",
+        wallet_balance=coordinator.wallet_balance,
+        positions={BTC: Decimal("1")},
+    )
+
+    with pytest.raises(UnexplainedEventError, match="conflicting account snapshot"):
+        coordinator.reconcile_account_snapshot(
+            source_event_id="account-snapshot-1",
+            wallet_balance=coordinator.wallet_balance,
+            positions={BTC: Decimal("2")},
+        )
+
+    assert coordinator.fail_closed is True
 
 
 def test_account_snapshot_mismatch_is_persisted_and_fails_closed(coordinator) -> None:

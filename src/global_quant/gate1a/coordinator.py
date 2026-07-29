@@ -92,6 +92,15 @@ class EventSourcedCoordinator:
         self.fail_closed = False
         self._seen_fill_ids: set[str] = set()
         self._seen_source_event_ids: set[str] = set()
+        self._fill_fingerprints: dict[str, tuple[str, str, str, str, str]] = {}
+        self._transition_sources: dict[
+            str,
+            tuple[str, str, str | None],
+        ] = {}
+        self._reconciliation_sources: dict[
+            str,
+            tuple[str, tuple[tuple[str, str], ...]],
+        ] = {}
         self._applied_event_ids: set[str] = set()
 
     @staticmethod
@@ -349,8 +358,17 @@ class EventSourcedCoordinator:
         source_id = source_event_id or (
             f"{status}:{client_order_id}:{self.ledger.next_sequence}"
         )
-        if source_id in self._seen_source_event_ids:
-            return False
+        existing_transition = self._transition_sources.get(source_id)
+        transition_fingerprint = (client_order_id, status, venue_order_id)
+        if existing_transition is not None:
+            if existing_transition == transition_fingerprint:
+                return False
+            self._record_anomaly(
+                f"conflicting duplicate order event {source_id}",
+                decision_id=order.decision_id,
+                instrument_id=order.instrument_id,
+            )
+            raise UnexplainedEventError("conflicting duplicate order event")
         if order.status in TERMINAL_ORDER_STATES:
             event = self._event(
                 event_type="STALE_ORDER_EVENT",
@@ -474,7 +492,21 @@ class EventSourcedCoordinator:
             )
             raise UnexplainedEventError(f"fill references unknown order {client_order_id}")
         if fill_id in self._seen_fill_ids:
-            return False
+            fingerprint = (
+                client_order_id,
+                str(self._decimal(quantity)),
+                str(self._decimal(price)),
+                str(self._decimal(fee)),
+                order.side,
+            )
+            if self._fill_fingerprints[fill_id] == fingerprint:
+                return False
+            self._record_anomaly(
+                f"conflicting duplicate fill {fill_id}",
+                decision_id=order.decision_id,
+                instrument_id=order.instrument_id,
+            )
+            raise UnexplainedEventError("conflicting duplicate fill")
 
         fill_quantity = self._decimal(quantity)
         fill_price = self._decimal(price)
@@ -681,8 +713,6 @@ class EventSourcedCoordinator:
         wallet_balance: Decimal,
         positions: dict[str, Decimal],
     ) -> bool:
-        if source_event_id in self._seen_source_event_ids:
-            return False
         observed_wallet = self._decimal(wallet_balance)
         observed_positions = {
             instrument_id: self._decimal(quantity)
@@ -693,6 +723,21 @@ class EventSourcedCoordinator:
             for instrument_id, position in self.positions.items()
             if position.quantity != 0 or instrument_id in observed_positions
         }
+        fingerprint = (
+            str(observed_wallet),
+            tuple(
+                (key, str(value))
+                for key, value in sorted(observed_positions.items())
+            ),
+        )
+        existing_snapshot = self._reconciliation_sources.get(source_event_id)
+        if existing_snapshot is not None:
+            if existing_snapshot == fingerprint:
+                return False
+            self._record_anomaly(
+                f"conflicting account snapshot {source_event_id}",
+            )
+            raise UnexplainedEventError("conflicting account snapshot")
         if (
             observed_wallet != self.wallet_balance
             or observed_positions != expected_positions
@@ -786,6 +831,12 @@ class EventSourcedCoordinator:
             assert event.client_order_id and event.order_transition
             order = self.orders[event.client_order_id]
             next_status = event.order_transition["to"]
+            if event.source_event_id:
+                self._transition_sources[event.source_event_id] = (
+                    event.client_order_id,
+                    next_status,
+                    event.venue_order_id,
+                )
             if event.order_transition["from"] != order.status:
                 raise UnexplainedEventError("order transition source state mismatch")
             if next_status not in VALID_ORDER_TRANSITIONS.get(order.status, set()):
@@ -794,7 +845,24 @@ class EventSourcedCoordinator:
             if event.venue_order_id:
                 order.venue_order_id = event.venue_order_id
             return
-        if event.event_type in {"STALE_ORDER_EVENT", "RECONCILIATION"}:
+        if event.event_type == "STALE_ORDER_EVENT":
+            if event.source_event_id and event.client_order_id and event.order_transition:
+                self._transition_sources[event.source_event_id] = (
+                    event.client_order_id,
+                    event.order_transition["attempted"],
+                    event.venue_order_id,
+                )
+            return
+        if event.event_type == "RECONCILIATION":
+            assert event.source_event_id and event.balance_transition
+            positions = event.balance_transition["positions"]
+            self._reconciliation_sources[event.source_event_id] = (
+                event.balance_transition["wallet_balance"],
+                tuple(
+                    (key, str(value))
+                    for key, value in sorted(positions.items())
+                ),
+            )
             return
         if event.event_type == "PROTECTION_RESIZE":
             assert event.client_order_id and event.order_transition
@@ -816,6 +884,13 @@ class EventSourcedCoordinator:
             quantity = Decimal(event.fill["quantity"])
             price = Decimal(event.fill["price"])
             fee = Decimal(event.fee)
+            self._fill_fingerprints[fill_id] = (
+                event.client_order_id,
+                str(quantity),
+                str(price),
+                str(fee),
+                order.side,
+            )
             signed_quantity = quantity if order.side == "BUY" else -quantity
             position = self.position(order.instrument_id)
             if (
