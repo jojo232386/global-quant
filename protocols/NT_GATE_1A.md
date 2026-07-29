@@ -1,6 +1,6 @@
 # NT-GATE-1A Frozen Protocol
 
-Protocol version: `1.0`
+Protocol version: `1.1`
 
 Status at freeze: `READY`
 
@@ -9,6 +9,11 @@ Frozen start: `2026-07-30T06:26:32+08:00`
 Wall-clock stop deadline: `2026-07-30T18:26:32+08:00`
 
 Effective work limit: `12 hours`
+
+Version `1.1` was frozen before any production implementation after an
+independent pre-implementation review found five P1 specification gaps. The
+original `1.0` protocol remains preserved in Git commit `617a5da`; the original
+start and deadline are unchanged.
 
 ## 1. Sole objective
 
@@ -106,6 +111,10 @@ code.
 11. Unknown external order or unexplained fill.
 12. Replayed ledger disagrees with a stored runtime snapshot.
 
+Partial-entry scenarios must verify that protection quantity follows filled
+quantity. Protection-race scenarios must also cover a sibling fill received
+before the sibling-cancel acknowledgement.
+
 Unknown or unexplained events must fail closed. Ignoring them is forbidden.
 
 ## 7. Required non-graceful termination matrix
@@ -121,6 +130,14 @@ recovers only from durable files:
 6. protection group update in progress;
 7. event append/checkpoint boundary.
 
+The matrix also includes these high-risk boundaries:
+
+8. external submit side effect occurred, but acknowledgement was not persisted;
+9. fill, cancel, or trigger confirmation was received, but not persisted;
+10. sibling-protection cancel was sent, but its result was not persisted;
+11. checkpoint was truncated or corrupted, including a second crash during
+    replay.
+
 After restart, duplicate historical events are delivered again to verify
 idempotency. A graceful framework reset is not accepted as crash evidence.
 
@@ -128,8 +145,11 @@ idempotency. A graceful framework reset is not accepted as crash evidence.
 
 Each canonical JSONL event includes:
 
+- `schema_version`
+- `ledger_sequence`
 - `decision_id`
 - `strategy_id`
+- `account_id`
 - `run_id`
 - `instrument_id`
 - `client_order_id`
@@ -138,9 +158,12 @@ Each canonical JSONL event includes:
 - `correlation_id`
 - `causation_id`
 - `event_id`
+- `source_event_id`
+- `dedupe_key`
 - `event_sequence`
 - `event_timestamp`
 - `receive_timestamp`
+- `persisted_at`
 - `event_type`
 - `order_intent`
 - `order_transition`
@@ -153,16 +176,49 @@ Each canonical JSONL event includes:
 - `process_start_id`
 - `source_hash`
 - `config_hash`
+- `previous_event_hash`
+- `event_hash`
+- `settlement_currency`
+- `quantity_precision`
+- `price_precision`
 
 Optional fields remain present with JSON `null`. Events are immutable once
-appended. Derived orders, positions, balances, and protection state must be
-rebuildable from the ledger.
+appended. All prices, quantities, fees, balances, and PnL use `Decimal` strings;
+binary floating point is forbidden. Gate 1A freezes settlement currency to
+USDT, contract multiplier to one, quantity precision to eight decimal places,
+and price precision to two decimal places.
+
+The ledger uses a global monotonic `ledger_sequence`, a source event ID, a
+dedupe key, and a SHA-256 hash chain. A checkpoint uses atomic replacement and
+stores the last durable ledger sequence and event hash. Truncation, malformed
+JSON, hash-chain failure, unknown schema or event type, and unexplained economic
+change are fatal.
+
+Derived orders, positions, balances, and protection state must be rebuildable
+from the ledger.
+
+The durability order is frozen:
+
+1. persist and `fsync` the decision;
+2. persist and `fsync` the order intent;
+3. only then permit an order-submit side effect;
+4. persist and `fsync` each external event before updating derived projections;
+5. persist checkpoints only after the corresponding ledger event is durable.
+
+Recovery reuses the original `client_order_id`. It must not create a second
+effective order to compensate for uncertain acknowledgement state.
 
 For the Gate 1A USDT-perpetual accounting model, funding is zero:
 
 `wallet_balance = initial_balance + realized_pnl - cumulative_fees`
 
 `equity = wallet_balance + unrealized_pnl`
+
+Every event must also satisfy:
+
+`position_after = position_before + signed_fill_quantity`
+
+`original_order_quantity = cumulative_filled + remaining + terminated_unfilled`
 
 Replay state must match the final runtime snapshot field by field after
 excluding only declared volatile metadata.
@@ -194,6 +250,10 @@ non-zero for:
 - WebSocket clients;
 - inherited child-process access;
 - IPv4 and IPv6.
+
+The operating-system sandbox must cover Python, Rust/native extensions, and
+child processes launched by the harness. Parent, child, IPv4, IPv6, and DNS
+failure probes are required. Python monkeypatching alone cannot satisfy PASS.
 
 The claim is limited to processes launched by the frozen gate harness. The gate
 does not claim a machine-wide firewall.
@@ -260,6 +320,12 @@ remedies.
 
 ## 15. Required machine verdict
 
+An independent machine arbiter reads frozen evidence and generates
+`gate_1a_verdict.json`. Strategy, coordinator, scenario, and test code are
+forbidden from writing `PASS` directly. Missing evidence, skipped or xfailed
+tests, unknown results, non-zero required-command exits, dirty evidence, or
+checksum mismatch automatically produce `STOP`.
+
 `gate_1a_verdict.json` must contain:
 
 - `verdict`
@@ -308,7 +374,16 @@ connect to an exchange, use credentials, or start another research route.
 WorkBuddy must verify raw evidence item by item and report P0/P1/P2 plus a
 four-state conclusion. A summary-only endorsement is invalid.
 
-## 18. Sole next action
+Final `PASS` additionally requires WorkBuddy to report `P0=0` and `P1=0`.
+
+## 18. Deferred multi-instrument capacity test
+
+The BTC/ETH schedule proves only two-instrument mechanics. A ten-instrument
+order-storm and portfolio-constraint capacity test is mandatory after Gate 1B
+and before Gate 2. It is explicitly not part of Gate 1A and cannot be inferred
+from a Gate 1A pass.
+
+## 19. Sole next action
 
 - `PASS`: freeze Gate 1A and separately preregister Gate 1B for Binance Futures
   Demo.
