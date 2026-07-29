@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -109,7 +112,9 @@ class EventSourcedCoordinator:
 
     def _timestamp(self) -> str:
         sequence = self.ledger.next_sequence
-        return f"2000-01-01T00:00:{sequence:02d}+00:00"
+        return (
+            datetime(2000, 1, 1, tzinfo=UTC) + timedelta(seconds=sequence)
+        ).isoformat()
 
     def _event(
         self,

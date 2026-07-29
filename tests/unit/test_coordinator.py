@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import datetime
 
 import pytest
 
@@ -429,3 +430,18 @@ def test_replay_matches_runtime_snapshot_field_by_field(coordinator) -> None:
 
     assert replayed.business_snapshot() == expected
     assert replayed.business_hash() == coordinator.business_hash()
+
+
+def test_deterministic_event_timestamps_remain_valid_after_one_minute(
+    coordinator,
+) -> None:
+    for index in range(65):
+        coordinator.mark_price(BTC, Decimal("100") + index)
+
+    timestamps = [
+        datetime.fromisoformat(event.event_timestamp)
+        for event in coordinator.ledger.read_all()
+    ]
+
+    assert timestamps == sorted(timestamps)
+    assert timestamps[-1].minute >= 1
