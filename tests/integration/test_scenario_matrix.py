@@ -31,6 +31,7 @@ def test_all_frozen_scenarios_pass_with_complete_evidence(tmp_path) -> None:
         assert result.final_wallet == result.expected_final_wallet
         assert result.protection_state == result.expected_protection_state
         assert result.exit_code == result.expected_exit_code
+        assert result.business_hash == result.expected_business_hash
         assert result.oracle_version == "NT-GATE-1A-SCENARIO-ORACLE-1"
         assert result.validation_errors == []
         assert result.ledger_hash
@@ -67,6 +68,7 @@ def test_snapshot_mismatch_scenario_detects_integrity_failure(tmp_path) -> None:
         ("final_wallet", "0"),
         ("protection_state", {}),
         ("exit_code", 99),
+        ("business_hash", "0" * 64),
     ],
 )
 def test_each_mutated_actual_field_is_stopped_by_frozen_oracle(

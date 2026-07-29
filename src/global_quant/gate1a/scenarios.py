@@ -64,6 +64,7 @@ class ScenarioResult:
     observed_events: list[str]
     ledger_hash: str
     business_hash: str
+    expected_business_hash: str
     oracle_version: str | None
     validation_errors: list[str]
     error: str | None = None
@@ -164,6 +165,7 @@ def _result(
         observed_events=[event.event_type for event in events],
         ledger_hash=coordinator.ledger.last_event_hash,
         business_hash=coordinator.business_hash(),
+        expected_business_hash="",
         oracle_version=None,
         validation_errors=[],
     )

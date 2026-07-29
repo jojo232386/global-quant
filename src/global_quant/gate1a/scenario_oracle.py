@@ -12,8 +12,9 @@ ORACLE_PATH = (
     / "fixtures"
     / "nt_gate_1a_scenario_oracle_v1.json"
 )
-ORACLE_SHA256 = "9b895854550c79bada42ec43c44ea61195f38e4f3533865b7b8aca492449f6b0"
+ORACLE_SHA256 = "5b6eb1f25028ebcee04aa399d0acfc9968a2e1cf20aebc9d85a8a93ab697b757"
 EXPECTED_FIELDS = {
+    "business_hash",
     "orders",
     "fills",
     "final_positions",
@@ -22,6 +23,7 @@ EXPECTED_FIELDS = {
     "exit_code",
 }
 COMPARISONS = (
+    ("business_hash", "business_hash"),
     ("observed_orders", "orders"),
     ("observed_fills", "fills"),
     ("final_positions", "final_positions"),
@@ -93,6 +95,7 @@ def validate_scenario_payloads(
                         expected["protection_state"],
                     ),
                     "expected_exit_code": expected["exit_code"],
+                    "expected_business_hash": expected["business_hash"],
                 },
             )
 
