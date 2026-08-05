@@ -21,6 +21,7 @@ from nautilus_trader.trading.strategy import Strategy
 from global_quant.gate1a.coordinator import EventSourcedCoordinator
 from global_quant.gate1a.ledger import AppendOnlyLedger
 from global_quant.gate1a.recovery import CheckpointStore
+from global_quant.gate1a.recovery import DurableInbox
 from global_quant.gate1a.recovery import RecoveryAction
 from global_quant.gate1a.recovery import RecoverySupervisor
 
@@ -61,6 +62,9 @@ class FixedTargetStrategy(Strategy):
         self._last_prices: dict[str, Decimal] = {}
         self._cancel_requests_sent: set[str] = set()
         self._modify_requests_sent: dict[str, Decimal] = {}
+        self._execution_inbox = DurableInbox(
+            Path(config.ledger_path).with_suffix(".inbox.jsonl"),
+        )
 
     @classmethod
     def targets_for_step(cls, step: int) -> tuple[Decimal, Decimal]:
@@ -311,14 +315,29 @@ class FixedTargetStrategy(Strategy):
 
     def on_order_filled(self, event: OrderFilled) -> None:
         coordinator = self._require_coordinator()
-        intent = coordinator.orders[str(event.client_order_id)]
-        coordinator.apply_fill(
-            str(event.client_order_id),
-            fill_id=str(event.trade_id),
-            quantity=event.last_qty.as_decimal(),
-            price=event.last_px.as_decimal(),
-            fee=event.commission.as_decimal(),
+        client_order_id = str(event.client_order_id)
+        fill_id = str(event.trade_id)
+        quantity = event.last_qty.as_decimal()
+        price = event.last_px.as_decimal()
+        fee = event.commission.as_decimal()
+        self._execution_inbox.append(
+            {
+                "event_type": "FILL",
+                "source_event_id": fill_id,
+                "client_order_id": client_order_id,
+                "quantity": str(quantity),
+                "price": str(price),
+                "fee": str(fee),
+            },
         )
+        coordinator.apply_fill(
+            client_order_id,
+            fill_id=fill_id,
+            quantity=quantity,
+            price=price,
+            fee=fee,
+        )
+        intent = coordinator.orders[client_order_id]
         if (
             intent.role not in {"PROTECTION_STOP", "PROTECTION_TAKE"}
             and coordinator.position(intent.instrument_id).quantity != 0

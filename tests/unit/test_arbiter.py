@@ -10,21 +10,24 @@ from pathlib import Path
 import pytest
 
 from global_quant.gate1a.arbiter import GateArbiter
+from global_quant.gate1a.environment import collect_tool_versions
 from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
 
 REQUIRED_COMMANDS = {
-    "full_seed_1_rep_1": 145,
-    "full_seed_20260730_rep_1": 145,
-    "full_seed_1_rep_2": 145,
-    "full_seed_20260730_rep_2": 145,
-    "full_seed_1_rep_3": 145,
-    "full_seed_20260730_rep_3": 145,
+    "full_seed_1_rep_1": 150,
+    "full_seed_20260730_rep_1": 150,
+    "full_seed_1_rep_2": 150,
+    "full_seed_20260730_rep_2": 150,
+    "full_seed_1_rep_3": 150,
+    "full_seed_20260730_rep_3": 150,
     "network_matrix": 11,
     "crash_matrix": 17,
     "nautilus_backtest": 3,
     "scenario_matrix_test": 12,
     "determinism_matrix_test": 1,
+    "strategy_callback_matrix": 2,
+    "tool_versions": 1,
 }
 NETWORK_CASES = (
     "test_python_network_paths_fail_nonzero_and_log_stack[connect]",
@@ -59,22 +62,33 @@ CRASH_CASES = (
     "test_checkpoint_matches_replay_or_fails_closed",
     "test_reversal_target_survives_restart_during_partial_close",
 )
+CALLBACK_CASES = (
+    "test_real_strategy_fill_survives_sigkill_and_applies_exactly_once",
+    "test_real_strategy_unknown_fill_is_durably_fail_closed",
+)
 SOURCE_PATHS = {
     "strategy": "src/global_quant/gate1a/strategy.py",
     "state_machine": "src/global_quant/gate1a/coordinator.py",
     "ledger": "src/global_quant/gate1a/ledger.py",
     "recovery": "src/global_quant/gate1a/recovery.py",
+    "environment_sampler": "src/global_quant/gate1a/environment.py",
     "scenario_runner": "src/global_quant/gate1a/scenarios.py",
     "scenario_oracle": "src/global_quant/gate1a/scenario_oracle.py",
     "scenario_fixture": (
         "src/global_quant/gate1a/fixtures/nt_gate_1a_scenario_oracle_v1.json"
     ),
+    "callback_oracle": (
+        "src/global_quant/gate1a/fixtures/"
+        "nt_gate_1a_strategy_callback_oracle_v2.json"
+    ),
+    "callback_worker": "tests/helpers/strategy_callback_worker.py",
+    "callback_test": "tests/integration/test_strategy_callback_recovery.py",
     "arbiter": "src/global_quant/gate1a/arbiter.py",
     "manifest_builder": "scripts/build_gate_manifest.py",
     "command_logger": "scripts/run_logged.py",
     "offline_launcher": "scripts/run_offline.sh",
     "evidence_runner": "scripts/run_gate_1a_evidence.sh",
-    "config": "protocols/NT_GATE_1A.md",
+    "config": "protocols/NT_GATE_1A_V1_2.md",
 }
 
 
@@ -240,6 +254,8 @@ def passing_manifest(tmp_path: Path) -> dict:
             cases = NETWORK_CASES
         elif name == "crash_matrix":
             cases = CRASH_CASES
+        elif name == "strategy_callback_matrix":
+            cases = CALLBACK_CASES
         junit = evidence_root / f"{name}.xml"
         log = evidence_root / f"{name}.log"
         evidence[str(junit)] = write(junit, junit_xml(minimum_tests, cases))
@@ -328,6 +344,13 @@ def passing_manifest(tmp_path: Path) -> dict:
         json.dumps(summary, sort_keys=True) + "\n",
     )
 
+    tool_versions = collect_tool_versions()
+    tool_versions_path = evidence_root / "tool_versions.json"
+    evidence[str(tool_versions_path)] = write(
+        tool_versions_path,
+        json.dumps(tool_versions, sort_keys=True) + "\n",
+    )
+
     for source in source_objects.values():
         path = repo / source["path"]
         evidence[str(path)] = sha256_bytes(path.read_bytes())
@@ -373,7 +396,7 @@ def passing_manifest(tmp_path: Path) -> dict:
         ],
         "restart_results": [
             {"name": f"restart-{index}", "status": "PASS"}
-            for index in range(1, 12)
+            for index in range(1, 14)
         ],
         "determinism": summary,
         "machine_evidence": {
@@ -381,6 +404,7 @@ def passing_manifest(tmp_path: Path) -> dict:
             "scenario_results_path": str(primary_scenarios),
             "determinism_summary_path": str(determinism_summary),
             "determinism_run_paths": run_paths,
+            "tool_versions_path": str(tool_versions_path),
         },
         "unresolved_P0": [],
         "unresolved_P1": [],
@@ -388,6 +412,7 @@ def passing_manifest(tmp_path: Path) -> dict:
         "evidence_paths": evidence,
         "workbuddy_review": review_payload,
         "workbuddy_review_path": str(workbuddy_review),
+        "versions": tool_versions,
     }
 
 
@@ -402,7 +427,8 @@ def test_complete_machine_evidence_produces_pass(tmp_path) -> None:
     assert verdict["failures"] == []
     assert verdict["network_block_status"]["universal_network_blocked"] is True
     assert len(verdict["scenario_results"]) == len(REQUIRED_SCENARIOS)
-    assert len(verdict["restart_results"]) == 11
+    assert len(verdict["restart_results"]) == 13
+    assert verdict["versions"] == collect_tool_versions()
 
 
 @pytest.mark.parametrize(
@@ -482,6 +508,11 @@ def test_forged_pass_and_matrix_hash_cannot_override_frozen_oracle(
     [
         ("network_matrix", NETWORK_CASES[0], "network probe"),
         ("crash_matrix", CRASH_CASES[0], "restart evidence"),
+        (
+            "strategy_callback_matrix",
+            CALLBACK_CASES[0],
+            "restart evidence",
+        ),
     ],
 )
 def test_batch_junit_summary_cannot_hide_missing_specific_case(
@@ -669,6 +700,21 @@ def test_checksum_mismatch_is_stop(tmp_path) -> None:
 
     assert verdict["verdict"] == "STOP"
     assert any("checksum" in failure for failure in verdict["failures"])
+
+
+def test_sampled_tool_versions_must_match_running_environment(tmp_path) -> None:
+    manifest = passing_manifest(tmp_path)
+    path = Path(manifest["machine_evidence"]["tool_versions_path"])
+    sampled = json.loads(path.read_text(encoding="utf-8"))
+    sampled["python"]["value"] = "0.0.0-forged"
+    path.write_text(json.dumps(sampled), encoding="utf-8")
+    manifest["versions"] = sampled
+    refresh_checksum(manifest, path)
+
+    verdict = GateArbiter(require_workbuddy=True).decide(manifest)
+
+    assert verdict["verdict"] == "STOP"
+    assert any("running environment" in failure for failure in verdict["failures"])
 
 
 def test_candidate_mode_does_not_require_workbuddy(tmp_path) -> None:

@@ -17,7 +17,7 @@ from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STARTED_AT = "2026-07-30T06:26:32+08:00"
+STARTED_AT = "2026-08-06T07:00:00+08:00"
 REQUIRED_COMMANDS = tuple(REQUIRED_COMMAND_MINIMUMS)
 MINIMUM_TESTS = REQUIRED_COMMAND_MINIMUMS
 
@@ -173,6 +173,7 @@ def main() -> int:
         / "determinism"
         / "determinism_summary.json"
     )
+    tool_versions_path = evidence_root / "tool_versions.json"
     run_paths = determinism_run_paths(evidence_root)
     workbuddy_review_path = (
         Path(args.workbuddy_review).resolve()
@@ -182,8 +183,12 @@ def main() -> int:
     commands = parse_commands(commands_path, evidence_root)
     network_cases = junit_case_names(evidence_root / "network_matrix.xml")
     crash_cases = junit_case_names(evidence_root / "crash_matrix.xml")
+    crash_cases.update(
+        junit_case_names(evidence_root / "strategy_callback_matrix.xml"),
+    )
     scenario_payload = json.loads(scenario_path.read_text(encoding="utf-8"))
     determinism = json.loads(determinism_path.read_text(encoding="utf-8"))
+    tool_versions = json.loads(tool_versions_path.read_text(encoding="utf-8"))
 
     commit = resolve_tested_commit(ROOT, args.tested_commit)
     head_commit = resolve_tested_commit(ROOT, "HEAD")
@@ -231,7 +236,7 @@ def main() -> int:
         for name, case in NETWORK_EVIDENCE_CASES.items()
     }
     manifest = {
-        "manifest_version": 2,
+        "manifest_version": 3,
         "started_at": STARTED_AT,
         "completed_at": completed_at.isoformat(),
         "effective_work_duration": str(completed_at - started_at),
@@ -276,22 +281,17 @@ def main() -> int:
                 str(path.resolve())
                 for path in run_paths
             ],
+            "tool_versions_path": str(tool_versions_path.resolve()),
         },
         "unresolved_P0": [],
         "unresolved_P1": [],
         "unresolved_P2": [
             "Nautilus BarDataWrangler emits a pandas chained-assignment warning",
             "Nautilus backtest path emits a Timestamp.utcnow deprecation warning",
-            "GitHub private remote awaits user re-authentication",
             "Gate 1A does not preserve the 149 MiB Nautilus wheel bytes",
         ],
         "evidence_paths": evidence_paths,
-        "versions": {
-            "python": "3.12.13",
-            "nautilus_trader": "1.230.0",
-            "pytest": "9.1.1",
-            "uv": "0.11.23",
-        },
+        "versions": tool_versions,
     }
     if workbuddy_review_path is not None:
         review = json.loads(workbuddy_review_path.read_text(encoding="utf-8"))

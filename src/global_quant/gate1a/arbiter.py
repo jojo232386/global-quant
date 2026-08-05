@@ -9,22 +9,25 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from global_quant.gate1a.environment import collect_tool_versions
 from global_quant.gate1a.scenarios import REQUIRED_SCENARIOS
 
 
 GATE_TIME_LIMIT_SECONDS = 12 * 60 * 60
 REQUIRED_COMMAND_MINIMUMS = {
-    "full_seed_1_rep_1": 145,
-    "full_seed_20260730_rep_1": 145,
-    "full_seed_1_rep_2": 145,
-    "full_seed_20260730_rep_2": 145,
-    "full_seed_1_rep_3": 145,
-    "full_seed_20260730_rep_3": 145,
+    "full_seed_1_rep_1": 150,
+    "full_seed_20260730_rep_1": 150,
+    "full_seed_1_rep_2": 150,
+    "full_seed_20260730_rep_2": 150,
+    "full_seed_1_rep_3": 150,
+    "full_seed_20260730_rep_3": 150,
     "network_matrix": 11,
     "crash_matrix": 17,
     "nautilus_backtest": 3,
     "scenario_matrix_test": 12,
     "determinism_matrix_test": 1,
+    "strategy_callback_matrix": 2,
+    "tool_versions": 1,
 }
 NETWORK_EVIDENCE_CASES = {
     "parent": "test_python_network_paths_fail_nonzero_and_log_stack[connect]",
@@ -57,22 +60,35 @@ RESTART_EVIDENCE_CASES["checkpoint_corruption_and_replay_crash"] = (
     "test_checkpoint_matches_replay_or_fails_closed",
     "test_reversal_target_survives_restart_during_partial_close",
 )
+RESTART_EVIDENCE_CASES["real_strategy_fill_crash_recovery"] = (
+    "test_real_strategy_fill_survives_sigkill_and_applies_exactly_once",
+)
+RESTART_EVIDENCE_CASES["real_strategy_unknown_fill"] = (
+    "test_real_strategy_unknown_fill_is_durably_fail_closed",
+)
 SOURCE_OBJECT_PATHS = {
     "strategy": "src/global_quant/gate1a/strategy.py",
     "state_machine": "src/global_quant/gate1a/coordinator.py",
     "ledger": "src/global_quant/gate1a/ledger.py",
     "recovery": "src/global_quant/gate1a/recovery.py",
+    "environment_sampler": "src/global_quant/gate1a/environment.py",
     "scenario_runner": "src/global_quant/gate1a/scenarios.py",
     "scenario_oracle": "src/global_quant/gate1a/scenario_oracle.py",
     "scenario_fixture": (
         "src/global_quant/gate1a/fixtures/nt_gate_1a_scenario_oracle_v1.json"
     ),
+    "callback_oracle": (
+        "src/global_quant/gate1a/fixtures/"
+        "nt_gate_1a_strategy_callback_oracle_v2.json"
+    ),
+    "callback_worker": "tests/helpers/strategy_callback_worker.py",
+    "callback_test": "tests/integration/test_strategy_callback_recovery.py",
     "arbiter": "src/global_quant/gate1a/arbiter.py",
     "manifest_builder": "scripts/build_gate_manifest.py",
     "command_logger": "scripts/run_logged.py",
     "offline_launcher": "scripts/run_offline.sh",
     "evidence_runner": "scripts/run_gate_1a_evidence.sh",
-    "config": "protocols/NT_GATE_1A.md",
+    "config": "protocols/NT_GATE_1A_V1_2.md",
 }
 SOURCE_HASH_FIELDS = {
     "strategy": "strategy_hash",
@@ -166,6 +182,7 @@ class GateArbiter:
         self._check_evidence_hashes(manifest, failures)
         self._check_identity(manifest, failures)
         self._check_commands(manifest, failures)
+        self._check_versions(manifest, failures)
         self._check_network(failures)
         self._check_scenarios(manifest, failures)
         self._check_restarts(failures)
@@ -190,6 +207,7 @@ class GateArbiter:
             "strategy_hash": manifest.get("strategy_hash"),
             "state_machine_hash": manifest.get("state_machine_hash"),
             "config_hash": manifest.get("config_hash"),
+            "versions": manifest.get("versions"),
             "source_objects": manifest.get("source_objects"),
             "test_commands": manifest.get("test_commands", []),
             "exit_codes": {
@@ -626,6 +644,9 @@ class GateArbiter:
 
     def _check_restarts(self, failures: list[str]) -> None:
         cases = self._passing_cases("crash_matrix", failures)
+        cases.update(
+            self._passing_cases("strategy_callback_matrix", failures),
+        )
         for name, required_cases in RESTART_EVIDENCE_CASES.items():
             passed = all(case in cases for case in required_cases)
             self._restart_results.append(
@@ -633,6 +654,50 @@ class GateArbiter:
             )
             if not passed:
                 failures.append(f"missing or failed restart evidence: {name}")
+
+    def _check_versions(
+        self,
+        manifest: dict[str, Any],
+        failures: list[str],
+    ) -> None:
+        machine = manifest.get("machine_evidence", {})
+        sampled = self._read_json_object(
+            Path(str(machine.get("tool_versions_path", ""))),
+            "tool version evidence",
+            failures,
+        )
+        if sampled is None:
+            return
+        required = {
+            "python",
+            "nautilus_trader",
+            "pytest",
+            "uv",
+            "platform",
+            "architecture",
+        }
+        if set(sampled) != required:
+            failures.append("tool version evidence set is incomplete")
+            return
+        for name, item in sampled.items():
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"value", "source"}
+                or not isinstance(item.get("value"), str)
+                or not item["value"]
+                or not isinstance(item.get("source"), str)
+                or not item["source"]
+            ):
+                failures.append(f"tool version evidence is invalid: {name}")
+        if manifest.get("versions") != sampled:
+            failures.append("manifest versions disagree with sampled evidence")
+        try:
+            running = collect_tool_versions()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            failures.append(f"running environment version sampling failed: {exc}")
+            return
+        if sampled != running:
+            failures.append("tool versions do not match the running environment")
 
     def _check_determinism(
         self,
@@ -946,6 +1011,7 @@ class GateArbiter:
                 "command_log_path",
                 "scenario_results_path",
                 "determinism_summary_path",
+                "tool_versions_path",
             ):
                 paths.append(machine.get(key))
             run_paths = machine.get("determinism_run_paths", [])

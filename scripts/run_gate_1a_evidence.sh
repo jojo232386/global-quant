@@ -12,7 +12,7 @@ if [ -n "$STATUS" ]; then
     exit 2
 fi
 
-EVIDENCE_ROOT=${1:-"$ROOT/evidence/runtime/gate1a-$COMMIT"}
+EVIDENCE_ROOT=${1:-"$ROOT/evidence/runtime/gate1a-v1.2-$COMMIT"}
 case "$EVIDENCE_ROOT" in
     "$ROOT"/evidence/runtime/*) ;;
     *)
@@ -60,6 +60,11 @@ run_pytest scenario_matrix_test 20260730 \
     tests/unit/test_scenario_oracle.py
 run_pytest determinism_matrix_test 20260730 \
     tests/integration/test_determinism_matrix.py
+run_pytest strategy_callback_matrix 20260730 \
+    tests/integration/test_strategy_callback_recovery.py
+GATE_TOOL_VERSION_OUTPUT="$EVIDENCE_ROOT/tool_versions.json" \
+    run_pytest tool_versions 20260730 \
+    tests/integration/test_tool_versions.py
 
 PYTHONHASHSEED=20260730 "$PYTHON" "$LOGGER" \
     --name scenario_evidence \
