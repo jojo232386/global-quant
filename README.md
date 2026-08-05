@@ -14,20 +14,21 @@ Clean research and execution-engineering repository for non-A-share markets.
 
 ## Gate status
 
-`NT-GATE-1A v1.2`: `READY`, frozen to start at
-`2026-08-06T07:00:00+08:00` and stop at `2026-08-06T19:00:00+08:00`.
+`NT-GATE-1A v1.2`: `PASS`. The final machine verdict completed at
+`2026-08-06T07:29:00.478740+08:00`, within the frozen 12-hour window.
 
 The gate protocol is frozen in
-[`protocols/NT_GATE_1A.md`](protocols/NT_GATE_1A.md). Only this gate may be
-active. The first implementation produced strong offline evidence but failed
-final review because two real-Strategy persistence paths were not covered and
-the fixed review deadline expired. See
-[`reviews/GATE1A_FINAL_REVIEW.md`](reviews/GATE1A_FINAL_REVIEW.md).
+[`protocols/NT_GATE_1A_V1_2.md`](protocols/NT_GATE_1A_V1_2.md). The tested
+commit passed six independent `150/150` runs, thirteen restart groups, the real
+Strategy post-`fsync` `SIGKILL` recovery path, durable unknown-fill lockout,
+runtime version sampling, and WorkBuddy review with `P0=0` and `P1=0`. See
+[`reviews/GATE1A_V1_2_FINAL_REVIEW.md`](reviews/GATE1A_V1_2_FINAL_REVIEW.md).
 
 Version 1.1 remains frozen as `STOP` under tag
-`nt-gate-1a-v1.1-stop`. Version 1.2 is authorized only to repair and test the
-two real Strategy callback P1 findings. Gate 1B remains forbidden; no alpha,
-Demo, exchange, or live work is active.
+`nt-gate-1a-v1.1-stop`. Version 1.2 closes only the two real Strategy callback
+P1 findings and the evidence gap. It does not prove Binance behavior, alpha,
+profitability, or live readiness. Gate 1B remains forbidden until separately
+authorized; no alpha, Demo, exchange, or live work is active.
 
 ## GitHub
 

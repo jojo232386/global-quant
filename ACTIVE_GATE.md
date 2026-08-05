@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T07:00:00+08:00`
+Updated: `2026-08-06T07:30:00+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`IN_PROGRESS`
+`PASS`
 
 Protocol: `protocols/NT_GATE_1A_V1_2.md`
 
@@ -46,15 +46,30 @@ unknown fills.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Frozen evidence contract
+## Final evidence
 
-- protocol and callback oracle committed before the start;
-- real Strategy callback and real `SIGKILL` boundary;
-- exact-once recovery and durable unknown-fill lockout;
-- freshly sampled tool versions;
-- all retained v1.1 offline tests and evidence;
-- WorkBuddy review and final machine verdict before the deadline.
+- protocol and callback oracle were committed before the frozen start;
+- tested commit: `51becd3c4ff28239a2524bbf814b8c5668acffb8`;
+- six independent full-suite runs passed `150/150` tests;
+- the real Strategy callback passed the post-`fsync` `SIGKILL` recovery test;
+- the unknown-fill path durably failed closed and blocked restart;
+- all thirteen restart groups and all retained v1.1 checks passed;
+- Python, NautilusTrader, pytest, uv, platform, and architecture were sampled
+  from the tested environment;
+- WorkBuddy completed its independent review with `P0=0`, `P1=0`, and four
+  non-blocking P2 observations;
+- final machine verdict: `PASS`, completed at
+  `2026-08-06T07:29:00.478740+08:00` after `1740.47874` seconds.
+
+See `reviews/GATE1A_V1_2_FINAL_REVIEW.md` and the curated evidence under
+`evidence/gate1a/51becd3c4ff28239a2524bbf814b8c5668acffb8/`.
+
+This PASS proves only the frozen offline execution, persistence, recovery, and
+evidence contract. It does not prove Binance behavior, strategy alpha,
+profitability, or live readiness.
 
 ## Sole next action
 
-Preserve failing real-Strategy callback tests before editing implementation.
+Wait for explicit human authorization of a separately frozen Gate 1B. Do not
+connect to Demo, an exchange, market data, credentials, or live trading, and do
+not begin alpha research under this completed gate.

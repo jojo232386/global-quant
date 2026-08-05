@@ -1,0 +1,18 @@
+{
+  "hash_seeds": [
+    "1",
+    "20260730"
+  ],
+  "independent_processes": 6,
+  "ledger_replay_hash": "51ca2130cc7c5a02aa11182265918edbfadf980e403478ad870ee9080f919b84",
+  "repetitions": 3,
+  "run_files": [
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-1-rep-1.json",
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-20260730-rep-1.json",
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-1-rep-2.json",
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-20260730-rep-2.json",
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-1-rep-3.json",
+    "/Users/ASUS/Desktop/global-quant/evidence/runtime/gate1a-v1.2-51becd3c4ff28239a2524bbf814b8c5668acffb8/determinism/seed-20260730-rep-3.json"
+  ],
+  "status": "PASS"
+}

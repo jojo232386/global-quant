@@ -1,0 +1,21 @@
+........................................................................ [ 48%]
+........................................................................ [ 96%]
+......                                                                   [100%]
+=============================== warnings summary ===============================
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+  /Users/ASUS/Desktop/global-quant/tests/integration/test_nautilus_backtest.py:52: ChainedAssignmentError: A value is being set on a copy of a DataFrame or Series through chained assignment.
+  Such chained assignment never works to update the original DataFrame or Series, because the intermediate object on which we are setting values always behaves as a copy (due to Copy-on-Write).
+  
+  Try using '.loc[row_indexer, col_indexer] = value' instead, to perform the assignment in a single step.
+  
+  See the documentation for a more detailed explanation: https://pandas.pydata.org/pandas-docs/stable/user_guide/copy_on_write.html#chained-assignment
+    return BarDataWrangler(bar_type, instrument).process(frame)
+
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+  /Users/ASUS/Desktop/global-quant/tests/integration/test_nautilus_backtest.py:107: Pandas4Warning: Timestamp.utcnow is deprecated and will be removed in a future version. Use Timestamp.now('UTC') instead.
+    engine.run()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+150 passed, 4 warnings in 29.93s
