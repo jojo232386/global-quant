@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-07-30T07:20:00+08:00`
+Updated: `2026-08-06T06:30:00+08:00`
 
 ## Project
 
@@ -12,11 +12,11 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-`NT-GATE-1A`
+`NT-GATE-1A v1.1`
 
 ## Status
 
-`IN_PROGRESS`
+`STOP`
 
 Protocol: `protocols/NT_GATE_1A.md`
 
@@ -45,7 +45,7 @@ state.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Current evidence
+## Final evidence
 
 - shared Nautilus `Strategy` delegates to the shared event-sourced coordinator;
 - append-only hash-chained ledger and atomic checkpoint;
@@ -54,7 +54,20 @@ state.
 - process-level macOS network sandbox and Python call-stack guard;
 - machine arbiter that fails closed.
 
+The within-window machine candidate was `PASS`, but final review found three
+P1 blockers:
+
+- the real Strategy fill callback bypasses the durable execution inbox used by
+  the crash-recovery helper;
+- an unknown fill can raise before the durable `ANOMALY` and fail-closed path;
+- the required final independent review was not completed before the frozen
+  wall-clock deadline.
+
+The final machine verdict is `STOP`. See
+`reviews/GATE1A_FINAL_REVIEW.md`.
+
 ## Sole next action
 
-Commit the implementation snapshot, then generate clean offline evidence and a
-machine candidate verdict before WorkBuddy review.
+Wait for explicit human authorization of a newly versioned `NT-GATE-1A v1.2`.
+Gate 1B, market data, alpha research, parameter work, exchange connections, and
+live or Demo trading remain forbidden.

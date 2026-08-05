@@ -12,18 +12,23 @@ Clean research and execution-engineering repository for non-A-share markets.
   strategies are not migrated here.
 - No real-money trading is authorized.
 
-## Current gate
+## Gate status
 
-`NT-GATE-1A`: offline, no-alpha execution and recovery verification.
+`NT-GATE-1A v1.1`: `STOP`.
 
 The gate protocol is frozen in
 [`protocols/NT_GATE_1A.md`](protocols/NT_GATE_1A.md). Only this gate may be
-active. Passing it proves local engineering behavior only; it does not prove
-Binance behavior, strategy profitability, or live readiness.
+active. The first implementation produced strong offline evidence but failed
+final review because two real-Strategy persistence paths were not covered and
+the fixed review deadline expired. See
+[`reviews/GATE1A_FINAL_REVIEW.md`](reviews/GATE1A_FINAL_REVIEW.md).
+
+Gate 1B is forbidden. A new Gate 1A version requires explicit human
+authorization; no alpha, Demo, exchange, or live work is active.
 
 ## GitHub
 
-The intended remote is a private personal repository named `global-quant`.
-Remote creation is pending GitHub re-authentication. The local repository is
-the source of truth until a remote is added and verified.
-
+The private personal remote is
+[`jojo232386/global-quant`](https://github.com/jojo232386/global-quant).
+The local repository remains the execution source of truth; pushed commits are
+the off-machine audit trail.
