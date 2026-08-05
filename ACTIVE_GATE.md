@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T06:42:00+08:00`
+Updated: `2026-08-06T07:00:00+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`READY`
+`IN_PROGRESS`
 
 Protocol: `protocols/NT_GATE_1A_V1_2.md`
 
@@ -57,5 +57,4 @@ unknown fills.
 
 ## Sole next action
 
-Freeze the v1.2 protocol and callback oracle in Git before the start. Do not
-edit implementation until the frozen start time.
+Preserve failing real-Strategy callback tests before editing implementation.

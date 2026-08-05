@@ -1,0 +1,47 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+______ test_real_strategy_fill_survives_sigkill_and_applies_exactly_once _______
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-4/test_real_strategy_fill_surviv0')
+
+    def test_real_strategy_fill_survives_sigkill_and_applies_exactly_once(
+        tmp_path,
+    ) -> None:
+        expected = load_oracle()["real_strategy_fill_crash_recovery"]
+        completed = run_worker(tmp_path, "known_fill_crash")
+>       assert completed.returncode == -signal.SIGKILL, completed.stderr
+E       AssertionError: Traceback (most recent call last):
+E           File "/Users/ASUS/Desktop/global-quant/tests/helpers/strategy_callback_worker.py", line 169, in <module>
+E             raise SystemExit(main())
+E                              ^^^^^^
+E           File "/Users/ASUS/Desktop/global-quant/tests/helpers/strategy_callback_worker.py", line 154, in main
+E             strategy.on_order_filled(make_fill(payload))
+E           File "/Users/ASUS/Desktop/global-quant/src/global_quant/gate1a/strategy.py", line 331, in on_order_filled
+E             self._submit_pending_intents()
+E           File "/Users/ASUS/Desktop/global-quant/src/global_quant/gate1a/strategy.py", line 247, in _submit_pending_intents
+E             instrument = self.cache.instrument(instrument_id)
+E                          ^^^^^^^^^^^^^^^^^^^^^
+E         AttributeError: 'NoneType' object has no attribute 'instrument'
+E         
+E       assert 1 == -<Signals.SIGKILL: 9>
+E        +  where 1 = CompletedProcess(args=['/Users/ASUS/Desktop/global-quant/.venv/bin/python', '/Users/ASUS/Desktop/global-quant/tests/he...nt_id)\n                 ^^^^^^^^^^^^^^^^^^^^^\nAttributeError: \'NoneType\' object has no attribute \'instrument\'\n').returncode
+E        +  and   <Signals.SIGKILL: 9> = signal.SIGKILL
+
+tests/integration/test_strategy_callback_recovery.py:81: AssertionError
+____________ test_real_strategy_unknown_fill_is_durably_fail_closed ____________
+
+tmp_path = PosixPath('/private/var/folders/n7/d9fklwtj0qdf0lhcz_pgvrg80000gn/T/pytest-of-ASUS/pytest-4/test_real_strategy_unknown_fil0')
+
+    def test_real_strategy_unknown_fill_is_durably_fail_closed(tmp_path) -> None:
+        expected = load_oracle()["real_strategy_unknown_fill"]
+        completed = run_worker(tmp_path, "unknown_fill")
+        assert completed.returncode != 0
+>       assert expected["expected_callback_exception"] in completed.stderr
+E       assert 'UnexplainedEventError' in 'Traceback (most recent call last):\n  File "/Users/ASUS/Desktop/global-quant/tests/helpers/strategy_callback_worker.p...t_order_id)]\n             ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nKeyError: \'UNKNOWN-real-strategy-order\'\n'
+E        +  where 'Traceback (most recent call last):\n  File "/Users/ASUS/Desktop/global-quant/tests/helpers/strategy_callback_worker.p...t_order_id)]\n             ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nKeyError: \'UNKNOWN-real-strategy-order\'\n' = CompletedProcess(args=['/Users/ASUS/Desktop/global-quant/.venv/bin/python', '/Users/ASUS/Desktop/global-quant/tests/he..._order_id)]\n             ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nKeyError: \'UNKNOWN-real-strategy-order\'\n').stderr
+
+tests/integration/test_strategy_callback_recovery.py:117: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_strategy_callback_recovery.py::test_real_strategy_fill_survives_sigkill_and_applies_exactly_once
+FAILED tests/integration/test_strategy_callback_recovery.py::test_real_strategy_unknown_fill_is_durably_fail_closed
+2 failed in 2.54s
