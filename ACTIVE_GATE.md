@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T06:30:00+08:00`
+Updated: `2026-08-06T06:42:00+08:00`
 
 ## Project
 
@@ -12,28 +12,29 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-`NT-GATE-1A v1.1`
+`NT-GATE-1A v1.2`
 
 ## Status
 
-`STOP`
+`READY`
 
-Protocol: `protocols/NT_GATE_1A.md`
+Protocol: `protocols/NT_GATE_1A_V1_2.md`
 
-Frozen protocol commits:
+Parent STOP tag:
 
-- `617a5dafe201f7ca56c1148295753a8e57f8cbed`
-- `8638c1b0003b12215d01a9d867fc82dd39b5e224` (pre-implementation review fix)
+- `nt-gate-1a-v1.1-stop`
 
 Effective work limit: `12 hours`
 
-Wall-clock stop deadline: `2026-07-30T18:26:32+08:00`
+Frozen start: `2026-08-06T07:00:00+08:00`
+
+Wall-clock stop deadline: `2026-08-06T19:00:00+08:00`
 
 ## Sole objective
 
-Verify offline no-alpha strategy-source parity, append-only ledger replay,
-idempotent order handling, forced-crash recovery, and deterministic business
-state.
+Repair and falsify-test the two v1.1 production Strategy callback P1 findings:
+durable raw-fill persistence before apply, and durable fail-closed handling for
+unknown fills.
 
 ## Exclusions
 
@@ -45,29 +46,16 @@ state.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Final evidence
+## Frozen evidence contract
 
-- shared Nautilus `Strategy` delegates to the shared event-sourced coordinator;
-- append-only hash-chained ledger and atomic checkpoint;
-- twelve scenario tests;
-- eleven crash boundaries, including real `SIGKILL`;
-- process-level macOS network sandbox and Python call-stack guard;
-- machine arbiter that fails closed.
-
-The within-window machine candidate was `PASS`, but final review found three
-P1 blockers:
-
-- the real Strategy fill callback bypasses the durable execution inbox used by
-  the crash-recovery helper;
-- an unknown fill can raise before the durable `ANOMALY` and fail-closed path;
-- the required final independent review was not completed before the frozen
-  wall-clock deadline.
-
-The final machine verdict is `STOP`. See
-`reviews/GATE1A_FINAL_REVIEW.md`.
+- protocol and callback oracle committed before the start;
+- real Strategy callback and real `SIGKILL` boundary;
+- exact-once recovery and durable unknown-fill lockout;
+- freshly sampled tool versions;
+- all retained v1.1 offline tests and evidence;
+- WorkBuddy review and final machine verdict before the deadline.
 
 ## Sole next action
 
-Wait for explicit human authorization of a newly versioned `NT-GATE-1A v1.2`.
-Gate 1B, market data, alpha research, parameter work, exchange connections, and
-live or Demo trading remain forbidden.
+Freeze the v1.2 protocol and callback oracle in Git before the start. Do not
+edit implementation until the frozen start time.

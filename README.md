@@ -14,7 +14,8 @@ Clean research and execution-engineering repository for non-A-share markets.
 
 ## Gate status
 
-`NT-GATE-1A v1.1`: `STOP`.
+`NT-GATE-1A v1.2`: `READY`, frozen to start at
+`2026-08-06T07:00:00+08:00` and stop at `2026-08-06T19:00:00+08:00`.
 
 The gate protocol is frozen in
 [`protocols/NT_GATE_1A.md`](protocols/NT_GATE_1A.md). Only this gate may be
@@ -23,8 +24,10 @@ final review because two real-Strategy persistence paths were not covered and
 the fixed review deadline expired. See
 [`reviews/GATE1A_FINAL_REVIEW.md`](reviews/GATE1A_FINAL_REVIEW.md).
 
-Gate 1B is forbidden. A new Gate 1A version requires explicit human
-authorization; no alpha, Demo, exchange, or live work is active.
+Version 1.1 remains frozen as `STOP` under tag
+`nt-gate-1a-v1.1-stop`. Version 1.2 is authorized only to repair and test the
+two real Strategy callback P1 findings. Gate 1B remains forbidden; no alpha,
+Demo, exchange, or live work is active.
 
 ## GitHub
 
