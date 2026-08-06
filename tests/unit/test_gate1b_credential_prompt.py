@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import io
+import os
 from pathlib import Path
 
 import pytest
@@ -84,12 +84,19 @@ def test_prompted_preflight_injects_secrets_only_into_in_process_mapping(
     }
 
 
-def test_prompted_preflight_reads_ed25519_private_key_in_one_hidden_capture(
+def test_prompted_preflight_reads_ed25519_private_key_from_secure_file(
     tmp_path,
     monkeypatch,
 ) -> None:
     captured: dict[str, str] = {}
-    private_key_prompts = 0
+    private_key = tmp_path / "demo.pem"
+    private_key.write_text(
+        "-----BEGIN PRIVATE KEY-----\n"
+        "base64-private-material-test-only\n"
+        "-----END PRIVATE KEY-----\n",
+        encoding="ascii",
+    )
+    private_key.chmod(0o600)
 
     def fake_run_preflight(*, environ, confirm_demo_only, evidence_dir):
         captured.update(environ)
@@ -99,22 +106,13 @@ def test_prompted_preflight_reads_ed25519_private_key_in_one_hidden_capture(
 
     monkeypatch.setattr(credential_prompt, "run_preflight", fake_run_preflight)
 
-    def prompt_private_key() -> str:
-        nonlocal private_key_prompts
-        private_key_prompts += 1
-        return (
-            "-----BEGIN PRIVATE KEY-----\n"
-            "base64-private-material-test-only\n"
-            "-----END PRIVATE KEY-----\n"
-        )
-
     exit_code, _ = credential_prompt.run_prompted_preflight(
         evidence_dir=tmp_path,
         parent_environ={},
         prompt_secret=lambda _label: "ed25519-demo-key",
-        prompt_private_key=prompt_private_key,
         input_is_tty=True,
         key_type="ed25519",
+        private_key_file=private_key,
     )
 
     assert exit_code == 0
@@ -124,7 +122,17 @@ def test_prompted_preflight_reads_ed25519_private_key_in_one_hidden_capture(
         "base64-private-material-test-only\n"
         "-----END PRIVATE KEY-----\n"
     )
-    assert private_key_prompts == 1
+
+
+def test_ed25519_private_key_file_is_required(tmp_path) -> None:
+    with pytest.raises(CredentialPromptError, match="ED25519_PRIVATE_KEY_FILE_REQUIRED"):
+        credential_prompt.run_prompted_preflight(
+            evidence_dir=tmp_path,
+            parent_environ={},
+            prompt_secret=lambda _label: "ed25519-demo-key",
+            input_is_tty=True,
+            key_type="ed25519",
+        )
 
 
 @pytest.mark.parametrize(
@@ -141,70 +149,67 @@ def test_ed25519_private_key_requires_bounded_complete_pem(value) -> None:
         credential_prompt.normalize_ed25519_private_key(value)
 
 
-def test_ed25519_private_key_capture_keeps_echo_disabled_for_entire_pem(monkeypatch) -> None:
-    class FakeTerminal(io.StringIO):
-        def isatty(self) -> bool:
-            return True
-
-        def fileno(self) -> int:
-            return 123
-
-    private_key = (
+def test_ed25519_private_key_file_refuses_insecure_permissions(tmp_path) -> None:
+    private_key = tmp_path / "insecure.pem"
+    private_key.write_text(
         "-----BEGIN PRIVATE KEY-----\n"
-        "base64-private-material-test-only\n"
-        "-----END PRIVATE KEY-----\n"
+        "body\n"
+        "-----END PRIVATE KEY-----\n",
+        encoding="ascii",
     )
-    input_stream = FakeTerminal(private_key)
-    output_stream = io.StringIO()
-    original = [0, 0, 0, credential_prompt.termios.ECHO | 8, 0, 0]
-    changes: list[tuple[int, int, list[int]]] = []
-    monkeypatch.setattr(credential_prompt.termios, "tcgetattr", lambda _fd: original.copy())
+    private_key.chmod(0o644)
+
+    with pytest.raises(CredentialPromptError, match="INSECURE_PRIVATE_KEY_PERMISSIONS"):
+        credential_prompt.read_ed25519_private_key(private_key)
+
+
+def test_ed25519_private_key_file_refuses_symlink(tmp_path) -> None:
+    target = tmp_path / "target.pem"
+    target.write_text(
+        "-----BEGIN PRIVATE KEY-----\nbody\n-----END PRIVATE KEY-----\n",
+        encoding="ascii",
+    )
+    target.chmod(0o600)
+    link = tmp_path / "link.pem"
+    link.symlink_to(target)
+
+    with pytest.raises(CredentialPromptError, match="PRIVATE_KEY_MUST_BE_REGULAR_FILE"):
+        credential_prompt.read_ed25519_private_key(link)
+
+
+def test_ed25519_private_key_file_must_belong_to_current_user(tmp_path, monkeypatch) -> None:
+    private_key = tmp_path / "foreign.pem"
+    private_key.write_text(
+        "-----BEGIN PRIVATE KEY-----\nbody\n-----END PRIVATE KEY-----\n",
+        encoding="ascii",
+    )
+    private_key.chmod(0o600)
+    monkeypatch.setattr(os, "getuid", lambda: private_key.stat().st_uid + 1)
+
+    with pytest.raises(CredentialPromptError, match="PRIVATE_KEY_OWNER_MISMATCH"):
+        credential_prompt.read_ed25519_private_key(private_key)
+
+
+def test_ed25519_private_key_file_refuses_oversize_content(tmp_path) -> None:
+    private_key = tmp_path / "oversize.pem"
+    private_key.write_bytes(b"x" * (credential_prompt.MAX_PRIVATE_KEY_BYTES + 1))
+    private_key.chmod(0o600)
+
+    with pytest.raises(CredentialPromptError, match="PRIVATE_KEY_SIZE_INVALID"):
+        credential_prompt.read_ed25519_private_key(private_key)
+
+
+def test_core_dump_guard_sets_hard_and_soft_limits_to_zero(monkeypatch) -> None:
+    captured: list[tuple[int, tuple[int, int]]] = []
     monkeypatch.setattr(
-        credential_prompt.termios,
-        "tcsetattr",
-        lambda fd, when, attrs: changes.append((fd, when, attrs.copy())),
+        credential_prompt.resource,
+        "setrlimit",
+        lambda resource_id, limits: captured.append((resource_id, limits)),
     )
 
-    captured = credential_prompt.read_hidden_ed25519_private_key(
-        input_stream=input_stream,
-        output_stream=output_stream,
-    )
+    credential_prompt.disable_core_dumps()
 
-    assert captured == private_key
-    assert len(changes) == 2
-    assert changes[0][2][3] & credential_prompt.termios.ECHO == 0
-    assert changes[1][2] == original
-    assert "base64-private-material-test-only" not in output_stream.getvalue()
-
-
-def test_ed25519_private_key_capture_restores_echo_after_invalid_input(monkeypatch) -> None:
-    class FakeTerminal(io.StringIO):
-        def isatty(self) -> bool:
-            return True
-
-        def fileno(self) -> int:
-            return 456
-
-    input_stream = FakeTerminal("invalid\n")
-    output_stream = io.StringIO()
-    original = [0, 0, 0, credential_prompt.termios.ECHO | 8, 0, 0]
-    changes: list[list[int]] = []
-    monkeypatch.setattr(credential_prompt.termios, "tcgetattr", lambda _fd: original.copy())
-    monkeypatch.setattr(
-        credential_prompt.termios,
-        "tcsetattr",
-        lambda _fd, _when, attrs: changes.append(attrs.copy()),
-    )
-
-    with pytest.raises(CredentialPromptError, match="INVALID_ED25519_PRIVATE_KEY"):
-        credential_prompt.read_hidden_ed25519_private_key(
-            input_stream=input_stream,
-            output_stream=output_stream,
-        )
-
-    assert len(changes) == 2
-    assert changes[0][3] & credential_prompt.termios.ECHO == 0
-    assert changes[1] == original
+    assert captured == [(credential_prompt.resource.RLIMIT_CORE, (0, 0))]
 
 
 @pytest.mark.parametrize("answers", [("", "secret"), ("key", "")])

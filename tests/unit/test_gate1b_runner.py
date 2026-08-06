@@ -101,11 +101,11 @@ def test_successful_preflight_writes_only_sanitized_evidence(tmp_path, monkeypat
     assert "sensitive-demo-secret" not in encoded
 
 
-def test_default_evidence_and_config_hash_bind_gate1b_v1_3() -> None:
+def test_default_evidence_and_config_hash_bind_gate1b_v1_4() -> None:
     evidence_dir = runner.default_evidence_dir()
-    expected_protocol = runner.PROJECT_ROOT / "protocols" / "NT_GATE_1B_V1_3.md"
+    expected_protocol = runner.PROJECT_ROOT / "protocols" / "NT_GATE_1B_V1_4.md"
 
-    assert "gate1b-v1.3-" in evidence_dir.name
+    assert "gate1b-v1.4-" in evidence_dir.name
     assert expected_protocol.is_file()
     assert isinstance(Path(evidence_dir), Path)
     assert runner._config_hash() == runner._digest_files(
