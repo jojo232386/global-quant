@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T13:40:00+08:00`
+Updated: `2026-08-06T15:02:16+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`ACTIVE`
+`STOP`
 
 Protocol: `protocols/NT_GATE_1B_V1_3.md`
 
@@ -34,8 +34,9 @@ Parent PASS tag:
 
 ## Last closed result
 
-`NT-GATE-1B v1.2` remains `INCONCLUSIVE/MISSING_DEMO_CREDENTIALS` at tag
-`nt-gate-1b-v1.2-inconclusive`.
+`NT-GATE-1B v1.3` stopped before network access because the private-key input
+was invalid and the Demo API key identifier entered agent context during
+diagnosis. The affected Demo key was deleted. Signed requests and orders: `0`.
 
 ## Exclusions
 
@@ -46,21 +47,9 @@ Parent PASS tag:
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Activation readiness
-
-- main Binance login was confirmed;
-- the official `demo.binance.com` trading and Demo API Management pages render;
-- a Demo-only API key was created by the user;
-- the key and secret were not read, copied, logged, hashed, or committed;
-- the interactive in-process prompt path passed six focused tests and the full
-  offline suite passed with `198 passed`;
-- live and Testnet Binance variables are absent;
-- no signed request, account query, node connection, or order occurred;
-- the protocol must be committed and tagged before the frozen start.
-
 ## Sole next action
 
-Commit and annotate-tag the v1.3 protocol before its frozen start. Then run
-only the interactive read-only signed preflight. Do not start the Demo node or
-submit an order unless the preflight returns PASS and its sanitized evidence
-passes review.
+Freeze the v1.3 STOP evidence and tag. Then preregister a newly timed v1.4
+protocol which reads the private key only from an owner-only local file. Do not
+connect, query the account, start the Demo node, submit an order, or enter Gate
+2 until the new protocol is committed and tagged.

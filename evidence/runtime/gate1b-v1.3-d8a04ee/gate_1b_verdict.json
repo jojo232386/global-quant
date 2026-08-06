@@ -1,0 +1,60 @@
+{
+  "action": "DO_NOT_ENTER_GATE_2; revoke the affected Demo key and retry only under a separately frozen file-based credential protocol",
+  "account_preflight": {
+    "account_queried": false,
+    "signed_request_sent": false,
+    "status": "NOT_RUN"
+  },
+  "branch": "codex/nt-gate1b-v1.3-prep",
+  "completed_at": "2026-08-06T07:02:16Z",
+  "credential_containment": {
+    "api_key_identifier_entered_agent_context": true,
+    "api_key_value_retained_in_repository_or_evidence": false,
+    "demo_key_deleted_from_api_management": true,
+    "deletion_check": {
+      "delete_button_count": 0,
+      "key_label_count": 0,
+      "method": "authenticated Demo API Management DOM count without retaining credential values"
+    },
+    "private_key_entered_agent_context": false,
+    "private_key_retained_in_repository_or_evidence": false
+  },
+  "dirty_worktree_at_failed_attempt": false,
+  "economic_event_summary": {
+    "fees": 0,
+    "fills": 0,
+    "funding": 0
+  },
+  "frozen_start": "2026-08-06T13:40:00+08:00",
+  "gate": "NT-GATE-1B",
+  "order_summary": {
+    "canceled": 0,
+    "filled": 0,
+    "submitted": 0
+  },
+  "position_summary": {
+    "demo_connection_opened": false,
+    "known_position_change": false
+  },
+  "protocol_commit": "c7fb5242bc31053651e3e176e15e91ca681d2469",
+  "protocol_tag": "nt-gate-1b-v1.3-protocol",
+  "protocol_version": "1.3",
+  "reason_codes": [
+    "DEMO_API_KEY_IDENTIFIER_EXPOSED_TO_AGENT_CONTEXT",
+    "INVALID_ED25519_PRIVATE_KEY_INPUT"
+  ],
+  "repository": "/Users/ASUS/Desktop/global-quant",
+  "scope_statement": "Execution engineering only; no alpha, profitability, or live-readiness claim",
+  "secondary_review": {
+    "approval_equivalent": false,
+    "claude_acp": "TIMED_OUT_WITHOUT_CONCLUSION",
+    "qwen_acp": "RUNTIME_ERROR_WITHOUT_CONCLUSION"
+  },
+  "test_results": {
+    "credential_focused": "32 passed",
+    "full_suite": "206 passed, 5 warnings"
+  },
+  "tested_commit": "d8a04eeb4cd94c1d4222b546c562dd92289e5068",
+  "verdict": "STOP",
+  "wall_clock_deadline": "2026-08-07T01:40:00+08:00"
+}
