@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_SCRIPT = ROOT / "scripts" / "build_gate_manifest.py"
 DECIDE_SCRIPT = ROOT / "scripts" / "decide_gate.py"
+GATE1B_DECIDE_SCRIPT = ROOT / "scripts" / "decide_gate_1b.py"
 
 
 def load_script(path: Path, name: str):
@@ -86,3 +87,28 @@ def test_verdict_is_written_with_detached_checksum(tmp_path) -> None:
         verdict_path,
         checksum_path,
     ) == hashlib.sha256(verdict_path.read_bytes()).hexdigest()
+
+
+def test_gate1b_secondary_review_marks_runtime_failure_as_partial(tmp_path) -> None:
+    decider = load_script(GATE1B_DECIDE_SCRIPT, "gate1b_secondary_review_failure")
+    review_path = tmp_path / "qwen_review.txt"
+    review_path.write_text(
+        "partial checks completed\n[error] RUNTIME Method not found\n",
+        encoding="utf-8",
+    )
+
+    result = decider._secondary_review(review_path)
+
+    assert result["status"] == "FAILED_RUNTIME_PARTIAL"
+    assert result["approval_equivalent"] is False
+
+
+def test_gate1b_secondary_review_never_counts_as_workbuddy_approval(tmp_path) -> None:
+    decider = load_script(GATE1B_DECIDE_SCRIPT, "gate1b_secondary_review_recorded")
+    review_path = tmp_path / "qwen_review.txt"
+    review_path.write_text("independent notes without a runtime error\n", encoding="utf-8")
+
+    result = decider._secondary_review(review_path)
+
+    assert result["status"] == "RECORDED"
+    assert result["approval_equivalent"] is False

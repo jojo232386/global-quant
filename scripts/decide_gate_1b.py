@@ -194,10 +194,17 @@ def _software_versions() -> dict[str, str]:
 
 def _secondary_review(path: Path) -> dict[str, object]:
     if not path.exists():
-        return {"reviewer": "Qwen Code via ACP", "status": "NOT_OBTAINED"}
+        return {
+            "reviewer": "Qwen Code via ACP",
+            "status": "NOT_OBTAINED",
+            "approval_equivalent": False,
+        }
+    content = path.read_text(encoding="utf-8")
+    runtime_failed = "[error] RUNTIME" in content or "Method not found" in content
     return {
         "reviewer": "Qwen Code via ACP",
-        "status": "RECORDED",
+        "status": "FAILED_RUNTIME_PARTIAL" if runtime_failed else "RECORDED",
+        "approval_equivalent": False,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "path": str(path),
     }
