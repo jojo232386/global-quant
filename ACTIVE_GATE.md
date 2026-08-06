@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T08:00:00+08:00`
+Updated: `2026-08-06T08:10:00+08:00`
 
 ## Project
 
@@ -12,13 +12,13 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-`NT-GATE-1B v1.1`
+`NT-GATE-1B v1.2`
 
 ## Status
 
 `READY`
 
-Protocol: `protocols/NT_GATE_1B_V1_1.md`
+Protocol: `protocols/NT_GATE_1B_V1_2.md`
 
 Parent PASS tag:
 
@@ -26,9 +26,9 @@ Parent PASS tag:
 
 Effective work limit: `12 hours`
 
-Frozen start: `2026-08-06T08:10:00+08:00`
+Frozen start: `2026-08-06T08:20:00+08:00`
 
-Wall-clock stop deadline: `2026-08-06T20:10:00+08:00`
+Wall-clock stop deadline: `2026-08-06T20:20:00+08:00`
 
 ## Sole objective
 
@@ -53,6 +53,9 @@ cancel/fill races, restart reconciliation, fees, and funding.
   `BinanceAccountType.USDT_FUTURES`;
 - pre-implementation review found and v1.1 records the pinned adapter's exact
   authenticated Demo WS API route at `testnet.binancefuture.com/ws-fapi/v1`;
+- v1.2 raises only the non-economic order-count ceiling to 32 and freezes a
+  bounded 0.10% one-instrument protection-trigger probe so the mandatory
+  protection-fill claim is observable;
 - all Demo and live Binance credential variables were absent at protocol draft
   time;
 - no Binance connection or order has occurred under Gate 1B.
