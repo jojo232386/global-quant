@@ -40,7 +40,10 @@ def test_trading_node_config_is_demo_reconciled_and_risk_bounded(tmp_path) -> No
     assert config.exec_engine.open_check_open_only is False
     assert config.exec_engine.graceful_shutdown_on_exception is True
     assert config.risk_engine.bypass is False
-    assert config.risk_engine.max_notional_per_order == {"USDT": 200}
+    assert config.risk_engine.max_notional_per_order == {
+        "BTCUSDT-PERP.BINANCE": 200,
+        "ETHUSDT-PERP.BINANCE": 200,
+    }
     assert config.risk_engine.max_order_submit_rate == "32/12:00:00"
 
 
