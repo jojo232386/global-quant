@@ -1,0 +1,25 @@
+........................................................................ [ 37%]
+........................................................................ [ 75%]
+................................................                         [100%]
+=============================== warnings summary ===============================
+tests/integration/test_gate1b_node_build.py::test_node_builds_offline_with_shared_strategy_and_does_not_connect
+  /Users/ASUS/Desktop/global-quant/.venv/lib/python3.12/site-packages/nautilus_trader/live/node.py:67: DeprecationWarning: There is no current event loop
+    loop = asyncio.get_event_loop()
+
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+  /Users/ASUS/Desktop/global-quant/tests/integration/test_nautilus_backtest.py:52: ChainedAssignmentError: A value is being set on a copy of a DataFrame or Series through chained assignment.
+  Such chained assignment never works to update the original DataFrame or Series, because the intermediate object on which we are setting values always behaves as a copy (due to Copy-on-Write).
+
+  Try using '.loc[row_indexer, col_indexer] = value' instead, to perform the assignment in a single step.
+
+  See the documentation for a more detailed explanation: https://pandas.pydata.org/pandas-docs/stable/user_guide/copy_on_write.html#chained-assignment
+    return BarDataWrangler(bar_type, instrument).process(frame)
+
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+tests/integration/test_nautilus_backtest.py::test_same_strategy_source_runs_real_nautilus_backtest_and_finishes_flat
+  /Users/ASUS/Desktop/global-quant/tests/integration/test_nautilus_backtest.py:107: Pandas4Warning: Timestamp.utcnow is deprecated and will be removed in a future version. Use Timestamp.now('UTC') instead.
+    engine.run()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+192 passed, 5 warnings in 50.39s

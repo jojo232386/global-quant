@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T08:20:00+08:00`
+Updated: `2026-08-06T09:03:35+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`ACTIVE`
+`CLOSED — INCONCLUSIVE`
 
 Protocol: `protocols/NT_GATE_1B_V1_2.md`
 
@@ -45,26 +45,25 @@ cancel/fill races, restart reconciliation, fees, and funding.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Preflight state
+## Final state
 
-- protocol authorized by the user;
-- frozen protocol commit: `35e849d`;
-- frozen protocol tag: `nt-gate-1b-v1.2-protocol`;
-- private repository and clean parent Gate verified;
-- NautilusTrader `1.230.0` exposes `BinanceEnvironment.DEMO` and
-  `BinanceAccountType.USDT_FUTURES`;
-- pre-implementation review found and v1.1 records the pinned adapter's exact
-  authenticated Demo WS API route at `testnet.binancefuture.com/ws-fapi/v1`;
-- v1.2 raises only the non-economic order-count ceiling to 32 and freezes a
-  bounded 0.10% one-instrument protection-trigger probe so the mandatory
-  protection-fill claim is observable;
-- all Demo and live Binance credential variables were absent at protocol draft
-  time;
-- no Binance connection or order has occurred under Gate 1B.
+- machine verdict: `INCONCLUSIVE`;
+- sole reason: `MISSING_DEMO_CREDENTIALS`;
+- tested commit: `c163b1588073559403e3009f3063066d66773620`;
+- final offline result: `192 passed`, with network denied;
+- public Demo probe used no credentials and submitted no order;
+- authenticated Demo connection, mandatory scenario matrix, restart matrix,
+  funding reconciliation, and final-flat proof were not run;
+- WorkBuddy review was not obtained; Qwen ACP produced only a partial review
+  before its runtime failed, and is not approval-equivalent;
+- no Binance account was queried and no order, fill, fee, funding event,
+  position, or balance change occurred.
+
+Curated evidence: `evidence/nt_gate_1b_v1_2/`
 
 ## Sole next action
 
-Commit and tag this protocol before the frozen start. Then implement and run
-only the bounded Demo safety and execution matrix. Missing Demo credentials may
-produce only `INCONCLUSIVE`; it may not be bypassed with production or Testnet
-credentials.
+None is active. Preserve this result. A retry requires explicit user
+authorization, a new protocol version, a new frozen start, and Demo-only
+credentials. Do not enter Gate 2, alpha research, Demo execution, or real-money
+work from this verdict.
