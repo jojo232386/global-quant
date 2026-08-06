@@ -2,7 +2,7 @@
 
 Protocol version: `1.3-draft`
 
-Status: `DRAFT — NOT ACTIVE`
+Status: `SUPERSEDED BY NT_GATE_1B_V1_3.md`
 
 Prepared: `2026-08-06`
 
@@ -28,7 +28,7 @@ v1.2 verdict.
 
 All items must be true before this draft can be frozen:
 
-1. The official `https://www.binance.com/en/demo-trading` portal renders for
+1. The official `https://demo.binance.com/` portal renders for
    the logged-in account and exposes Demo API Management.
 2. A Demo-only API key exists. A live-account or legacy Testnet key is not an
    acceptable substitute.

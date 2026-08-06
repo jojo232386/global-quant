@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T12:54:00+08:00`
+Updated: `2026-08-06T13:40:00+08:00`
 
 ## Project
 
@@ -12,24 +12,25 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-None
+`NT-GATE-1B v1.3`
 
 ## Status
 
-`NO ACTIVE GATE`
+`ACTIVE`
 
-Last closed protocol: `protocols/NT_GATE_1B_V1_2.md`
+Protocol: `protocols/NT_GATE_1B_V1_3.md`
 
-Prepared candidate: `protocols/NT_GATE_1B_V1_3_DRAFT.md`
+Parent closed tag: `nt-gate-1b-v1.2-inconclusive`
 
-Candidate status: `DRAFT — NOT ACTIVE`
+Frozen start: `2026-08-06T13:40:00+08:00`
+
+Wall-clock stop deadline: `2026-08-07T01:40:00+08:00`
+
+Effective work limit: `12 hours`
 
 Parent PASS tag:
 
 - `nt-gate-1a-v1.2-pass`
-
-The v1.3 clock has not started. It may start only after its activation
-prerequisites pass and the final protocol is committed and tagged.
 
 ## Last closed result
 
@@ -45,18 +46,21 @@ prerequisites pass and the final protocol is committed and tagged.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Candidate readiness
+## Activation readiness
 
 - main Binance login was confirmed;
-- the official Demo Trading portal still returned a generic error page;
-- Demo API credentials are absent from the project runtime;
+- the official `demo.binance.com` trading and Demo API Management pages render;
+- a Demo-only API key was created by the user;
+- the key and secret were not read, copied, logged, hashed, or committed;
+- the interactive in-process prompt path passed six focused tests and the full
+  offline suite passed with `198 passed`;
 - live and Testnet Binance variables are absent;
 - no signed request, account query, node connection, or order occurred;
-- v1.3 is only a draft and cannot inherit or extend the v1.2 deadline.
+- the protocol must be committed and tagged before the frozen start.
 
 ## Sole next action
 
-Restore access to the official Demo Trading portal and create a Demo-only API
-key through its API Management page. Do not use the ordinary live-account API
-page, do not send credentials through chat, and do not freeze v1.3 until the
-secure injection path and all activation prerequisites are ready.
+Commit and annotate-tag the v1.3 protocol before its frozen start. Then run
+only the interactive read-only signed preflight. Do not start the Demo node or
+submit an order unless the preflight returns PASS and its sanitized evidence
+passes review.
