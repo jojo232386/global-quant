@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T09:03:35+08:00`
+Updated: `2026-08-06T12:54:00+08:00`
 
 ## Project
 
@@ -12,29 +12,29 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-`NT-GATE-1B v1.2`
+None
 
 ## Status
 
-`CLOSED — INCONCLUSIVE`
+`NO ACTIVE GATE`
 
-Protocol: `protocols/NT_GATE_1B_V1_2.md`
+Last closed protocol: `protocols/NT_GATE_1B_V1_2.md`
+
+Prepared candidate: `protocols/NT_GATE_1B_V1_3_DRAFT.md`
+
+Candidate status: `DRAFT — NOT ACTIVE`
 
 Parent PASS tag:
 
 - `nt-gate-1a-v1.2-pass`
 
-Effective work limit: `12 hours`
+The v1.3 clock has not started. It may start only after its activation
+prerequisites pass and the final protocol is committed and tagged.
 
-Frozen start: `2026-08-06T08:20:00+08:00`
+## Last closed result
 
-Wall-clock stop deadline: `2026-08-06T20:20:00+08:00`
-
-## Sole objective
-
-Falsify-test the shared Strategy, coordinator, ledger, and recovery model
-against actual Binance USD-M Futures Demo acknowledgements, protection orders,
-cancel/fill races, restart reconciliation, fees, and funding.
+`NT-GATE-1B v1.2` remains `INCONCLUSIVE/MISSING_DEMO_CREDENTIALS` at tag
+`nt-gate-1b-v1.2-inconclusive`.
 
 ## Exclusions
 
@@ -45,25 +45,18 @@ cancel/fill races, restart reconciliation, fees, and funding.
 - no stopped legacy strategy;
 - no A-share project access.
 
-## Final state
+## Candidate readiness
 
-- machine verdict: `INCONCLUSIVE`;
-- sole reason: `MISSING_DEMO_CREDENTIALS`;
-- tested commit: `c163b1588073559403e3009f3063066d66773620`;
-- final offline result: `192 passed`, with network denied;
-- public Demo probe used no credentials and submitted no order;
-- authenticated Demo connection, mandatory scenario matrix, restart matrix,
-  funding reconciliation, and final-flat proof were not run;
-- WorkBuddy review was not obtained; Qwen ACP produced only a partial review
-  before its runtime failed, and is not approval-equivalent;
-- no Binance account was queried and no order, fill, fee, funding event,
-  position, or balance change occurred.
-
-Curated evidence: `evidence/nt_gate_1b_v1_2/`
+- main Binance login was confirmed;
+- the official Demo Trading portal still returned a generic error page;
+- Demo API credentials are absent from the project runtime;
+- live and Testnet Binance variables are absent;
+- no signed request, account query, node connection, or order occurred;
+- v1.3 is only a draft and cannot inherit or extend the v1.2 deadline.
 
 ## Sole next action
 
-None is active. Preserve this result. A retry requires explicit user
-authorization, a new protocol version, a new frozen start, and Demo-only
-credentials. Do not enter Gate 2, alpha research, Demo execution, or real-money
-work from this verdict.
+Restore access to the official Demo Trading portal and create a Demo-only API
+key through its API Management page. Do not use the ordinary live-account API
+page, do not send credentials through chat, and do not freeze v1.3 until the
+secure injection path and all activation prerequisites are ready.
