@@ -38,6 +38,7 @@ class FixedTargetConfig(StrategyConfig, frozen=True):
     decision_interval_bars: int = 2
     protection_stop_fraction: Decimal = Decimal("0.20")
     protection_take_fraction: Decimal = Decimal("0.20")
+    max_notional_per_instrument: Decimal | None = None
 
 
 class FixedTargetStrategy(Strategy):
@@ -53,6 +54,11 @@ class FixedTargetStrategy(Strategy):
 
     def __init__(self, config: FixedTargetConfig) -> None:
         super().__init__(config)
+        if (
+            config.max_notional_per_instrument is not None
+            and config.max_notional_per_instrument <= 0
+        ):
+            raise ValueError("max_notional_per_instrument must be positive")
         self._gate_config = config
         self._step = 0
         self._bar_count = 0
@@ -166,10 +172,30 @@ class FixedTargetStrategy(Strategy):
             raise RuntimeError(f"instrument unavailable: {instrument_id}")
         price = self._last_prices[str(instrument_id)]
         raw_quantity = (
-            self._gate_config.initial_wallet * abs(weight) / price
+            self.target_notional_for_weight(
+                initial_wallet=self._gate_config.initial_wallet,
+                weight=weight,
+                max_notional=self._gate_config.max_notional_per_instrument,
+            )
+            / price
         )
         quantity = instrument.make_qty(raw_quantity).as_decimal()
         return quantity if weight > 0 else -quantity
+
+    @staticmethod
+    def target_notional_for_weight(
+        *,
+        initial_wallet: Decimal,
+        weight: Decimal,
+        max_notional: Decimal | None,
+    ) -> Decimal:
+        target = Decimal(initial_wallet) * abs(Decimal(weight))
+        if max_notional is None:
+            return target
+        cap = Decimal(max_notional)
+        if cap <= 0:
+            raise ValueError("max_notional must be positive")
+        return min(target, cap)
 
     def _all_prices_available(self) -> bool:
         return all(

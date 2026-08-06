@@ -91,11 +91,13 @@ class EventSourcedCoordinator:
         self.protection_groups: dict[str, set[str]] = {}
         self.realized_pnl = Decimal("0")
         self.cumulative_fees = Decimal("0")
+        self.cumulative_funding = Decimal("0")
         self.wallet_balance = self.initial_wallet
         self.fail_closed = False
         self._seen_fill_ids: set[str] = set()
         self._seen_source_event_ids: set[str] = set()
         self._fill_fingerprints: dict[str, tuple[str, str, str, str, str]] = {}
+        self._funding_fingerprints: dict[str, tuple[str, str]] = {}
         self._transition_sources: dict[
             str,
             tuple[str, str, str | None],
@@ -711,6 +713,54 @@ class EventSourcedCoordinator:
         )
         self._append_and_reduce(event)
 
+    def apply_funding(
+        self,
+        *,
+        source_event_id: str,
+        instrument_id: str,
+        amount: Decimal,
+    ) -> bool:
+        if self.fail_closed:
+            raise UnexplainedEventError("coordinator is fail-closed")
+        funding = self._decimal(amount)
+        fingerprint = (instrument_id, str(funding))
+        existing = self._funding_fingerprints.get(source_event_id)
+        if existing is not None:
+            if existing == fingerprint:
+                return False
+            self._record_anomaly(
+                f"conflicting funding event {source_event_id}",
+                instrument_id=instrument_id,
+                source_event_id=source_event_id,
+            )
+            raise UnexplainedEventError("conflicting funding event")
+        if source_event_id in self._seen_source_event_ids:
+            self._record_anomaly(
+                f"funding source collides with another event {source_event_id}",
+                instrument_id=instrument_id,
+                source_event_id=source_event_id,
+            )
+            raise UnexplainedEventError("funding source event collision")
+        wallet_after = self.wallet_balance + funding
+        event = self._event(
+            event_type="FUNDING",
+            event_id=(
+                "funding:"
+                + hashlib.sha256(source_event_id.encode()).hexdigest()[:24]
+            ),
+            source_event_id=source_event_id,
+            dedupe_key=f"funding:{source_event_id}",
+            instrument_id=instrument_id,
+            correlation_id=source_event_id,
+            causation_id=source_event_id,
+            balance_transition={
+                "amount": str(funding),
+                "wallet_before": str(self.wallet_balance),
+                "wallet_after": str(wallet_after),
+            },
+        )
+        return self._append_and_reduce(event)
+
     def reconcile_account_snapshot(
         self,
         *,
@@ -917,6 +967,21 @@ class EventSourcedCoordinator:
                 else "PARTIALLY_FILLED"
             )
             return
+        if event.event_type == "FUNDING":
+            assert event.source_event_id and event.instrument_id
+            assert event.balance_transition
+            amount = Decimal(event.balance_transition["amount"])
+            wallet_before = Decimal(event.balance_transition["wallet_before"])
+            wallet_after = Decimal(event.balance_transition["wallet_after"])
+            if wallet_before != self.wallet_balance or wallet_after != wallet_before + amount:
+                raise UnexplainedEventError("funding economic transition mismatch")
+            self._funding_fingerprints[event.source_event_id] = (
+                event.instrument_id,
+                str(amount),
+            )
+            self.cumulative_funding += amount
+            self.wallet_balance = wallet_after
+            return
         if event.event_type == "MARK_PRICE":
             assert event.instrument_id and event.fill
             self.marks[event.instrument_id] = Decimal(event.fill["price"])
@@ -958,7 +1023,10 @@ class EventSourcedCoordinator:
         self.marks[order.instrument_id] = price
         self.cumulative_fees += fee
         self.wallet_balance = (
-            self.initial_wallet + self.realized_pnl - self.cumulative_fees
+            self.initial_wallet
+            + self.realized_pnl
+            - self.cumulative_fees
+            + self.cumulative_funding
         )
 
     def active_orders(self, instrument_id: str | None = None) -> list[OrderState]:
@@ -983,7 +1051,10 @@ class EventSourcedCoordinator:
 
     def assert_invariants(self) -> None:
         expected_wallet = (
-            self.initial_wallet + self.realized_pnl - self.cumulative_fees
+            self.initial_wallet
+            + self.realized_pnl
+            - self.cumulative_fees
+            + self.cumulative_funding
         )
         if self.wallet_balance != expected_wallet:
             raise AssertionError("wallet accounting identity failed")
@@ -1006,6 +1077,11 @@ class EventSourcedCoordinator:
             "wallet_balance": str(self.wallet_balance),
             "realized_pnl": str(self.realized_pnl),
             "cumulative_fees": str(self.cumulative_fees),
+            **(
+                {"cumulative_funding": str(self.cumulative_funding)}
+                if self.cumulative_funding != 0
+                else {}
+            ),
             "unrealized_pnl": str(self.unrealized_pnl()),
             "equity": str(self.equity()),
             "fail_closed": self.fail_closed,

@@ -67,6 +67,12 @@ _REQUIRED_EVENT_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("position_transition", "signed_fill_quantity"),
         ("balance_transition", "fee"),
     ),
+    "FUNDING": (
+        ("instrument_id",),
+        ("balance_transition", "amount"),
+        ("balance_transition", "wallet_before"),
+        ("balance_transition", "wallet_after"),
+    ),
     "PROTECTION_RESIZE": (
         ("instrument_id",),
         ("client_order_id",),
@@ -106,6 +112,11 @@ _DECIMAL_PATHS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("position_transition", "quantity_before"),
         ("position_transition", "signed_fill_quantity"),
         ("balance_transition", "fee"),
+    ),
+    "FUNDING": (
+        ("balance_transition", "amount"),
+        ("balance_transition", "wallet_before"),
+        ("balance_transition", "wallet_after"),
     ),
     "PROTECTION_RESIZE": (
         ("order_transition", "from_quantity"),
