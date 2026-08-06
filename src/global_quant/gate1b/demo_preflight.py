@@ -18,6 +18,7 @@ from nautilus_trader.common.component import LiveClock
 
 from global_quant.gate1b.preflight import AccountPreflight
 from global_quant.gate1b.preflight import PreflightResult
+from global_quant.gate1b.preflight import evaluate_account_preflight
 from global_quant.gate1b.safety import DemoCredentials
 from global_quant.gate1b.safety import resolve_demo_endpoints
 from global_quant.gate1b.safety import validate_demo_endpoints
@@ -123,6 +124,17 @@ def sanitized_preflight_evidence(
         "server_time_skew_ms": snapshot.server_time_skew_ms,
         "trading_instruments": sorted(snapshot.trading_instruments),
     }
+
+
+async def run_signed_preflight(
+    credentials: DemoCredentials,
+) -> tuple[AccountPreflight, PreflightResult]:
+    apis = build_demo_http_apis(credentials)
+    snapshot = await collect_account_preflight(
+        account_api=apis.account,
+        market_api=apis.market,
+    )
+    return snapshot, evaluate_account_preflight(snapshot)
 
 
 def _enum_value(value: object) -> str:
