@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from pathlib import Path
 
 import global_quant.gate1b.runner as runner
 from global_quant.gate1b.preflight import AccountPreflight
@@ -98,3 +99,22 @@ def test_successful_preflight_writes_only_sanitized_evidence(tmp_path, monkeypat
     }
     assert "sensitive-demo-key" not in encoded
     assert "sensitive-demo-secret" not in encoded
+
+
+def test_default_evidence_and_config_hash_bind_gate1b_v1_3() -> None:
+    evidence_dir = runner.default_evidence_dir()
+    expected_protocol = runner.PROJECT_ROOT / "protocols" / "NT_GATE_1B_V1_3.md"
+
+    assert "gate1b-v1.3-" in evidence_dir.name
+    assert expected_protocol.is_file()
+    assert isinstance(Path(evidence_dir), Path)
+    assert runner._config_hash() == runner._digest_files(
+        (
+            runner.PROJECT_ROOT / "src/global_quant/gate1b/config.py",
+            runner.PROJECT_ROOT / "src/global_quant/gate1b/runtime.py",
+            runner.PROJECT_ROOT / "src/global_quant/gate1b/safety.py",
+            runner.PROJECT_ROOT / "src/global_quant/gate1b/credential_prompt.py",
+            runner.PROJECT_ROOT / "scripts/run_gate_1b_prompted.py",
+            expected_protocol,
+        ),
+    )

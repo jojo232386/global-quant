@@ -150,7 +150,7 @@ def run_preflight(
 
 def default_evidence_dir() -> Path:
     commit = _git_commit()[:12] or "unknown"
-    return PROJECT_ROOT / "evidence" / "runtime" / f"gate1b-v1.2-{commit}"
+    return PROJECT_ROOT / "evidence" / "runtime" / f"gate1b-v1.3-{commit}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,7 +241,9 @@ def _config_hash() -> str:
                 "src/global_quant/gate1b/config.py",
                 "src/global_quant/gate1b/runtime.py",
                 "src/global_quant/gate1b/safety.py",
-                "protocols/NT_GATE_1B_V1_2.md",
+                "src/global_quant/gate1b/credential_prompt.py",
+                "scripts/run_gate_1b_prompted.py",
+                "protocols/NT_GATE_1B_V1_3.md",
             )
         ),
     )
