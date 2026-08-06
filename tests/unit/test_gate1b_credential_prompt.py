@@ -83,6 +83,65 @@ def test_prompted_preflight_injects_secrets_only_into_in_process_mapping(
     }
 
 
+def test_prompted_preflight_accepts_hidden_multiline_ed25519_private_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    answers = iter(
+        (
+            "ed25519-demo-key",
+            "-----BEGIN PRIVATE KEY-----",
+            "base64-private-material-test-only",
+            "-----END PRIVATE KEY-----",
+        ),
+    )
+    captured: dict[str, str] = {}
+
+    def fake_run_preflight(*, environ, confirm_demo_only, evidence_dir):
+        captured.update(environ)
+        evidence = Path(evidence_dir) / "preflight.json"
+        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
+        return 0, evidence
+
+    monkeypatch.setattr(credential_prompt, "run_preflight", fake_run_preflight)
+
+    exit_code, _ = credential_prompt.run_prompted_preflight(
+        evidence_dir=tmp_path,
+        parent_environ={},
+        prompt_secret=lambda _label: next(answers),
+        input_is_tty=True,
+        key_type="ed25519",
+    )
+
+    assert exit_code == 0
+    assert captured["BINANCE_DEMO_API_KEY"] == "ed25519-demo-key"
+    assert captured["BINANCE_DEMO_API_SECRET"] == (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "base64-private-material-test-only\n"
+        "-----END PRIVATE KEY-----\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("lines", "reason"),
+    [
+        (("not-a-pem",), "INVALID_ED25519_PRIVATE_KEY"),
+        (
+            (("-----BEGIN PRIVATE KEY-----",) + ("line",) * 64),
+            "UNTERMINATED_ED25519_PRIVATE_KEY",
+        ),
+    ],
+)
+def test_ed25519_private_key_requires_bounded_complete_pem(lines, reason) -> None:
+    values = iter(lines)
+
+    with pytest.raises(CredentialPromptError, match=reason):
+        credential_prompt.prompt_api_secret(
+            key_type="ed25519",
+            prompt_secret=lambda _label: next(values),
+        )
+
+
 @pytest.mark.parametrize("answers", [("", "secret"), ("key", "")])
 def test_prompted_preflight_rejects_empty_values(tmp_path, answers) -> None:
     values = iter(answers)
