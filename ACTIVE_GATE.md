@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T08:10:00+08:00`
+Updated: `2026-08-06T08:20:00+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`READY`
+`ACTIVE`
 
 Protocol: `protocols/NT_GATE_1B_V1_2.md`
 
@@ -48,6 +48,8 @@ cancel/fill races, restart reconciliation, fees, and funding.
 ## Preflight state
 
 - protocol authorized by the user;
+- frozen protocol commit: `35e849d`;
+- frozen protocol tag: `nt-gate-1b-v1.2-protocol`;
 - private repository and clean parent Gate verified;
 - NautilusTrader `1.230.0` exposes `BinanceEnvironment.DEMO` and
   `BinanceAccountType.USDT_FUTURES`;
