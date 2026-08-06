@@ -27,10 +27,9 @@ do not write a replacement implementation.
 - A separate credential-free public probe reached only
   `https://demo-fapi.binance.com`, observed server-time skew below five
   seconds, and found BTCUSDT and ETHUSDT perpetuals in `TRADING` state.
-- The logged-in Binance account showed identity verification under review;
-  `/en/demo-trading` returned an error page, so no Demo API key could be
-  created. The ordinary API Management page was intentionally not used because
-  it belongs to the live account.
+- No Demo API credential was available for this gate. The ordinary API
+  Management page was intentionally not used because it belongs to the live
+  account.
 - No order, position, balance change, cleanup, Demo node connection, Gate 2,
   alpha research, daemon, or real-money action occurred.
 
@@ -45,9 +44,8 @@ do not write a replacement implementation.
 5. Verify that no secret values occur in tracked files or local evidence.
 6. Verify the full test claim from command evidence or rerun tests only through
    `scripts/run_offline.sh`; never connect to Binance.
-7. Inspect the public and missing-credential evidence. Treat account
-   verification state as a reported external observation, not as proof you can
-   independently re-query.
+7. Inspect the public and missing-credential evidence. Do not inspect or infer
+   the user's Binance identity, verification, or live-account state.
 8. Decide whether the present result is correctly `INCONCLUSIVE` under section
    13 of the frozen protocol. Do not award PASS: the mandatory Demo matrix was
    not run. Use STOP only for a verified safety or engineering failure.
