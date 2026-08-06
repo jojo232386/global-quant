@@ -5,8 +5,10 @@ import getpass
 import json
 import os
 import sys
+import termios
 from collections.abc import Callable
 from collections.abc import Mapping
+from io import TextIOBase
 from pathlib import Path
 
 from global_quant.gate1b.runner import run_preflight
@@ -23,6 +25,7 @@ ALL_BINANCE_CREDENTIAL_NAMES = (
 ED25519_BEGIN = "-----BEGIN PRIVATE KEY-----"
 ED25519_END = "-----END PRIVATE KEY-----"
 MAX_PRIVATE_KEY_LINES = 64
+MAX_PRIVATE_KEY_LINE_LENGTH = 4096
 
 
 class CredentialPromptError(RuntimeError):
@@ -34,6 +37,7 @@ def run_prompted_preflight(
     evidence_dir: Path,
     parent_environ: Mapping[str, str],
     prompt_secret: Callable[[str], str] = getpass.getpass,
+    prompt_private_key: Callable[[], str] | None = None,
     input_is_tty: bool,
     key_type: str = "hmac",
 ) -> tuple[int, Path]:
@@ -44,7 +48,11 @@ def run_prompted_preflight(
     api_key = prompt_secret("Demo API key (hidden): ")
     if not api_key:
         raise CredentialPromptError("EMPTY_DEMO_CREDENTIAL")
-    api_secret = prompt_api_secret(key_type=key_type, prompt_secret=prompt_secret)
+    api_secret = prompt_api_secret(
+        key_type=key_type,
+        prompt_secret=prompt_secret,
+        prompt_private_key=prompt_private_key or read_hidden_ed25519_private_key,
+    )
 
     ephemeral = {
         DEMO_KEY_NAME: api_key,
@@ -98,6 +106,7 @@ def prompt_api_secret(
     *,
     key_type: str,
     prompt_secret: Callable[[str], str],
+    prompt_private_key: Callable[[], str] | None = None,
 ) -> str:
     if key_type == "hmac":
         value = prompt_secret("Demo API secret (hidden): ")
@@ -106,16 +115,62 @@ def prompt_api_secret(
         return value
     if key_type != "ed25519":
         raise CredentialPromptError("UNSUPPORTED_DEMO_KEY_TYPE")
+    private_key_reader = prompt_private_key or read_hidden_ed25519_private_key
+    return normalize_ed25519_private_key(private_key_reader())
 
-    lines = [prompt_secret("Ed25519 private key line 1 (hidden): ")]
-    if lines[0] != ED25519_BEGIN:
+
+def read_hidden_ed25519_private_key(
+    *,
+    input_stream: TextIOBase | None = None,
+    output_stream: TextIOBase | None = None,
+) -> str:
+    input_stream = input_stream or sys.stdin
+    output_stream = output_stream or sys.stderr
+    if not input_stream.isatty():
+        raise CredentialPromptError("INTERACTIVE_TERMINAL_REQUIRED")
+
+    try:
+        descriptor = input_stream.fileno()
+        original = termios.tcgetattr(descriptor)
+    except (AttributeError, OSError) as exc:
+        raise CredentialPromptError("TERMINAL_ECHO_GUARD_UNAVAILABLE") from exc
+
+    hidden = original.copy()
+    hidden[3] &= ~termios.ECHO
+    lines: list[str] = []
+    output_stream.write("Paste the complete Ed25519 private key PEM (hidden):\n")
+    output_stream.flush()
+    try:
+        termios.tcsetattr(descriptor, termios.TCSAFLUSH, hidden)
+        for _ in range(MAX_PRIVATE_KEY_LINES):
+            line = input_stream.readline(MAX_PRIVATE_KEY_LINE_LENGTH + 1)
+            if not line or len(line) > MAX_PRIVATE_KEY_LINE_LENGTH:
+                raise CredentialPromptError("INVALID_ED25519_PRIVATE_KEY")
+            stripped = line.rstrip("\r\n")
+            lines.append(stripped)
+            if stripped == ED25519_END:
+                break
+        else:
+            raise CredentialPromptError("INVALID_ED25519_PRIVATE_KEY")
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSAFLUSH, original)
+        output_stream.write("\n")
+        output_stream.flush()
+
+    return normalize_ed25519_private_key("\n".join(lines) + "\n")
+
+
+def normalize_ed25519_private_key(value: str) -> str:
+    lines = value.splitlines()
+    if (
+        len(lines) < 3
+        or len(lines) > MAX_PRIVATE_KEY_LINES
+        or lines[0] != ED25519_BEGIN
+        or lines[-1] != ED25519_END
+        or any(not line for line in lines[1:-1])
+    ):
         raise CredentialPromptError("INVALID_ED25519_PRIVATE_KEY")
-    for line_number in range(2, MAX_PRIVATE_KEY_LINES + 1):
-        line = prompt_secret(f"Ed25519 private key line {line_number} (hidden): ")
-        lines.append(line)
-        if line == ED25519_END:
-            return "\n".join(lines) + "\n"
-    raise CredentialPromptError("UNTERMINATED_ED25519_PRIVATE_KEY")
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
