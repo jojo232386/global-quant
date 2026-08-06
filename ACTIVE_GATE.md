@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T15:02:16+08:00`
+Updated: `2026-08-06T15:05:00+08:00`
 
 ## Project
 
@@ -12,19 +12,19 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Gate
 
-`NT-GATE-1B v1.3`
+`NT-GATE-1B v1.4`
 
 ## Status
 
-`STOP`
+`READY`
 
-Protocol: `protocols/NT_GATE_1B_V1_3.md`
+Protocol: `protocols/NT_GATE_1B_V1_4.md`
 
-Parent closed tag: `nt-gate-1b-v1.2-inconclusive`
+Parent closed tag: `nt-gate-1b-v1.3-stop`
 
-Frozen start: `2026-08-06T13:40:00+08:00`
+Frozen start: `2026-08-06T15:15:00+08:00`
 
-Wall-clock stop deadline: `2026-08-07T01:40:00+08:00`
+Wall-clock stop deadline: `2026-08-07T03:15:00+08:00`
 
 Effective work limit: `12 hours`
 
@@ -34,9 +34,9 @@ Parent PASS tag:
 
 ## Last closed result
 
-`NT-GATE-1B v1.3` stopped before network access because the private-key input
-was invalid and the Demo API key identifier entered agent context during
-diagnosis. The affected Demo key was deleted. Signed requests and orders: `0`.
+`NT-GATE-1B v1.3` is frozen as `STOP` at `nt-gate-1b-v1.3-stop`. It stopped
+before network access, and the affected Demo key was deleted. Signed requests
+and orders: `0`.
 
 ## Exclusions
 
@@ -49,7 +49,6 @@ diagnosis. The affected Demo key was deleted. Signed requests and orders: `0`.
 
 ## Sole next action
 
-Freeze the v1.3 STOP evidence and tag. Then preregister a newly timed v1.4
-protocol which reads the private key only from an owner-only local file. Do not
-connect, query the account, start the Demo node, submit an order, or enter Gate
-2 until the new protocol is committed and tagged.
+Commit and annotated-tag the v1.4 protocol before its frozen start. Only then
+generate the new local Ed25519 key pair. Do not connect, query the account,
+start the Demo node, submit an order, or enter Gate 2 before the tag.
