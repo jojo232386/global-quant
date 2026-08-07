@@ -1,6 +1,6 @@
 # Current Active Gate
 
-Updated: `2026-08-06T15:05:00+08:00`
+Updated: `2026-08-07T12:16:42+08:00`
 
 ## Project
 
@@ -16,7 +16,7 @@ Legacy archive: `/Users/ASUS/Desktop/trading-assistant`
 
 ## Status
 
-`READY`
+`STOP / PAUSED`
 
 Protocol: `protocols/NT_GATE_1B_V1_4.md`
 
@@ -34,9 +34,9 @@ Parent PASS tag:
 
 ## Last closed result
 
-`NT-GATE-1B v1.3` is frozen as `STOP` at `nt-gate-1b-v1.3-stop`. It stopped
-before network access, and the affected Demo key was deleted. Signed requests
-and orders: `0`.
+`NT-GATE-1B v1.4` expired at `2026-08-07T03:15:00+08:00` before an
+authenticated preflight. The temporary local key pair was never registered
+with Binance and has been removed. Signed requests and orders: `0`.
 
 ## Exclusions
 
@@ -49,6 +49,7 @@ and orders: `0`.
 
 ## Sole next action
 
-Commit and annotated-tag the v1.4 protocol before its frozen start. Only then
-generate the new local Ed25519 key pair. Do not connect, query the account,
-start the Demo node, submit an order, or enter Gate 2 before the tag.
+No action while paused. Do not reopen v1.4. Any future retry requires explicit
+authorization, a newly versioned protocol committed before its start, and a
+fresh key pair generated only after that freeze. Gate 2 and all real-money work
+remain blocked.

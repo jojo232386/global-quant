@@ -1,0 +1,53 @@
+{
+  "action": "PAUSE; do not resume v1.4; any future retry requires explicit authorization and a newly frozen protocol",
+  "account_preflight": {
+    "account_queried": false,
+    "signed_request_sent": false,
+    "status": "NOT_RUN"
+  },
+  "branch": "codex/nt-gate1b-v1.3-prep",
+  "completed_at": "2026-08-07T12:16:42+08:00",
+  "credential_lifecycle": {
+    "binance_demo_api_key_created": false,
+    "local_key_pair_registered_with_binance": false,
+    "local_private_key_removed": true,
+    "local_public_key_removed": true,
+    "private_key_value_retained": false,
+    "public_key_sha256": "18abcab0418f71e94b14fee073af6fdaac2ee892f3921a1f0cf612e753ea18ab"
+  },
+  "economic_event_summary": {
+    "fees": 0,
+    "fills": 0,
+    "funding": 0
+  },
+  "frozen_start": "2026-08-06T15:15:00+08:00",
+  "gate": "NT-GATE-1B",
+  "order_summary": {
+    "canceled": 0,
+    "filled": 0,
+    "submitted": 0
+  },
+  "position_summary": {
+    "demo_connection_opened": false,
+    "known_position_change": false
+  },
+  "protocol_commit": "348313b",
+  "protocol_tag": "nt-gate-1b-v1.4-protocol",
+  "protocol_version": "1.4",
+  "reason_codes": [
+    "WALL_CLOCK_DEADLINE_EXPIRED",
+    "USER_REQUESTED_PAUSE"
+  ],
+  "repository": "/Users/ASUS/Desktop/global-quant",
+  "scope_statement": "Execution engineering only; no alpha, profitability, or live-readiness claim",
+  "secondary_review": {
+    "approval_equivalent": false,
+    "status": "NOT_COMPLETED"
+  },
+  "test_results": {
+    "full_suite": "210 passed, 5 warnings"
+  },
+  "tested_commit": "760adff",
+  "verdict": "STOP",
+  "wall_clock_deadline": "2026-08-07T03:15:00+08:00"
+}
