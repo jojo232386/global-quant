@@ -1,0 +1,247 @@
+"""Owner-only authorization manifest for the frozen NT-GATE-1B v1.6 protocol.
+
+Implements protocol section 9's one-time authorization boundary:
+
+* Each explicit runtime authorization creates one non-secret ID of the form
+  ``g1b16-{16 lowercase hex}`` in an owner-only local manifest.
+* The manifest binds the authorization to the exact frozen protocol commit, the
+  annotated tag object, the protocol SHA-256, and the runtime commit it is valid
+  for. A mismatch or replay across protocol/runtime fails closed.
+* The manifest is local and git-ignored (protocol section 16); it stores no
+  credential value, only non-secret authorization metadata.
+* A consumed or recovery authorization cannot be reused to obtain another
+  attempt; the model may not invent a replacement ID.
+
+This module is credential-free. It never reads, indexes, or serializes any API
+key or secret.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import stat
+import tempfile
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+_AUTHORIZATION_ID = re.compile(r"^g1b16-[0-9a-f]{16}$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_TAG_OBJECT = re.compile(r"^[0-9a-f]{40}$")
+
+
+class AuthorizationError(RuntimeError):
+    """Raised when a one-time authorization cannot be proven or is replayed."""
+
+
+@dataclass(frozen=True)
+class AuthorizationRecord:
+    authorization_id: str
+    protocol_commit: str
+    protocol_tag_object: str
+    protocol_sha256: str
+    runtime_commit: str
+    created_at: str
+    status: str  # "ACTIVE" | "CONSUMED" | "RECOVERY"
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "authorization_id": self.authorization_id,
+                "protocol_commit": self.protocol_commit,
+                "protocol_tag_object": self.protocol_tag_object,
+                "protocol_sha256": self.protocol_sha256,
+                "runtime_commit": self.runtime_commit,
+                "created_at": self.created_at,
+                "status": self.status,
+            },
+            sort_keys=True,
+            indent=2,
+        ) + "\n"
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, object]) -> AuthorizationRecord:
+        required = (
+            "authorization_id",
+            "protocol_commit",
+            "protocol_tag_object",
+            "protocol_sha256",
+            "runtime_commit",
+            "created_at",
+            "status",
+        )
+        missing = [k for k in required if k not in data]
+        if missing:
+            raise AuthorizationError(f"AUTHORIZATION_MANIFEST_MISSING_FIELDS:{missing}")
+        return cls(
+            authorization_id=str(data["authorization_id"]),
+            protocol_commit=str(data["protocol_commit"]),
+            protocol_tag_object=str(data["protocol_tag_object"]),
+            protocol_sha256=str(data["protocol_sha256"]),
+            runtime_commit=str(data["runtime_commit"]),
+            created_at=str(data["created_at"]),
+            status=str(data["status"]),
+        )
+
+
+def is_valid_authorization_id(value: str) -> bool:
+    return bool(_AUTHORIZATION_ID.match(value))
+
+
+def create_authorization(
+    *,
+    protocol_commit: str,
+    protocol_tag_object: str,
+    protocol_sha256: str,
+    runtime_commit: str,
+    authorization_id: str,
+) -> AuthorizationRecord:
+    """Create a new ACTIVE authorization record bound to the frozen protocol.
+
+    The caller must supply a freshly generated ``authorization_id`` matching the
+    frozen ``g1b16-{16 hex}`` format. This function does not generate the ID
+    itself (the supervisor session generates it from OS randomness), so the model
+    cannot invent a replacement ID to obtain another attempt.
+    """
+
+    if not is_valid_authorization_id(authorization_id):
+        raise AuthorizationError("INVALID_AUTHORIZATION_ID_FORMAT")
+    if not _GIT_COMMIT.match(protocol_commit):
+        raise AuthorizationError("INVALID_PROTOCOL_COMMIT")
+    if not _TAG_OBJECT.match(protocol_tag_object):
+        raise AuthorizationError("INVALID_PROTOCOL_TAG_OBJECT")
+    if not _SHA256.match(protocol_sha256):
+        raise AuthorizationError("INVALID_PROTOCOL_SHA256")
+    if not _GIT_COMMIT.match(runtime_commit):
+        raise AuthorizationError("INVALID_RUNTIME_COMMIT")
+    return AuthorizationRecord(
+        authorization_id=authorization_id,
+        protocol_commit=protocol_commit,
+        protocol_tag_object=protocol_tag_object,
+        protocol_sha256=protocol_sha256,
+        runtime_commit=runtime_commit,
+        created_at=datetime.now(UTC).isoformat(),
+        status="ACTIVE",
+    )
+
+
+def write_manifest(path: Path, record: AuthorizationRecord) -> Path:
+    """Atomically write the owner-only manifest with 0600 permissions.
+
+    The manifest path must live under a git-ignored location (the caller chooses
+    an evidence/runtime directory already excluded by ``.gitignore``). No
+    credential value is ever written.
+    """
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = record.to_json()
+    tmp: Path | None = None
+    try:
+        descriptor, tmp_name = tempfile.mkstemp(
+            prefix=".authorization-", suffix=".json", dir=str(path.parent)
+        )
+        tmp = Path(tmp_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp, path)
+    finally:
+        if tmp is not None and tmp.exists():
+            tmp.unlink()
+    return path
+
+
+def read_manifest(path: Path) -> AuthorizationRecord:
+    """Read and validate an owner-only manifest from disk.
+
+    Refuses symlinks, requires 0600 permissions, and validates the schema. A
+    missing, malformed, stale, or unknown authorization fails closed.
+    """
+
+    path = Path(path)
+    if not path.exists():
+        raise AuthorizationError("AUTHORIZATION_MANIFEST_MISSING")
+    if path.is_symlink():
+        raise AuthorizationError("AUTHORIZATION_MANIFEST_IS_SYMLINK")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise AuthorizationError("AUTHORIZATION_MANIFEST_NOT_REGULAR")
+        if metadata.st_uid != os.getuid():
+            raise AuthorizationError("AUTHORIZATION_MANIFEST_OWNER_MISMATCH")
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            raise AuthorizationError("AUTHORIZATION_MANIFEST_INSECURE_PERMISSIONS")
+        with os.fdopen(descriptor, "r", encoding="utf-8", closefd=False) as handle:
+            raw = handle.read()
+    finally:
+        os.close(descriptor)
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise AuthorizationError("AUTHORIZATION_MANIFEST_MALFORMED_JSON") from exc
+    if not isinstance(data, dict):
+        raise AuthorizationError("AUTHORIZATION_MANIFEST_MALFORMED_JSON")
+    record = AuthorizationRecord.from_mapping(data)
+    if record.status not in {"ACTIVE", "CONSUMED", "RECOVERY"}:
+        raise AuthorizationError(f"AUTHORIZATION_MANIFEST_INVALID_STATUS:{record.status}")
+    return record
+
+
+def validate_authorization_for_runtime(
+    record: AuthorizationRecord,
+    *,
+    authorization_id: str,
+    protocol_commit: str,
+    protocol_tag_object: str,
+    protocol_sha256: str,
+    runtime_commit: str,
+) -> AuthorizationRecord:
+    """Prove the authorization binds to the exact current protocol/runtime.
+
+    A mismatch on any frozen identity, an unknown/stale ID, a replay across a
+    different protocol/runtime, or a non-ACTIVE status fails closed. The record
+    is returned unchanged; the caller (supervisor) is responsible for marking it
+    CONSUMED after the lifecycle completes.
+    """
+
+    if record.authorization_id != authorization_id:
+        raise AuthorizationError("AUTHORIZATION_ID_MISMATCH")
+    if record.protocol_commit != protocol_commit:
+        raise AuthorizationError("AUTHORIZATION_PROTOCOL_REPLAY")
+    if record.protocol_tag_object != protocol_tag_object:
+        raise AuthorizationError("AUTHORIZATION_PROTOCOL_TAG_REPLAY")
+    if record.protocol_sha256 != protocol_sha256:
+        raise AuthorizationError("AUTHORIZATION_PROTOCOL_HASH_REPLAY")
+    if record.runtime_commit != runtime_commit:
+        raise AuthorizationError("AUTHORIZATION_RUNTIME_REPLAY")
+    if record.status == "CONSUMED":
+        raise AuthorizationError("AUTHORIZATION_ALREADY_CONSUMED")
+    if record.status == "RECOVERY":
+        raise AuthorizationError("AUTHORIZATION_RECOVERY_ONLY")
+    if record.status != "ACTIVE":
+        raise AuthorizationError(f"AUTHORIZATION_INVALID_STATUS:{record.status}")
+    return record
+
+
+def mark_consumed(path: Path, record: AuthorizationRecord) -> AuthorizationRecord:
+    """Persist the CONSUMED status so the authorization cannot be reused."""
+
+    consumed = AuthorizationRecord(
+        authorization_id=record.authorization_id,
+        protocol_commit=record.protocol_commit,
+        protocol_tag_object=record.protocol_tag_object,
+        protocol_sha256=record.protocol_sha256,
+        runtime_commit=record.runtime_commit,
+        created_at=record.created_at,
+        status="CONSUMED",
+    )
+    write_manifest(path, consumed)
+    return consumed

@@ -12,6 +12,9 @@ build/
 # Gate evidence is generated locally. Only curated evidence is committed.
 evidence/runtime/
 
+# WorkBuddy workspace-local data (daily logs, memory) is never committed.
+.workbuddy/
+
 # Secrets are forbidden in this repository.
 .env
 .env.*
