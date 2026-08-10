@@ -5,12 +5,13 @@ import json
 from decimal import Decimal
 from types import SimpleNamespace
 
-from global_quant.gate1b.demo_preflight import build_demo_http_apis
-from global_quant.gate1b.demo_preflight import collect_account_preflight
-from global_quant.gate1b.demo_preflight import sanitized_preflight_evidence
+from global_quant.gate1b.demo_preflight import (
+    build_demo_http_apis,
+    collect_account_preflight,
+    sanitized_preflight_evidence,
+)
 from global_quant.gate1b.preflight import evaluate_account_preflight
-from global_quant.gate1b.safety import DemoCredentials
-from global_quant.gate1b.safety import EXPECTED_DEMO_ENDPOINTS
+from global_quant.gate1b.safety import EXPECTED_DEMO_ENDPOINTS, DemoCredentials
 
 
 class FakeAccountApi:
@@ -106,6 +107,7 @@ def test_http_apis_are_pinned_to_demo_usdt_futures() -> None:
     assert apis.client.base_url == EXPECTED_DEMO_ENDPOINTS.http
     assert apis.account.client is apis.client
     assert apis.market.client is apis.client
+    assert apis.account._timestamp().isdigit()
 
 
 def test_sanitized_evidence_cannot_contain_demo_credentials() -> None:

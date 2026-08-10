@@ -16,12 +16,16 @@ from nautilus_trader.adapters.binance.futures.http.market import BinanceFuturesM
 from nautilus_trader.adapters.binance.http.client import BinanceHttpClient
 from nautilus_trader.common.component import LiveClock
 
-from global_quant.gate1b.preflight import AccountPreflight
-from global_quant.gate1b.preflight import PreflightResult
-from global_quant.gate1b.preflight import evaluate_account_preflight
-from global_quant.gate1b.safety import DemoCredentials
-from global_quant.gate1b.safety import resolve_demo_endpoints
-from global_quant.gate1b.safety import validate_demo_endpoints
+from global_quant.gate1b.preflight import (
+    AccountPreflight,
+    PreflightResult,
+    evaluate_account_preflight,
+)
+from global_quant.gate1b.safety import (
+    DemoCredentials,
+    resolve_demo_endpoints,
+    validate_demo_endpoints,
+)
 
 
 @dataclass(frozen=True)
@@ -35,8 +39,9 @@ def build_demo_http_apis(credentials: DemoCredentials) -> DemoHttpApis:
     endpoints = resolve_demo_endpoints()
     validate_demo_endpoints(endpoints)
     account_type = BinanceAccountType.USDT_FUTURES
+    clock = LiveClock()
     client = get_cached_binance_http_client(
-        clock=LiveClock(),
+        clock=clock,
         account_type=account_type,
         api_key=credentials.api_key,
         api_secret=credentials.api_secret,
@@ -49,7 +54,7 @@ def build_demo_http_apis(credentials: DemoCredentials) -> DemoHttpApis:
         raise RuntimeError("DEMO_HTTP_ENDPOINT_MISMATCH")
     return DemoHttpApis(
         client=client,
-        account=BinanceFuturesAccountHttpAPI(client, account_type),
+        account=BinanceFuturesAccountHttpAPI(client, clock, account_type),
         market=BinanceFuturesMarketHttpAPI(client, account_type),
     )
 
@@ -87,9 +92,7 @@ async def collect_account_preflight(
         ),
     )
     trading_instruments = frozenset(
-        symbol.symbol
-        for symbol in exchange_info.symbols
-        if _enum_value(symbol.status) == "TRADING"
+        symbol.symbol for symbol in exchange_info.symbols if _enum_value(symbol.status) == "TRADING"
     )
     return AccountPreflight(
         can_trade=bool(account.canTrade),
