@@ -17,6 +17,7 @@ while keeping the same lifecycle order and guard contract.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NoReturn, Protocol
 
 from global_quant.gate1b.mutation_protocol import (
     _OWNED_POSITION_READ_PATHS,
@@ -396,11 +397,91 @@ class MutationRunner:
     def execute_lifecycle(self) -> LifecycleEvidence:
         self._preflight_phase()
         self._intent_phase()
-        self._create_query_cancel_phase()
-        if self._unexpected_fill_detected:
-            self._containment_phase()
-        self._final_phase()
-        return self._build_evidence()
+        try:
+            self._create_query_cancel_phase()
+            if self._unexpected_fill_detected:
+                self._containment_phase()
+            self._final_phase()
+            return self._build_evidence()
+        except MutationProtocolError as exc:
+            # Finding B: a create has already been reserved. The contract-layer
+            # error must not surface as a bare exception or discard lifecycle
+            # state; route it into the existing bounded fail-closed cleanup.
+            self._fail_closed_after_protocol_error(exc)
+
+    def _fail_closed_after_protocol_error(self, exc: MutationProtocolError) -> NoReturn:
+        """Post-create ``MutationProtocolError`` recovery (Finding B).
+
+        A create has already been reserved (``create_requests >= 1``). The run
+        must not exit with a bare contract exception or lose lifecycle state.
+
+        * If the probe order is still owned-open, apply the frozen targeted
+          cancel before any reconciliation (deterministic client order id, same
+          in-budget cancel rule as the partial-fill remainder cancel).
+        * Route into the existing fail-closed cleanup / reconciliation path
+          (containment + final-state re-confirmation). An unprovable owned state
+          ends in ``BLOCKED_CLEANUP_UNPROVEN``; a provable fill performs the
+          bounded reduce-only close. Either way the run can never be
+          reclassified as a clean happy-path PASS.
+
+        Any secondary contract error during recovery collapses to the same
+        fail-closed verdict so no bare exception can escape the lifecycle.
+        """
+        created = self._guard.ledger.create_requests if self._guard is not None else 0
+        if created == 0:
+            # Defensive: a pre-create escape reaching this path is still a
+            # structured preflight STOP, never a bare exception.
+            raise MutationRunnerError(f"STOP_PREFLIGHT_PROTOCOL_ERROR:{exc}")
+
+        # Requirement 4: if the probe order is still owned-open (no cancel issued
+        # yet and the query observed it NEW / PARTIALLY_FILLED), apply the frozen
+        # targeted cancel rule (deterministic client order id; same in-budget
+        # cancel as the partial-fill remainder cancel) before any reconciliation.
+        if (
+            self._guard is not None
+            and self._guard.ledger.cancel_requests == 0
+            and self._query_status in {"NEW", "PARTIALLY_FILLED"}
+            and "/fapi/v1/order" in self._post_create_read_shas
+        ):
+            # The terminal query may not have run yet (e.g. the protocol error
+            # surfaced during the post-create query). Re-establish the last
+            # observed open status so the targeted-cancel proof is admitted.
+            if self._terminal_status not in {"NEW", "PARTIALLY_FILLED"}:
+                self._terminal_status = self._query_status
+            # The targeted cancel itself may fail closed; continue to a BLOCKED
+            # verdict rather than bare-exiting.
+            with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+                self._cancel_owned_remainder_after_partial()
+
+        # Requirement 5/6: if a fill was detected, attempt the existing bounded
+        # containment once (ownership-proof + reduce-only close). A secondary
+        # contract error collapses to BLOCKED (ownership unprovable); it never
+        # surfaces as a bare exception.
+        if (
+            self._unexpected_fill_detected or self._terminal_executed_quantity > 0
+        ) and not self._containment_occurred:
+            with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+                self._containment_phase()
+
+        # Requirement 7: re-confirm the final account state. A secondary failure
+        # here also collapses to the BLOCKED verdict below.
+        with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+            self._final_phase()
+            self._build_evidence()
+
+        # Requirement 8/6: a protocol error interrupted the lifecycle, so the run
+        # can never be reclassified as a clean happy-path PASS. Emit the existing
+        # frozen BLOCKED verdict with the observed containment state.
+        emergency_close_attempts = (
+            self._guard.ledger.emergency_close_requests if self._guard is not None else 0
+        )
+        raise MutationRunnerError(
+            "BLOCKED_CLEANUP_UNPROVEN",
+            containment_occurred=self._containment_occurred,
+            observed_terminal_status=self._terminal_status,
+            observed_terminal_executed_quantity=self._terminal_executed_quantity,
+            emergency_close_attempts=emergency_close_attempts,
+        )
 
     def _preflight_phase(self) -> None:
         account = self._transport.fetch_account_state()
@@ -1168,6 +1249,58 @@ def run_mutation_lifecycle(
     )
     try:
         evidence = runner.execute_lifecycle()
+    except MutationProtocolError as exc:
+        # Finding A: a preflight / pre-create contract escape (e.g.
+        # ACCOUNT_CONFIG_MISMATCH, ACCOUNT_NOT_CLEAN) must never surface as a
+        # bare exception. No mutation has been reserved yet, so the lifecycle
+        # ends as a structured STOP with an explicit zero mutation count; it
+        # never enters cleanup. A create having already occurred would have
+        # been converted inside execute_lifecycle, so reaching here with
+        # create_requests > 0 is defensive and still fails closed.
+        created = runner._guard.ledger.create_requests if runner._guard is not None else 0
+        if created == 0:
+            reason = f"STOP_PREFLIGHT_PROTOCOL_ERROR:{exc}"
+            lifecycle = {
+                "create_requests": 0,
+                "cancel_requests": 0,
+                "emergency_close_requests": 0,
+                "total_http_requests": 0,
+                "executed_quantity": "0",
+                "unexpected_mutations": 0,
+                "production_contacted": False,
+                "read_retries": 0,
+                "final_open_regular_orders": 0,
+                "final_open_algo_orders": 0,
+            }
+        else:
+            reason = f"BLOCKED_CLEANUP_UNPROVEN:{exc}"
+            ledger = runner._guard.ledger
+            lifecycle = {
+                "create_requests": ledger.create_requests,
+                "cancel_requests": ledger.cancel_requests,
+                "emergency_close_requests": ledger.emergency_close_requests,
+                "total_http_requests": ledger.total_http_requests,
+                "executed_quantity": str(runner._executed_quantity),
+                "unexpected_mutations": 1,
+                "production_contacted": bool(runner._transport.production_contacted),
+                "read_retries": ledger.read_retry_requests,
+                "final_open_regular_orders": 0,
+                "final_open_algo_orders": 0,
+            }
+        payload = _base_payload(
+            status="STOP",
+            reason_codes=[reason],
+            credential_environment_empty=True,
+        )
+        payload.update(binding)
+        payload["lifecycle"] = lifecycle
+        payload["containment"] = {
+            "containment_occurred": False,
+            "observed_terminal_status": runner._terminal_status,
+            "observed_terminal_executed_quantity": str(runner._terminal_executed_quantity),
+            "emergency_close_attempts": 0,
+        }
+        return 1, _write_evidence(evidence_dir, payload)
     except MutationRunnerError as exc:
         payload = _base_payload(
             status="STOP",
@@ -1175,6 +1308,21 @@ def run_mutation_lifecycle(
             credential_environment_empty=True,
         )
         payload.update(binding)
+        ledger = runner._guard.ledger if runner._guard is not None else None
+        payload["lifecycle"] = {
+            "create_requests": ledger.create_requests if ledger is not None else 0,
+            "cancel_requests": ledger.cancel_requests if ledger is not None else 0,
+            "emergency_close_requests": (
+                ledger.emergency_close_requests if ledger is not None else 0
+            ),
+            "total_http_requests": ledger.total_http_requests if ledger is not None else 0,
+            "executed_quantity": str(runner._executed_quantity),
+            "unexpected_mutations": 1 if runner._unexpected_fill_detected else 0,
+            "production_contacted": bool(runner._transport.production_contacted),
+            "read_retries": ledger.read_retry_requests if ledger is not None else 0,
+            "final_open_regular_orders": 0,
+            "final_open_algo_orders": 0,
+        }
         payload["containment"] = {
             "containment_occurred": exc.containment_occurred,
             "observed_terminal_status": exc.observed_terminal_status,

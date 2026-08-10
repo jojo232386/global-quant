@@ -936,3 +936,282 @@ def test_p3_credential_cleanup_derived_from_env_validation(tmp_path: Path) -> No
     payload = json.loads(evidence_path.read_text())
     assert payload["status"] == "PASS"
     assert payload["credential_environment_empty"] is True
+
+
+# ---------------------------------------------------------------------------
+# Narrow-scope closure: MutationProtocolError must never escape as a bare
+# exception. Preflight escapes become structured STOP with mutation_count = 0;
+# post-create escapes route into the existing bounded fail-closed cleanup and
+# end in BLOCKED_CLEANUP_UNPROVEN (never a clean happy-path PASS).
+# ---------------------------------------------------------------------------
+
+
+def _inject_query_protocol_error(_reservation: object) -> tuple[str, Decimal, Decimal]:
+    # Post-create: the query path observes contradictory ownership evidence.
+    raise MutationProtocolError("OWNERSHIP_PROOF_MISMATCH")
+
+
+def _inject_reconcile_protocol_error() -> dict[str, object]:
+    # Post-create containment: the ownership-proof reconcile path observes
+    # malformed evidence that cannot prove the owned position.
+    raise MutationProtocolError("OWNERSHIP_PROOF_MISMATCH")
+
+
+def test_closure_preflight_account_config_mismatch_is_structured_stop(
+    tmp_path: Path,
+) -> None:
+    """Finding A: ACCOUNT_CONFIG_MISMATCH -> structured STOP, mutation_count = 0."""
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.account_state = _account_state(margin_type="CROSS")
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    reason = payload["reason_codes"][0]
+    assert "STOP_PREFLIGHT_PROTOCOL_ERROR" in reason
+    assert "ACCOUNT_CONFIG_MISMATCH" in reason
+    assert payload["lifecycle"]["create_requests"] == 0
+    assert payload["lifecycle"]["cancel_requests"] == 0
+    assert payload["lifecycle"]["emergency_close_requests"] == 0
+    assert payload["containment"]["containment_occurred"] is False
+
+
+def test_closure_preflight_account_not_clean_is_structured_stop(
+    tmp_path: Path,
+) -> None:
+    """Finding A: ACCOUNT_NOT_CLEAN -> structured STOP, mutation_count = 0."""
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.account_state = _account_state(open_regular_order_ids=("999",))
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    reason = payload["reason_codes"][0]
+    assert "STOP_PREFLIGHT_PROTOCOL_ERROR" in reason
+    assert "ACCOUNT_NOT_CLEAN" in reason
+    assert payload["lifecycle"]["create_requests"] == 0
+    assert payload["lifecycle"]["cancel_requests"] == 0
+
+
+def test_closure_post_create_query_protocol_error_reconciles_to_blocked(
+    tmp_path: Path,
+) -> None:
+    """Finding B: a post-create query MutationProtocolError does not bare-exit.
+
+    The create has already been reserved, so the lifecycle routes into the
+    existing fail-closed cleanup: the still-owned-open probe order receives the
+    frozen targeted cancel and the run ends BLOCKED_CLEANUP_UNPROVEN (never PASS).
+    """
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.send_query_order = _inject_query_protocol_error  # type: ignore[assignment]
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "BLOCKED_CLEANUP_UNPROVEN" in payload["reason_codes"][0]
+    # The create is recorded; the targeted cleanup cancel was issued.
+    assert payload["lifecycle"]["create_requests"] == 1
+    assert payload["lifecycle"]["cancel_requests"] == 1
+    assert payload["lifecycle"]["emergency_close_requests"] == 0
+    assert payload["containment"]["containment_occurred"] is False
+
+
+def test_closure_post_create_malformed_ownership_evidence_blocks(
+    tmp_path: Path,
+) -> None:
+    """Finding B: malformed ownership evidence post-create -> BLOCKED, no crash."""
+    binding = _real_binding_values()
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    transport.fetch_reconcile_state = _inject_reconcile_protocol_error  # type: ignore[assignment]
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "BLOCKED_CLEANUP_UNPROVEN" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["create_requests"] == 1
+    assert payload["lifecycle"]["executed_quantity"] == "0.002"
+
+
+def test_closure_post_create_owned_open_order_targeted_cleanup() -> None:
+    """Finding B req 4: a still-owned-open probe order receives the targeted
+    bounded cancel during recovery (in-budget, deterministic client order id)."""
+    transport = _happy_transport()
+    transport.send_query_order = _inject_query_protocol_error  # type: ignore[assignment]
+
+    runner = _runner(transport)
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        runner.execute_lifecycle()
+
+    ledger = runner._guard.ledger  # type: ignore[union-attr]
+    assert ledger.create_requests == 1
+    assert ledger.cancel_requests == 1  # the frozen targeted cleanup cancel
+    assert ledger.emergency_close_requests == 0
+
+
+def test_closure_post_create_unexpected_fill_protocol_error_never_pass(
+    tmp_path: Path,
+) -> None:
+    """Finding B req 5/8: a fill plus a post-create protocol error still obeys
+    containment semantics and can never be reclassified as a normal PASS."""
+    binding = _real_binding_values()
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    transport.fetch_reconcile_state = _inject_reconcile_protocol_error  # type: ignore[assignment]
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert payload["status"] != "PASS"
+    assert "BLOCKED_CLEANUP_UNPROVEN" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["create_requests"] == 1
+    assert payload["lifecycle"]["executed_quantity"] == "0.002"
+    # Containment was attempted but ownership was unprovable; never PASS.
+    assert payload["containment"]["containment_occurred"] is False
+
+
+def test_closure_cleanup_unprovable_final_state_blocks(tmp_path: Path) -> None:
+    """Finding B req 7: when the final state cannot be proven clean after a
+    post-create protocol error, the run is BLOCKED."""
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.send_query_order = _inject_query_protocol_error  # type: ignore[assignment]
+    transport.final_state = {}  # incomplete final-state evidence
+
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    # The recovery collapses every secondary failure to the frozen BLOCKED verdict
+    # (here FINAL_STATE_EVIDENCE_INCOMPLETE is folded into BLOCKED_CLEANUP_UNPROVEN
+    # so no bare exception escapes and the run is never PASS).
+    assert "BLOCKED_CLEANUP_UNPROVEN" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["create_requests"] == 1
+
+
+def test_closure_mutation_budget_not_breached_after_protocol_error() -> None:
+    """Finding B req 8: the frozen mutation budget holds even after recovery."""
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    transport.fetch_reconcile_state = _inject_reconcile_protocol_error  # type: ignore[assignment]
+
+    runner = _runner(transport)
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        runner.execute_lifecycle()
+
+    ledger = runner._guard.ledger  # type: ignore[union-attr]
+    assert ledger.create_requests == 1
+    assert ledger.cancel_requests <= 2
+    assert ledger.emergency_close_requests <= 1
+
+
+def test_closure_happy_path_still_passes_via_run_mutation_lifecycle(
+    tmp_path: Path,
+) -> None:
+    """The closure must not regress the clean happy path."""
+    binding = _real_binding_values()
+    code, evidence_path = run_mutation_lifecycle(
+        _happy_transport(),
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 0
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "PASS"
+    assert payload["lifecycle"]["create_requests"] == 1
+    assert payload["lifecycle"]["cancel_requests"] == 1
+    assert payload["lifecycle"]["emergency_close_requests"] == 0
