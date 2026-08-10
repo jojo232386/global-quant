@@ -36,9 +36,8 @@ from typing import Any
 
 from global_quant.gate1b.authorization import (
     AuthorizationError,
+    claim_authorization,
     is_valid_authorization_id,
-    read_manifest,
-    validate_authorization_for_runtime,
 )
 from global_quant.gate1b.credential_prompt import (
     disable_core_dumps,
@@ -151,12 +150,14 @@ def run_credential_session(
         raise CredentialSessionError("INTERACTIVE_TERMINAL_REQUIRED")
     disable_core_dumps()
 
-    # Authorization must be proven ACTIVE and bound to this exact runtime before
-    # any credential is read. A stale/unknown/replayed authorization fails closed.
+    # Authorization must be atomically claimed (ACTIVE → CONSUMED) and bound
+    # to this exact runtime before any credential is read.  Two concurrent
+    # processes with the same authorization ID cannot both succeed — at most
+    # one enters the credential-bearing lifecycle.  The other fails closed
+    # before credential input or network/mutation.
     try:
-        record = read_manifest(Path(authorization_manifest))
-        validate_authorization_for_runtime(
-            record,
+        record = claim_authorization(
+            Path(authorization_manifest),
             authorization_id=str(binding["authorization_id"]),
             protocol_commit=str(binding["protocol_commit"]),
             protocol_tag_object=str(binding["protocol_tag_object"]),

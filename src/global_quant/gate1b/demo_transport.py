@@ -8,16 +8,21 @@ to ``demo-fapi.binance.com`` by ``safety.build_demo_http_apis``).
 
 Design rules (frozen protocol section 2.1 / 3 / 7 / 11):
 
-* REUSE_UNCHANGED: signing/HTTP/proxy/redirect handling is the pinned
-  nautilus client's; this adapter only parses raw responses.
+* REUSE_UNCHANGED: signing/HTTP/timeout handling is the pinned nautilus
+  client's; this adapter only parses raw responses and enforces redirect
+  isolation.
 * THIN_ADAPTER: transport owns no symbol/quantity/price/TIF/lifecycle decision;
   it executes frozen reservations and parses allowlisted fields.
 * MINIMAL_EXTENSION: a per-path response cache keeps the total HTTP count inside
   the frozen section-11 budget (fetch_* reads + caches, read() hits the cache).
 * production fail-closed: any contacted origin other than the frozen Demo origin
   sets ``production_contacted=True`` and the lifecycle can never PASS.
+* redirect fail-closed: any HTTP 3xx response is detected at the transport
+  boundary and raises a hard STOP before the body is returned to any caller.
 * mutation retry = 0; malformed/ambiguous response raises immediately (STOP).
 * 5 s single-request timeout is enforced around every signed request.
+* server-time skew is read from the real ``/fapi/v1/time`` endpoint (not
+  hardcoded to zero) so the frozen 5000 ms gate applies to live evidence.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time as _time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -77,6 +83,57 @@ class _SignedHttpClient(Protocol):
     ) -> bytes: ...
 
 
+# ---------------------------------------------------------------------------
+# Redirect isolation guard (protocol section 2.1 redirect fail-closed).
+#
+# The nautilus ``HttpClient`` (pyo3 Rust) follows redirects internally and does
+# not expose a ``max_redirects`` / ``follow_redirects`` toggle.  This guard
+# wraps the inner ``_client`` and intercepts every ``request()`` call so that
+# any HTTP 3xx response is detected before the body is returned to
+# ``BinanceHttpClient.send_request``.  A detected redirect raises a hard STOP
+# and the lifecycle can never PASS with ``production_contacted``.
+# ---------------------------------------------------------------------------
+
+
+class _RedirectGuard:
+    """Fail-closed on any HTTP 3xx redirect from the underlying pyo3 client.
+
+    Delegates all attribute access to the inner client so the pyo3 object
+    remains a drop-in replacement for ``BinanceHttpClient._client``.  Only
+    ``request`` is intercepted; all other attributes (rate-limit state, etc.)
+    are passed through transparently.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        object.__setattr__(self, "_inner", inner)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def request(self, *args: Any, **kwargs: Any) -> Any:
+        response = await self._inner.request(*args, **kwargs)
+        status = int(getattr(response, "status", 0))
+        if 300 <= status < 400:
+            raise MutationRunnerError(f"DEMO_HTTP_REDIRECT_DETECTED:{status}")
+        return response
+
+
+def _install_redirect_guard(http_client: Any) -> None:
+    """Wrap ``http_client._client`` with ``_RedirectGuard`` if not already guarded.
+
+    Idempotent: if the inner client is already a ``_RedirectGuard``, no second
+    wrapping is applied.  The guard is installed exactly once at transport
+    construction time (``DemoLifecycleTransport.__post_init__``) before any
+    credential-bearing request is made.
+    """
+    inner = getattr(http_client, "_client", None)
+    if inner is None:
+        return
+    if isinstance(inner, _RedirectGuard):
+        return  # already guarded
+    http_client._client = _RedirectGuard(inner)
+
+
 @dataclass
 class DemoLifecycleTransport:
     """Real Demo HTTP adapter implementing ``LifecycleTransport``.
@@ -105,6 +162,9 @@ class DemoLifecycleTransport:
         if base != DEMO_HTTP_ORIGIN:
             self._production_contacted = True
             raise MutationRunnerError("DEMO_HTTP_ORIGIN_MISMATCH")
+        # Redirect isolation: wrap the inner pyo3 HttpClient so any 3xx is
+        # detected and fail-closed before the response body reaches callers.
+        _install_redirect_guard(self.http_client)
         self._loop = asyncio.new_event_loop()
 
     # -- lifecycle / cleanup -------------------------------------------------
@@ -175,11 +235,32 @@ class DemoLifecycleTransport:
 
     # -- LifecycleTransport implementation ------------------------------------
 
+    def fetch_server_time_skew(self) -> Decimal:
+        """Read ``/fapi/v1/time`` and compute server-time skew in milliseconds.
+
+        The skew is the difference between the server timestamp and the local
+        midpoint of two ``time.time()`` calls bracketing the HTTP request.
+        The frozen 5000 ms gate in ``validate_account_state`` is applied to
+        this value; a hardcoded zero is never substituted.
+
+        This endpoint is public (no signature required) and is read exactly
+        once per lifecycle, cached like every other transport path.
+        """
+        t0_ms = int(_time.time() * 1000)
+        server = self._cached_json(
+            "/fapi/v1/time", {}, required_keys=frozenset({"serverTime"})
+        )
+        t1_ms = int(_time.time() * 1000)
+        local_mid = (t0_ms + t1_ms) // 2
+        server_time_ms = int(server["serverTime"])
+        return Decimal(str(server_time_ms - local_mid))
+
     def fetch_account_state(self) -> AccountState:
         # Protocol section 5 exact-field allowlist parse. Combines the raw
         # /fapi/v2/account, /fapi/v1/positionSide/dual, /fapi/v1/symbolConfig,
-        # /fapi/v1/openOrders, /fapi/v1/openAlgoOrders responses. Absent or
-        # discarded multiAssetsMargin / positions fields are a hard STOP.
+        # /fapi/v1/openOrders, /fapi/v1/openAlgoOrders, and /fapi/v1/time
+        # responses. The server-time skew is read from the real endpoint so
+        # the frozen 5000 ms gate applies to live evidence.
         account = self._cached_json(
             "/fapi/v2/account", self._recv_window(), _REQUIRED_ACCOUNT_KEYS
         )
@@ -195,12 +276,14 @@ class DemoLifecycleTransport:
         algo_orders = self._cached_json(
             "/fapi/v1/openAlgoOrders", self._recv_window(), required_keys=None
         )
+        skew = self.fetch_server_time_skew()
         return _build_account_state(
             account=account,
             dual=dual,
             symbol_config=symbol_config,
             regular_orders=regular_orders,
             algo_orders=algo_orders,
+            server_time_skew_ms=skew,
         )
 
     def fetch_symbol_state(self) -> SymbolState:
@@ -441,6 +524,7 @@ def _build_account_state(
     symbol_config: Any,
     regular_orders: Any,
     algo_orders: Any,
+    server_time_skew_ms: Decimal,
 ) -> AccountState:
     if not isinstance(account, dict) or not _REQUIRED_ACCOUNT_KEYS.issubset(account.keys()):
         raise MutationRunnerError("MALFORMED_RESPONSE:ACCOUNT")
@@ -473,9 +557,8 @@ def _build_account_state(
         sorted(str(o.get("algoId")) for o in algo if o.get("algoId") is not None)
     )
 
-    # Server-time skew is read separately by the runner pre-create schedule; the
-    # adapter carries a zero skew placeholder because the runner does not consume
-    # it from fetch_account_state (it is re-read in the pre-create read cycle).
+    # Server-time skew is read from the real /fapi/v1/time endpoint so the
+    # frozen 5000 ms gate (validate_account_state) applies to live data.
     return AccountState(
         can_trade=_require_bool(account, "canTrade", "ACCOUNT"),
         dual_side_position=_require_bool(dual, "dualSidePosition", "POSITION_MODE"),
@@ -483,7 +566,7 @@ def _build_account_state(
         margin_type=_require_str(symbol_config, "marginType", "SYMBOL_CONFIG"),
         leverage=_require_int(symbol_config, "leverage", "SYMBOL_CONFIG"),
         auto_add_margin=_require_bool(symbol_config, "isAutoAddMargin", "SYMBOL_CONFIG"),
-        server_time_skew_ms=Decimal("0"),
+        server_time_skew_ms=server_time_skew_ms,
         wallet_balance=wallet,
         available_balance=available,
         nonzero_positions=nonzero,

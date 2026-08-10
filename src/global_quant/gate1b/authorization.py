@@ -11,6 +11,9 @@ Implements protocol section 9's one-time authorization boundary:
   credential value, only non-secret authorization metadata.
 * A consumed or recovery authorization cannot be reused to obtain another
   attempt; the model may not invent a replacement ID.
+* ``claim_authorization`` atomically validates and marks an authorization
+  CONSUMED so that concurrent processes cannot both enter the credential-bearing
+  lifecycle using the same authorization ID.
 
 This module is credential-free. It never reads, indexes, or serializes any API
 key or secret.
@@ -245,3 +248,86 @@ def mark_consumed(path: Path, record: AuthorizationRecord) -> AuthorizationRecor
     )
     write_manifest(path, consumed)
     return consumed
+
+
+# ---------------------------------------------------------------------------
+# Atomic claim (protocol section 9 one-time authorization).
+#
+# ``read_manifest`` + ``validate_authorization_for_runtime`` + ``mark_consumed``
+# is a three-step read-check-write sequence.  Two concurrent processes racing on
+# the same authorization ID can both read ACTIVE, both validate, and both enter
+# the credential-bearing lifecycle before either writes CONSUMED.
+#
+# ``claim_authorization`` replaces the three steps with a single atomic
+# operation: it acquires an exclusive lock, reads the manifest, validates it,
+# asserts ACTIVE, atomically writes CONSUMED, and releases the lock.  Only one
+# caller can hold the lock at a time, so at most one caller enters the
+# credential-bearing path.
+#
+# The lock is implemented via ``os.O_CREAT | os.O_EXCL`` on a sibling ``.lock``
+# file, which is atomic on all POSIX and macOS local filesystems (APFS, HFS+,
+# ext4, tmpfs).  A stale lock left by a crashed process is not recovered
+# automatically — the caller handles this by removing the lock file only after
+# a successful claim or in the ``finally`` block.
+# ---------------------------------------------------------------------------
+
+
+def claim_authorization(
+    path: Path,
+    *,
+    authorization_id: str,
+    protocol_commit: str,
+    protocol_tag_object: str,
+    protocol_sha256: str,
+    runtime_commit: str,
+) -> AuthorizationRecord:
+    """Atomically claim an ACTIVE authorization and mark it CONSUMED.
+
+    Two concurrent processes with the same ``authorization_id`` cannot both
+    succeed — at most one will claim the authorization and enter the
+    credential-bearing lifecycle.  The loser fails closed *before* any
+    credential input or network/mutation activity.
+
+    Returns the consumed ``AuthorizationRecord`` on success.  Raises
+    ``AuthorizationError`` on any failure (missing manifest, stale,
+    already-consumed, protocol/runtime mismatch, concurrent claim conflict).
+    """
+
+    path = Path(path)
+    lock_path = Path(str(path) + ".lock")
+
+    # --- atomic lock acquisition ------------------------------------------
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(lock_fd)
+    except FileExistsError:
+        raise AuthorizationError(
+            f"AUTHORIZATION_CONCURRENT_CLAIM_CONFLICT:{authorization_id}"
+        ) from None
+
+    try:
+        # --- read + validate (under lock) ---------------------------------
+        record = read_manifest(path)
+        validate_authorization_for_runtime(
+            record,
+            authorization_id=authorization_id,
+            protocol_commit=protocol_commit,
+            protocol_tag_object=protocol_tag_object,
+            protocol_sha256=protocol_sha256,
+            runtime_commit=runtime_commit,
+        )
+        if record.status != "ACTIVE":
+            raise AuthorizationError(
+                f"AUTHORIZATION_NOT_ACTIVE:{record.status}:{authorization_id}"
+            )
+        # --- atomically write CONSUMED ------------------------------------
+        return mark_consumed(path, record)
+    finally:
+        _remove_lock(lock_path)
+
+
+def _remove_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass

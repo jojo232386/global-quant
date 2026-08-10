@@ -101,6 +101,7 @@ def _responses(**overrides: dict) -> dict[str, bytes]:
         "/fapi/v1/exchangeInfo": json.dumps(_exchange_info_payload()).encode(),
         "/fapi/v1/ticker/bookTicker": json.dumps(_book_payload()).encode(),
         "/fapi/v1/premiumIndex": json.dumps(_mark_payload()).encode(),
+        "/fapi/v1/time": json.dumps({"serverTime": 1786370000000}).encode(),
     }
     base.update(overrides)
     return base
@@ -156,6 +157,7 @@ class TestEndpointIsolation:
                 "/fapi/v1/symbolConfig",
                 "/fapi/v1/openOrders",
                 "/fapi/v1/openAlgoOrders",
+                "/fapi/v1/time",
             }
 
 
@@ -284,6 +286,7 @@ class TestBuildAccountState:
             symbol_config=_symbol_config_payload(),
             regular_orders=[],
             algo_orders=[],
+            server_time_skew_ms=Decimal("0"),
         )
         assert state.nonzero_positions == (("ETHUSDT", Decimal("0.001")),)
 
@@ -297,6 +300,7 @@ class TestBuildAccountState:
                 symbol_config=_symbol_config_payload(),
                 regular_orders=[],
                 algo_orders=[],
+                server_time_skew_ms=Decimal("0"),
             )
 
 

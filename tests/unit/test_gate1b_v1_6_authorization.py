@@ -22,6 +22,7 @@ import pytest
 from global_quant.gate1b.authorization import (
     AuthorizationError,
     AuthorizationRecord,
+    claim_authorization,
     create_authorization,
     mark_consumed,
     read_manifest,
@@ -216,3 +217,188 @@ class TestCreation:
         assert "api_key" not in text
         assert "secret" not in text
         assert "BINANCE" not in text
+
+
+class TestAtomicConcurrentClaim:
+    """Prove that ``claim_authorization`` is atomic: two concurrent claims on the
+    same authorization ID must yield at most one success."""
+
+    def test_single_claim_succeeds(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        claimed = claim_authorization(
+            path,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+        assert claimed.status == "CONSUMED"
+        # Verify on-disk state is CONSUMED
+        reloaded = read_manifest(path)
+        assert reloaded.status == "CONSUMED"
+
+    def test_second_claim_after_consumed_fails(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        claim_authorization(
+            path,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+        with pytest.raises(AuthorizationError) as exc:
+            claim_authorization(
+                path,
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit=_RUNTIME,
+            )
+        assert "CONSUMED" in str(exc.value) or "NOT_ACTIVE" in str(exc.value)
+
+    def test_concurrent_claims_only_one_succeeds(self, tmp_path: Path) -> None:
+        """Simulate two concurrent processes racing on the same manifest.
+
+        Uses ``os.fork()`` to create a real second process.  Both children
+        attempt ``claim_authorization``; the parent collects results and
+        asserts exactly one succeeded.
+        """
+        import os as _os
+        import sys as _sys
+
+        path = _write(tmp_path / "auth.json", _record())
+
+        read_fd, write_fd = _os.pipe()
+        pid_a = _os.fork()
+        if pid_a == 0:
+            # Child A
+            _os.close(read_fd)
+            result_a = {"pid": _os.getpid(), "success": False, "error": None}
+            try:
+                claim_authorization(
+                    path,
+                    authorization_id=_AUTH_ID,
+                    protocol_commit=_PROTOCOL,
+                    protocol_tag_object=_TAG_OBJECT,
+                    protocol_sha256=_SHA,
+                    runtime_commit=_RUNTIME,
+                )
+                result_a["success"] = True
+            except AuthorizationError as e:
+                result_a["error"] = str(e)
+            payload = json.dumps(result_a).encode()
+            _os.write(write_fd, payload)
+            _os.close(write_fd)
+            _os._exit(0)
+
+        pid_b = _os.fork()
+        if pid_b == 0:
+            # Child B
+            _os.close(read_fd)
+            result_b = {"pid": _os.getpid(), "success": False, "error": None}
+            try:
+                claim_authorization(
+                    path,
+                    authorization_id=_AUTH_ID,
+                    protocol_commit=_PROTOCOL,
+                    protocol_tag_object=_TAG_OBJECT,
+                    protocol_sha256=_SHA,
+                    runtime_commit=_RUNTIME,
+                )
+                result_b["success"] = True
+            except AuthorizationError as e:
+                result_b["error"] = str(e)
+            payload = json.dumps(result_b).encode()
+            _os.write(write_fd, payload)
+            _os.close(write_fd)
+            _os._exit(0)
+
+        _os.close(write_fd)
+        results: list[dict] = []
+        for _ in range(2):
+            data = _os.read(read_fd, 4096).decode()
+            results.append(json.loads(data))
+        _os.close(read_fd)
+
+        # Reap children
+        _os.waitpid(pid_a, 0)
+        _os.waitpid(pid_b, 0)
+
+        successes = [r for r in results if r["success"]]
+        failures = [r for r in results if not r["success"]]
+
+        assert len(successes) == 1, f"Expected exactly 1 success, got {successes}"
+        assert len(failures) == 1, f"Expected exactly 1 failure, got {failures}"
+        assert "CONCURRENT" in failures[0]["error"] or "CONSUMED" in failures[0]["error"] or "NOT_ACTIVE" in failures[0]["error"]
+
+        # Verify on-disk state is CONSUMED (only one claim persisted)
+        reloaded = read_manifest(path)
+        assert reloaded.status == "CONSUMED"
+
+    def test_lock_file_cleaned_up_after_claim(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        lock_path = Path(str(path) + ".lock")
+        claim_authorization(
+            path,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+        assert not lock_path.exists(), "Lock file must be cleaned up after claim"
+
+    def test_lock_file_cleaned_up_after_failure(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        claim_authorization(
+            path,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+        lock_path = Path(str(path) + ".lock")
+        # Second claim fails, but lock must still be cleaned up
+        with pytest.raises(AuthorizationError):
+            claim_authorization(
+                path,
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit=_RUNTIME,
+            )
+        assert not lock_path.exists(), "Lock file must be cleaned up even after failure"
+
+    def test_wrong_runtime_rejected(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        with pytest.raises(AuthorizationError):
+            claim_authorization(
+                path,
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit="0" * 40,
+            )
+        # Manifest must still be ACTIVE (not consumed on failed claim)
+        reloaded = read_manifest(path)
+        assert reloaded.status == "ACTIVE"
+
+    def test_wrong_protocol_commit_rejected_and_not_consumed(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+        with pytest.raises(AuthorizationError):
+            claim_authorization(
+                path,
+                authorization_id=_AUTH_ID,
+                protocol_commit="0" * 40,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit=_RUNTIME,
+            )
+        reloaded = read_manifest(path)
+        assert reloaded.status == "ACTIVE"
