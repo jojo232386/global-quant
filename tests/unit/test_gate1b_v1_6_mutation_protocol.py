@@ -108,7 +108,7 @@ def passing_lifecycle(**overrides: object) -> LifecycleEvidence:
 
 def test_frozen_candidate_constants_are_minimal() -> None:
     assert PROTOCOL_VERSION == "1.6"
-    assert PROTOCOL_STATUS == "CANDIDATE_NOT_FROZEN"
+    assert PROTOCOL_STATUS == "FROZEN_OPTION_A_APPROVED"
     assert SYMBOL == "ETHUSDT"
     assert Decimal("10") == MAX_NOTIONAL_USDT
     assert PRICE_DISCOUNT_BPS == 100
@@ -1267,6 +1267,33 @@ def test_order_payload_must_match_every_frozen_field() -> None:
             price=order.price,
             quantity=order.quantity,
             side="SELL",
+        )
+
+
+def test_frozen_payloads_omit_self_trade_prevention_mode() -> None:
+    """The frozen GTX payloads deliberately omit ``selfTradePreventionMode``.
+
+    GTX is post-only and cannot cross at acceptance, so self-trade prevention cannot
+    fire at acceptance regardless of the account-level default. This is a recorded
+    frozen decision (protocol section 8 / section 23), not a reliance on an undocumented
+    implicit default. Any resting fill is handled by section 14 containment and makes
+    the run non-PASS independent of self-trade semantics. The runner must not add this
+    field to either payload.
+    """
+    intent = durable_intent()
+    probe = intent.probe_payload
+    assert "selfTradePreventionMode" not in probe
+    assert "selfTradePrevention" not in probe
+
+    close = intent.emergency_close_payload(Decimal("0.001"))
+    assert "selfTradePreventionMode" not in close
+    assert "selfTradePrevention" not in close
+
+    with pytest.raises(MutationProtocolError, match="UNFROZEN_ORDER_PARAMETER"):
+        validate_order_payload(
+            {**probe, "selfTradePreventionMode": "NONE"},
+            expected=intent.probe_order,
+            client_order_id=intent.client_order_id,
         )
 
 
