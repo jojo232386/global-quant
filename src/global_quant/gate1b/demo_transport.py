@@ -31,6 +31,8 @@ import asyncio
 import contextlib
 import json
 import time as _time
+import urllib.error
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -84,54 +86,147 @@ class _SignedHttpClient(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Redirect isolation guard (protocol section 2.1 redirect fail-closed).
+# Redirect isolation (protocol section 2.1 redirect fail-closed).
 #
-# The nautilus ``HttpClient`` (pyo3 Rust) follows redirects internally and does
-# not expose a ``max_redirects`` / ``follow_redirects`` toggle.  This guard
-# wraps the inner ``_client`` and intercepts every ``request()`` call so that
-# any HTTP 3xx response is detected before the body is returned to
-# ``BinanceHttpClient.send_request``.  A detected redirect raises a hard STOP
-# and the lifecycle can never PASS with ``production_contacted``.
+# Source-verified behaviour of nautilus_trader 1.230.0
+# (crates/network/src/http/client.rs + crates/network/src/python/http.rs):
+#
+#   * the pyo3 ``HttpClient`` exposes NO redirect policy parameter
+#     (``__new__`` signature: default_headers, header_keys, keyed_quotas,
+#     default_quota, timeout_secs, proxy_url);
+#   * its reqwest ``Client::builder()`` never calls ``.redirect(...)``, so the
+#     reqwest default ``Policy::limited(10)`` applies — the client silently
+#     follows up to 10 redirects, including cross-origin ones, forwarding
+#     non-sensitive headers (e.g. ``X-MBX-APIKEY``).
+#
+# Because redirects cannot be disabled on the pyo3 client and are followed by
+# default, a post-hoc status check can never prove a request was not
+# redirected.  The credential-bearing path therefore REPLACES the pyo3 client
+# with ``_RedirectSafeHttpClient``, a stdlib-only client that:
+#
+#   * never follows redirects: any 3xx (301/302/303/307/308 and 300/304/305/306)
+#     raises ``DEMO_HTTP_REDIRECT_DETECTED`` before a second origin is contacted;
+#   * never reads HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY environment
+#     variables (``ProxyHandler({})``) — proxy isolation is unconditional;
+#   * enforces the frozen 5 s single-request timeout.
+#
+# The returned response object exposes the same ``status`` / ``headers`` /
+# ``body`` attributes that ``BinanceHttpClient.send_request`` reads, so the
+# Python signing layer (HMAC signing, URL assembly, error classification)
+# remains unchanged.
 # ---------------------------------------------------------------------------
 
 
-class _RedirectGuard:
-    """Fail-closed on any HTTP 3xx redirect from the underlying pyo3 client.
+class _HttpResponse:
+    """Minimal response contract compatible with ``BinanceHttpClient``."""
 
-    Delegates all attribute access to the inner client so the pyo3 object
-    remains a drop-in replacement for ``BinanceHttpClient._client``.  Only
-    ``request`` is intercepted; all other attributes (rate-limit state, etc.)
-    are passed through transparently.
+    __slots__ = ("status", "headers", "body")
+
+    def __init__(self, status: int, headers: dict[str, str], body: bytes) -> None:
+        self.status = status
+        self.headers = headers
+        self.body = body
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Fail-closed on any HTTP 3xx before a second origin is contacted.
+
+    ``HTTPRedirectHandler.redirect_request`` is invoked for 301/302/303/307/308
+    before any follow-up request is made; raising here guarantees the second
+    origin receives zero requests.  Codes not routed through
+    ``redirect_request`` (300/304/305/306) are rejected by the defensive
+    status check in ``_RedirectSafeHttpClient._request_sync``.
     """
 
-    def __init__(self, inner: Any) -> None:
-        object.__setattr__(self, "_inner", inner)
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str,
+                         headers: Any, newurl: str) -> Any:
+        raise MutationRunnerError(f"DEMO_HTTP_REDIRECT_DETECTED:{code}")
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
 
-    async def request(self, *args: Any, **kwargs: Any) -> Any:
-        response = await self._inner.request(*args, **kwargs)
+class _RedirectSafeHttpClient:
+    """Stdlib HTTP client with redirects disabled; replaces the pyo3 client.
+
+    Implements the same ``request(method, url, params, headers, body, keys,
+    timeout_secs)`` interface as the pyo3 ``HttpClient`` so it can be swapped
+    into ``BinanceHttpClient._client`` without touching the signing layer.
+    """
+
+    def __init__(self, timeout_secs: float = _REQUEST_TIMEOUT_SECONDS) -> None:
+        self._timeout_secs = timeout_secs
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),  # never read env proxy variables
+            _NoRedirectHandler(),
+        )
+
+    async def request(
+        self,
+        method: Any,
+        url: str,
+        params: Any = None,
+        headers: Any = None,
+        body: bytes | None = None,
+        keys: Any = None,
+        timeout_secs: float | None = None,
+    ) -> _HttpResponse:
+        return await asyncio.to_thread(
+            self._request_sync, method, url, headers, body, timeout_secs
+        )
+
+    def _request_sync(
+        self,
+        method: Any,
+        url: str,
+        headers: Any,
+        body: bytes | None,
+        timeout_secs: float | None,
+    ) -> _HttpResponse:
+        method_name = str(method).split(".")[-1].upper()
+        header_map = {str(k): str(v) for k, v in (headers or {}).items()}
+        request = urllib.request.Request(
+            url, data=body, headers=header_map, method=method_name
+        )
+        timeout = self._timeout_secs if timeout_secs is None else float(timeout_secs)
+        try:
+            response = self._opener.open(request, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if 300 <= int(exc.code) < 400:
+                # urllib surfaces some 3xx codes (300/304/305/306) as HTTPError
+                # instead of routing them through redirect_request; fail closed.
+                raise MutationRunnerError(
+                    f"DEMO_HTTP_REDIRECT_DETECTED:{exc.code}"
+                ) from None
+            # >=400 responses must flow back to BinanceHttpClient.send_request
+            # unchanged so its own 4xx/5xx classification applies.
+            return _HttpResponse(
+                status=int(exc.code),
+                headers={str(k): str(v) for k, v in (exc.headers or {}).items()},
+                body=exc.read(),
+            )
         status = int(getattr(response, "status", 0))
         if 300 <= status < 400:
+            # Defensive: covers 300/304/305/306 not routed through the handler.
             raise MutationRunnerError(f"DEMO_HTTP_REDIRECT_DETECTED:{status}")
-        return response
+        return _HttpResponse(
+            status=status,
+            headers={str(k): str(v) for k, v in response.headers.items()},
+            body=response.read(),
+        )
 
 
-def _install_redirect_guard(http_client: Any) -> None:
-    """Wrap ``http_client._client`` with ``_RedirectGuard`` if not already guarded.
+def _install_redirect_safe_client(http_client: Any) -> None:
+    """Replace ``http_client._client`` with ``_RedirectSafeHttpClient``.
 
-    Idempotent: if the inner client is already a ``_RedirectGuard``, no second
-    wrapping is applied.  The guard is installed exactly once at transport
+    Idempotent: if the inner client is already a ``_RedirectSafeHttpClient``,
+    no second replacement is applied.  Installed exactly once at transport
     construction time (``DemoLifecycleTransport.__post_init__``) before any
     credential-bearing request is made.
     """
     inner = getattr(http_client, "_client", None)
     if inner is None:
         return
-    if isinstance(inner, _RedirectGuard):
-        return  # already guarded
-    http_client._client = _RedirectGuard(inner)
+    if isinstance(inner, _RedirectSafeHttpClient):
+        return  # already redirect-safe
+    http_client._client = _RedirectSafeHttpClient()
 
 
 @dataclass
@@ -162,9 +257,10 @@ class DemoLifecycleTransport:
         if base != DEMO_HTTP_ORIGIN:
             self._production_contacted = True
             raise MutationRunnerError("DEMO_HTTP_ORIGIN_MISMATCH")
-        # Redirect isolation: wrap the inner pyo3 HttpClient so any 3xx is
-        # detected and fail-closed before the response body reaches callers.
-        _install_redirect_guard(self.http_client)
+        # Redirect isolation: the pyo3 client follows redirects by default and
+        # exposes no redirect policy, so it is replaced with a stdlib client
+        # that never follows 3xx and never reads proxy environment variables.
+        _install_redirect_safe_client(self.http_client)
         self._loop = asyncio.new_event_loop()
 
     # -- lifecycle / cleanup -------------------------------------------------
