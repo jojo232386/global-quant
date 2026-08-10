@@ -778,3 +778,161 @@ def test_p2_dirty_final_state_clears_cleanup_confirmed() -> None:
     assert evidence.final_account_config_matches is True
     with pytest.raises(MutationProtocolError, match="CLEANUP_NOT_CONFIRMED"):
         validate_lifecycle_pass(evidence)
+
+
+# ---------------------------------------------------------------------------
+# Second independent review P1/P3 closure: malformed final-state counts and
+# malformed terminal executed quantities must fail closed (no PASS, no crash).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [0.5, "0", False, None, -1],
+)
+def test_p1_final_state_open_regular_orders_malformed_cannot_pass(bad_value: object) -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        **_final_state(),
+        "open_regular_orders": bad_value,
+    }
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_MALFORMED"):
+        _runner(transport).execute_lifecycle()
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [0.5, "0", False, None, -1],
+)
+def test_p1_final_state_open_algo_orders_malformed_cannot_pass(bad_value: object) -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        **_final_state(),
+        "open_algo_orders": bad_value,
+    }
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_MALFORMED"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_final_state_exact_integer_zero_still_passes() -> None:
+    # Exact non-negative ints remain the only accepted counts.
+    evidence = _runner(_happy_transport()).execute_lifecycle()
+    assert evidence.final_open_regular_orders == 0
+    assert evidence.final_open_algo_orders == 0
+    validate_lifecycle_pass(evidence)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        Decimal("-1"),
+        True,
+        False,
+        None,
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        "0",
+        0.0,
+        1,
+    ],
+)
+def test_p1_terminal_executed_quantity_malformed_cannot_pass(bad_value: object) -> None:
+    transport = _happy_transport()
+    transport.terminal_status = "CANCELED"
+    transport.terminal_executed_quantity = bad_value
+
+    with pytest.raises(MutationRunnerError, match="STOP_MALFORMED_TERMINAL_EXECUTED_QUANTITY"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_terminal_executed_quantity_malformed_on_second_terminal_stops() -> None:
+    """The partial-fill remainder terminal query is validated the same way."""
+    transport = _happy_transport()
+    transport.terminal_status = "PARTIALLY_FILLED"
+    transport.terminal_executed_quantity = Decimal("0.002")
+    transport.second_terminal_status = "CANCELED"
+    transport.second_terminal_executed_quantity = Decimal("NaN")
+
+    with pytest.raises(MutationRunnerError, match="STOP_MALFORMED_TERMINAL_EXECUTED_QUANTITY"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_terminal_executed_zero_still_passes_clean_path() -> None:
+    transport = _happy_transport()
+    transport.terminal_status = "CANCELED"
+    transport.terminal_executed_quantity = Decimal("0")
+
+    evidence = _runner(transport).execute_lifecycle()
+    assert evidence.executed_quantity == Decimal("0")
+    validate_lifecycle_pass(evidence)
+
+
+def test_p1_terminal_executed_positive_still_contains() -> None:
+    """A genuine positive fill must still route through containment, not PASS."""
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    evidence = _runner(transport).execute_lifecycle()
+
+    assert evidence.emergency_close_requests == 1
+    assert evidence.executed_quantity == Decimal("0.002")
+    with pytest.raises(MutationProtocolError):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p3_emergency_query_malformed_quantity_fails_closed() -> None:
+    """Malformed contingency-close quantity is a clean STOP, never a crash."""
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    transport.emergency_query_executed_quantity = Decimal("NaN")
+
+    with pytest.raises(MutationRunnerError, match="STOP_MALFORMED_EMERGENCY_EXECUTED_QUANTITY"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p3_credential_cleanup_false_fails_closed() -> None:
+    transport = _happy_transport()
+    runner = MutationRunner(
+        transport,
+        runtime_commit=_RUNTIME_COMMIT,
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=_PROTOCOL_COMMIT,
+        protocol_tag_object=_PROTOCOL_TAG_OBJECT,
+        protocol_sha256=_PROTOCOL_SHA256,
+        runtime_binding_passed=True,
+        credential_cleanup_passed=False,
+    )
+    evidence = runner.execute_lifecycle()
+
+    assert evidence.credential_cleanup_passed is False
+    with pytest.raises(MutationProtocolError, match="CREDENTIAL_CLEANUP_FAILED"):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p3_credential_cleanup_derived_from_env_validation(tmp_path: Path) -> None:
+    """The clean-path credential_cleanup_passed is derived from the executed
+    credential-environment validation (env must be empty to proceed)."""
+    binding = _real_binding_values()
+    code, evidence_path = run_mutation_lifecycle(
+        _happy_transport(),
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 0
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "PASS"
+    assert payload["credential_environment_empty"] is True

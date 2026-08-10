@@ -566,6 +566,9 @@ class MutationRunner:
         terminal_status, terminal_executed = self._transport.send_terminal_query(
             terminal_reservation
         )
+        terminal_executed = _validated_executed_quantity(
+            terminal_executed, context="TERMINAL_EXECUTED_QUANTITY"
+        )
         self._terminal_status = terminal_status
         self._terminal_executed_quantity = terminal_executed
         if terminal_executed > 0:
@@ -669,6 +672,9 @@ class MutationRunner:
         self._register_read(terminal_reservation)
         terminal_status, terminal_executed = self._transport.send_terminal_query(
             terminal_reservation
+        )
+        terminal_executed = _validated_executed_quantity(
+            terminal_executed, context="TERMINAL_EXECUTED_QUANTITY"
         )
         self._terminal_status = terminal_status
         self._terminal_executed_quantity = terminal_executed
@@ -782,6 +788,9 @@ class MutationRunner:
         emergency_status, emergency_executed = self._transport.send_emergency_query(
             emergency_query_reservation
         )
+        emergency_executed = _validated_executed_quantity(
+            emergency_executed, context="EMERGENCY_EXECUTED_QUANTITY"
+        )
         self._emergency_query_status = emergency_status
         self._emergency_query_executed_quantity = emergency_executed
 
@@ -817,9 +826,19 @@ class MutationRunner:
             raise MutationRunnerError("FINAL_STATE_EVIDENCE_INCOMPLETE")
         positions_raw = final["nonzero_positions"]
         account_config_matches = final["account_config_matches"]
-        open_regular = int(final["open_regular_orders"])
-        open_algo = int(final["open_algo_orders"])
-        if not isinstance(positions_raw, tuple) or not isinstance(account_config_matches, bool):
+        open_regular = final["open_regular_orders"]
+        open_algo = final["open_algo_orders"]
+        if (
+            not isinstance(positions_raw, tuple)
+            or not isinstance(account_config_matches, bool)
+            # Counts must be exact non-negative ints. ``type(...) is int`` rejects
+            # the bool subclass and no lossy coercion is applied, so float/str/
+            # bool/None/negative values all fail closed instead of decoding to 0.
+            or type(open_regular) is not int
+            or type(open_algo) is not int
+            or open_regular < 0
+            or open_algo < 0
+        ):
             raise MutationRunnerError("FINAL_STATE_EVIDENCE_MALFORMED")
         final_nonzero_positions: tuple[tuple[str, Decimal], ...] = tuple(positions_raw)
         final_account_config_matches = bool(account_config_matches)
@@ -890,6 +909,19 @@ class MutationRunner:
             order_parameters_match=self.guard.ledger.create_requests == 1,
             cleanup_confirmed=cleanup_confirmed,
         )
+
+
+def _validated_executed_quantity(value: object, *, context: str) -> Decimal:
+    """Require an exact finite non-negative Decimal before any comparison.
+
+    Exchange executed-quantity state must never be lossily coerced: bool, float,
+    str, None, NaN, Infinity, or a negative value is malformed evidence and fails
+    closed with a clear STOP before any ``> 0`` / ``== 0`` decision is made.
+    """
+
+    if type(value) is not Decimal or not value.is_finite() or value < 0:
+        raise MutationRunnerError(f"STOP_MALFORMED_{context}")
+    return value
 
 
 def _run_git(
@@ -1093,7 +1125,10 @@ def run_mutation_lifecycle(
     """Run the offline v1.6 lifecycle gate and return exit code + evidence path."""
 
     environment_names = set(environ)
-    if environment_names & RECOGNIZED_BINANCE_CREDENTIAL_ENV_NAMES:
+    credential_environment_empty = not bool(
+        environment_names & RECOGNIZED_BINANCE_CREDENTIAL_ENV_NAMES
+    )
+    if not credential_environment_empty:
         payload = _base_payload(
             status="STOP",
             reason_codes=["CREDENTIAL_ENVIRONMENT_MUST_BE_EMPTY"],
@@ -1126,7 +1161,10 @@ def run_mutation_lifecycle(
         protocol_tag_object=binding["protocol_tag_object"],
         protocol_sha256=binding["protocol_sha256"],
         runtime_binding_passed=True,
-        credential_cleanup_passed=True,
+        # Derived from the executed credential-environment validation: the run
+        # only proceeds when the environment holds no recognized credential, so
+        # cleanup is trivially complete exactly when the env is empty.
+        credential_cleanup_passed=credential_environment_empty,
     )
     try:
         evidence = runner.execute_lifecycle()
