@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -13,6 +15,7 @@ from global_quant.gate1b.mutation_protocol import (
     SYMBOL,
     AccountState,
     LimitOrderFilters,
+    MarketCloseFilters,
     MutationProtocolError,
     SymbolState,
     validate_lifecycle_pass,
@@ -129,6 +132,8 @@ def _runner(transport: FakeLifecycleTransport) -> MutationRunner:
         protocol_commit=_PROTOCOL_COMMIT,
         protocol_tag_object=_PROTOCOL_TAG_OBJECT,
         protocol_sha256=_PROTOCOL_SHA256,
+        runtime_binding_passed=True,
+        credential_cleanup_passed=True,
     )
 
 
@@ -276,17 +281,18 @@ def test_run_mutation_lifecycle_rejects_credential_environment(tmp_path: Path) -
 
 def test_run_mutation_lifecycle_passes_protocol_tag_binding(tmp_path: Path) -> None:
     transport = _happy_transport()
+    binding = _real_binding_values()
     code, evidence_path = run_mutation_lifecycle(
         transport,
         project_root=PROJECT_ROOT,
         evidence_dir=tmp_path,
         environ={},
-        runtime_commit=_RUNTIME_COMMIT,
+        runtime_commit=binding["runtime_commit"],
         session_nonce=_SESSION_NONCE,
         authorization_id=_AUTHORIZATION_ID,
-        protocol_commit=_PROTOCOL_COMMIT,
-        protocol_tag_object=_PROTOCOL_TAG_OBJECT,
-        protocol_sha256=_PROTOCOL_SHA256,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
     )
 
     assert code == 0
@@ -294,9 +300,481 @@ def test_run_mutation_lifecycle_passes_protocol_tag_binding(tmp_path: Path) -> N
     assert payload["status"] == "PASS"
     assert payload["protocol_version"] == PROTOCOL_VERSION
     assert payload["protocol_tag"] == PROTOCOL_TAG
-    assert "protocol_commit" in payload
-    assert "protocol_sha256" in payload
+    assert payload["protocol_commit"] == binding["protocol_commit"]
+    assert payload["protocol_sha256"] == binding["protocol_sha256"]
+    assert payload["runtime_commit"] == binding["runtime_commit"]
     assert payload["lifecycle"]["create_requests"] == 1
     assert payload["lifecycle"]["cancel_requests"] == 1
     assert payload["lifecycle"]["executed_quantity"] == "0"
     assert payload["lifecycle"]["production_contacted"] is False
+
+
+# ---------------------------------------------------------------------------
+# Targeted security regression tests for the v1.6 review findings.
+# ---------------------------------------------------------------------------
+
+
+def _market_close_filters() -> MarketCloseFilters:
+    return MarketCloseFilters(
+        min_quantity=Decimal("0.001"),
+        max_quantity=Decimal("100.000"),
+        step_size=Decimal("0.001"),
+        min_notional=Decimal("5"),
+        market_lot_size_filter_count=1,
+        min_notional_filter_count=1,
+        uninterpreted_applicable_filter_types=(),
+    )
+
+
+def _clean_final_state() -> dict[str, object]:
+    return {
+        "nonzero_positions": (),
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+
+
+def _dirty_final_state() -> dict[str, object]:
+    return {
+        "nonzero_positions": ((SYMBOL, Decimal("0.002")),),
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+
+
+def _reconcile_owned(residual: Decimal = Decimal("0.002")) -> dict[str, object]:
+    return {
+        "residual_quantity": residual,
+        "position_direction": "LONG",
+        "open_remainder_quantity": Decimal("0"),
+        "other_activity_absent": True,
+    }
+
+
+def _containment_transport(
+    *,
+    terminal_status: str = "FILLED",
+    terminal_executed_quantity: Decimal = Decimal("0.002"),
+    reconcile: dict[str, object] | None = None,
+    containment_final: dict[str, object] | None = None,
+    second_terminal_status: str = "CANCELED",
+    second_terminal_executed_quantity: Decimal = Decimal("0.002"),
+) -> FakeLifecycleTransport:
+    transport = _happy_transport()
+    transport.terminal_status = terminal_status
+    transport.terminal_executed_quantity = terminal_executed_quantity
+    transport.market_close_filters = _market_close_filters()
+    transport.reconcile_state = (
+        reconcile
+        if reconcile is not None
+        else _reconcile_owned(residual=terminal_executed_quantity)
+    )
+    transport.emergency_close_ack = {
+        "orderId": "2",
+        "status": "NEW",
+        "clientOrderId": "g1b16c-aaaaaaaa-0123456789abcdef-1",
+    }
+    transport.emergency_query_status = "FILLED"
+    transport.emergency_query_executed_quantity = terminal_executed_quantity
+    transport.containment_final_state = (
+        containment_final if containment_final is not None else _clean_final_state()
+    )
+    transport.second_terminal_status = second_terminal_status
+    transport.second_terminal_executed_quantity = second_terminal_executed_quantity
+    return transport
+
+
+def _real_binding_values() -> dict[str, str]:
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    protocol_bytes = (PROJECT_ROOT / "protocols/NT_GATE_1B_V1_6.md").read_bytes()
+    return {
+        "runtime_commit": _git("rev-parse", "HEAD^{commit}"),
+        "protocol_commit": _git("rev-parse", f"refs/tags/{PROTOCOL_TAG}^{{commit}}"),
+        "protocol_tag_object": _git("rev-parse", f"refs/tags/{PROTOCOL_TAG}"),
+        "protocol_sha256": hashlib.sha256(protocol_bytes).hexdigest(),
+    }
+
+
+# --- P0-1: unexpected fill at the terminal query may never PASS --------------
+
+
+def test_p0_1_terminal_filled_cannot_pass() -> None:
+    transport = _happy_transport()
+    transport.terminal_status = "FILLED"
+    transport.terminal_executed_quantity = Decimal("0.002")
+
+    # Without provable ownership the runner must fail closed rather than PASS.
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p0_1_terminal_partially_filled_cannot_pass() -> None:
+    transport = _containment_transport(
+        terminal_status="PARTIALLY_FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        second_terminal_status="CANCELED",
+        second_terminal_executed_quantity=Decimal("0.002"),
+    )
+    evidence = _runner(transport).execute_lifecycle()
+
+    # Even after a successful second cancel + bounded containment, the run is
+    # not a clean happy-path PASS.
+    assert evidence.emergency_close_requests == 1
+    assert evidence.executed_quantity == Decimal("0.002")
+    assert evidence.unexpected_mutations == 1
+    with pytest.raises(MutationProtocolError):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p0_1_executed_qty_after_cancel_cannot_pass() -> None:
+    # Cancel returned CANCELED but the terminal query reveals a partial fill.
+    transport = _containment_transport(
+        terminal_status="CANCELED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    evidence = _runner(transport).execute_lifecycle()
+
+    assert evidence.emergency_close_requests == 1
+    assert evidence.executed_quantity == Decimal("0.002")
+    assert evidence.unexpected_mutations == 1
+    with pytest.raises(MutationProtocolError):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p0_1_cancel_response_cannot_erase_fill_fact() -> None:
+    # The terminal executed quantity drives the verdict, not the cancel status.
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    transport.cancel_status = "CANCELED"
+    evidence = _runner(transport).execute_lifecycle()
+
+    assert evidence.executed_quantity == Decimal("0.002")
+    assert evidence.emergency_close_requests == 1
+    assert evidence.unexpected_mutations == 1
+
+
+def test_p0_1_unexpected_terminal_state_without_fill_stops() -> None:
+    transport = _happy_transport()
+    transport.terminal_status = "EXPIRED"
+    transport.terminal_executed_quantity = Decimal("0")
+
+    with pytest.raises(MutationRunnerError, match="STOP_UNEXPECTED_TERMINAL_STATE"):
+        _runner(transport).execute_lifecycle()
+
+
+# --- P0-2: missing final-state evidence may never default to clean -----------
+
+
+def test_p0_2_empty_final_state_cannot_pass() -> None:
+    transport = _happy_transport()
+    transport.final_state = {}
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_INCOMPLETE"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p0_2_missing_positions_key_cannot_pass() -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_INCOMPLETE"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p0_2_missing_account_config_key_cannot_pass() -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        "nonzero_positions": (),
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+    }
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_INCOMPLETE"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p0_2_malformed_final_state_cannot_pass() -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        "nonzero_positions": "not-a-tuple",
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+
+    with pytest.raises(MutationRunnerError, match="FINAL_STATE_EVIDENCE_MALFORMED"):
+        _runner(transport).execute_lifecycle()
+
+
+# --- P1-1: containment / cleanup wiring -------------------------------------
+
+
+def test_p1_1_exactly_owned_fill_triggers_bounded_containment() -> None:
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    evidence = _runner(transport).execute_lifecycle()
+
+    # The single contingency reduce-only close is counted against the budget and
+    # recorded; the run is STOP_UNEXPECTED_FILL_CONTAINED, never PASS.
+    assert evidence.create_requests == 1
+    assert evidence.cancel_requests == 1
+    assert evidence.emergency_close_requests == 1
+    assert evidence.executed_quantity == Decimal("0.002")
+    assert evidence.unexpected_mutations == 1
+    assert evidence.cleanup_confirmed is True
+    assert "FILLED" in evidence.observed_statuses
+    with pytest.raises(MutationProtocolError):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p1_1_ownership_unprovable_other_activity_blocks() -> None:
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        reconcile={
+            "residual_quantity": Decimal("0.002"),
+            "position_direction": "LONG",
+            "open_remainder_quantity": Decimal("0"),
+            "other_activity_absent": False,
+        },
+    )
+
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_1_mixed_pre_existing_position_blocks_auto_close() -> None:
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        reconcile={
+            # Residual does not equal the proven owned fill -> not attributable
+            # solely to the probe.
+            "residual_quantity": Decimal("0.005"),
+            "position_direction": "LONG",
+            "open_remainder_quantity": Decimal("0"),
+            "other_activity_absent": True,
+        },
+    )
+
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_1_open_remainder_present_blocks() -> None:
+    transport = _containment_transport(
+        terminal_status="PARTIALLY_FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        second_terminal_status="PARTIALLY_FILLED",
+        second_terminal_executed_quantity=Decimal("0.002"),
+        reconcile={
+            "residual_quantity": Decimal("0.002"),
+            "position_direction": "LONG",
+            "open_remainder_quantity": Decimal("0.001"),
+            "other_activity_absent": True,
+        },
+    )
+
+    with pytest.raises(MutationRunnerError, match="BLOCKED_CLEANUP_UNPROVEN"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_1_final_still_nonzero_after_containment_blocks() -> None:
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        containment_final=_dirty_final_state(),
+    )
+
+    with pytest.raises(MutationRunnerError, match="BLOCKED_FINAL_NOT_CLEAN_AFTER_CONTAINMENT"):
+        _runner(transport).execute_lifecycle()
+
+
+def test_p1_1_containment_recorded_in_run_mutation_lifecycle(tmp_path: Path) -> None:
+    binding = _real_binding_values()
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+    )
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "STOP_UNEXPECTED_FILL_CONTAINED" in payload["reason_codes"]
+    assert payload["lifecycle"]["emergency_close_requests"] == 1
+    assert payload["lifecycle"]["executed_quantity"] == "0.002"
+    assert payload["containment"]["containment_occurred"] is True
+    assert payload["containment"]["emergency_close_attempts"] == 1
+
+
+# --- P1-2: runtime / evidence binding mechanical verification ---------------
+
+
+def test_p1_2_wrong_runtime_commit_stops(tmp_path: Path) -> None:
+    binding = _real_binding_values()
+    code, evidence_path = run_mutation_lifecycle(
+        _happy_transport(),
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit="b" * 40,
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "RUNTIME_COMMIT_MISMATCH" in payload["reason_codes"]
+
+
+def test_p1_2_wrong_protocol_sha256_stops(tmp_path: Path) -> None:
+    binding = _real_binding_values()
+    code, evidence_path = run_mutation_lifecycle(
+        _happy_transport(),
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256="0" * 64,
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "PROTOCOL_SHA256_MISMATCH" in payload["reason_codes"]
+
+
+def test_p1_2_wrong_protocol_commit_stops(tmp_path: Path) -> None:
+    binding = _real_binding_values()
+    code, evidence_path = run_mutation_lifecycle(
+        _happy_transport(),
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit="c" * 40,
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "PROTOCOL_COMMIT_MISMATCH" in payload["reason_codes"]
+
+
+def test_p1_2_untracked_source_file_stops(tmp_path: Path) -> None:
+    binding = _real_binding_values()
+    untracked = PROJECT_ROOT / "src" / "global_quant" / "gate1b" / "_rv_probe_untracked.py"
+    untracked.write_text("# rv probe\n")
+    try:
+        code, evidence_path = run_mutation_lifecycle(
+            _happy_transport(),
+            project_root=PROJECT_ROOT,
+            evidence_dir=tmp_path,
+            environ={},
+            runtime_commit=binding["runtime_commit"],
+            session_nonce=_SESSION_NONCE,
+            authorization_id=_AUTHORIZATION_ID,
+            protocol_commit=binding["protocol_commit"],
+            protocol_tag_object=binding["protocol_tag_object"],
+            protocol_sha256=binding["protocol_sha256"],
+        )
+    finally:
+        untracked.unlink(missing_ok=True)
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "RUNTIME_UNTRACKED_FILES_PRESENT" in payload["reason_codes"]
+
+
+# --- P2: evidence booleans are derived, not hardcoded ------------------------
+
+
+def test_p2_happy_path_booleans_derived_true() -> None:
+    evidence = _runner(_happy_transport()).execute_lifecycle()
+
+    assert evidence.preflight_passed is True
+    assert evidence.runtime_binding_passed is True
+    assert evidence.credential_cleanup_passed is True
+    assert evidence.filters_passed is True
+    assert evidence.order_parameters_match is True
+    assert evidence.cleanup_confirmed is True
+    validate_lifecycle_pass(evidence)
+
+
+def test_p2_runtime_binding_false_fails_closed() -> None:
+    transport = _happy_transport()
+    runner = MutationRunner(
+        transport,
+        runtime_commit=_RUNTIME_COMMIT,
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=_PROTOCOL_COMMIT,
+        protocol_tag_object=_PROTOCOL_TAG_OBJECT,
+        protocol_sha256=_PROTOCOL_SHA256,
+        runtime_binding_passed=False,
+        credential_cleanup_passed=True,
+    )
+    evidence = runner.execute_lifecycle()
+
+    assert evidence.runtime_binding_passed is False
+    with pytest.raises(MutationProtocolError, match="RUNTIME_BINDING_FAILED"):
+        validate_lifecycle_pass(evidence)
+
+
+def test_p2_dirty_final_state_clears_cleanup_confirmed() -> None:
+    transport = _happy_transport()
+    transport.final_state = {
+        "nonzero_positions": ((SYMBOL, Decimal("0.001")),),
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+    evidence = _runner(transport).execute_lifecycle()
+
+    assert evidence.cleanup_confirmed is False
+    assert evidence.final_account_config_matches is True
+    with pytest.raises(MutationProtocolError, match="CLEANUP_NOT_CONFIRMED"):
+        validate_lifecycle_pass(evidence)
