@@ -988,6 +988,9 @@ def test_closure_preflight_account_config_mismatch_is_structured_stop(
     assert payload["lifecycle"]["cancel_requests"] == 0
     assert payload["lifecycle"]["emergency_close_requests"] == 0
     assert payload["containment"]["containment_occurred"] is False
+    # No final state was ever read: counts are unknown, never fabricated as 0.
+    assert payload["lifecycle"]["final_open_regular_orders"] is None
+    assert payload["lifecycle"]["final_open_algo_orders"] is None
 
 
 def test_closure_preflight_account_not_clean_is_structured_stop(
@@ -1056,6 +1059,10 @@ def test_closure_post_create_query_protocol_error_reconciles_to_blocked(
     assert payload["lifecycle"]["cancel_requests"] == 1
     assert payload["lifecycle"]["emergency_close_requests"] == 0
     assert payload["containment"]["containment_occurred"] is False
+    # The recovery re-confirmed a clean final state, so the proven zero counts
+    # are recorded as real zeros (not an unprovable fabricated value).
+    assert payload["lifecycle"]["final_open_regular_orders"] == 0
+    assert payload["lifecycle"]["final_open_algo_orders"] == 0
 
 
 def test_closure_post_create_malformed_ownership_evidence_blocks(
@@ -1215,3 +1222,142 @@ def test_closure_happy_path_still_passes_via_run_mutation_lifecycle(
     assert payload["lifecycle"]["create_requests"] == 1
     assert payload["lifecycle"]["cancel_requests"] == 1
     assert payload["lifecycle"]["emergency_close_requests"] == 0
+    # The happy-path PASS records the proven clean counts as real zeros.
+    assert payload["lifecycle"]["final_open_regular_orders"] == 0
+    assert payload["lifecycle"]["final_open_algo_orders"] == 0
+
+
+# ---------------------------------------------------------------------------
+# P2-1: STOP/BLOCKED evidence records provable final open-order counts. A
+# provable count is the real observed value; an unprovable count is JSON null,
+# never a fabricated clean zero (so unknown account state cannot read as clean).
+# ---------------------------------------------------------------------------
+
+
+def test_p2_1_stop_records_provable_regular_open_orders(tmp_path: Path) -> None:
+    """A STOP whose final state provably holds open regular orders records the
+    real count instead of a fabricated zero."""
+    binding = _real_binding_values()
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        containment_final={
+            "nonzero_positions": (),
+            "open_regular_orders": 1,
+            "open_algo_orders": 0,
+            "account_config_matches": True,
+        },
+    )
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "BLOCKED_FINAL_NOT_CLEAN_AFTER_CONTAINMENT" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["final_open_regular_orders"] == 1
+    assert payload["lifecycle"]["final_open_algo_orders"] == 0
+
+
+def test_p2_1_stop_records_provable_algo_open_orders(tmp_path: Path) -> None:
+    """A STOP whose final state provably holds open algo orders records the
+    real count instead of a fabricated zero."""
+    binding = _real_binding_values()
+    transport = _containment_transport(
+        terminal_status="FILLED",
+        terminal_executed_quantity=Decimal("0.002"),
+        containment_final={
+            "nonzero_positions": (),
+            "open_regular_orders": 0,
+            "open_algo_orders": 2,
+            "account_config_matches": True,
+        },
+    )
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "BLOCKED_FINAL_NOT_CLEAN_AFTER_CONTAINMENT" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["final_open_regular_orders"] == 0
+    assert payload["lifecycle"]["final_open_algo_orders"] == 2
+
+
+def test_p2_1_stop_malformed_counts_are_null_not_zero(tmp_path: Path) -> None:
+    """Malformed final-state counts are unknown: JSON null, never a fake zero."""
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.final_state = {
+        "nonzero_positions": (),
+        "open_regular_orders": 0.5,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "FINAL_STATE_EVIDENCE_MALFORMED" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["final_open_regular_orders"] is None
+    assert payload["lifecycle"]["final_open_algo_orders"] is None
+
+
+def test_p2_1_stop_incomplete_final_state_counts_are_null_not_zero(
+    tmp_path: Path,
+) -> None:
+    """Incomplete final-state evidence is unknown: JSON null, never a fake zero."""
+    binding = _real_binding_values()
+    transport = _happy_transport()
+    transport.final_state = {}
+    code, evidence_path = run_mutation_lifecycle(
+        transport,
+        project_root=PROJECT_ROOT,
+        evidence_dir=tmp_path,
+        environ={},
+        runtime_commit=binding["runtime_commit"],
+        session_nonce=_SESSION_NONCE,
+        authorization_id=_AUTHORIZATION_ID,
+        protocol_commit=binding["protocol_commit"],
+        protocol_tag_object=binding["protocol_tag_object"],
+        protocol_sha256=binding["protocol_sha256"],
+    )
+
+    assert code == 1
+    payload = json.loads(evidence_path.read_text())
+    assert payload["status"] == "STOP"
+    assert "FINAL_STATE_EVIDENCE_INCOMPLETE" in payload["reason_codes"][0]
+    assert payload["lifecycle"]["final_open_regular_orders"] is None
+    assert payload["lifecycle"]["final_open_algo_orders"] is None

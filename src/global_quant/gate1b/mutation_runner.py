@@ -1125,6 +1125,32 @@ def _verify_runtime_binding(
     }
 
 
+def _provable_final_open_counts(
+    final_state: Mapping[str, object],
+) -> tuple[int, int] | None:
+    """Return exact (regular, algo) open-order counts only when the final-state
+    evidence is complete and strictly valid, else ``None`` (unknown).
+
+    STOP/BLOCKED evidence must reflect the last provable observation: an
+    unprovable count is recorded as JSON null, never fabricated as a clean
+    zero, so a later verifier can never mistake an unknown account for a clean
+    one. Mirrors the ``_build_evidence`` count rules (exact non-negative ints;
+    bool/float/str/None/negative values are all unprovable).
+    """
+
+    if not isinstance(final_state, Mapping):
+        return None
+    if _REQUIRED_FINAL_STATE_KEYS - final_state.keys():
+        return None
+    open_regular = final_state.get("open_regular_orders")
+    open_algo = final_state.get("open_algo_orders")
+    if type(open_regular) is not int or type(open_algo) is not int:
+        return None
+    if open_regular < 0 or open_algo < 0:
+        return None
+    return open_regular, open_algo
+
+
 def _base_payload(
     *,
     status: str,
@@ -1258,6 +1284,7 @@ def run_mutation_lifecycle(
         # been converted inside execute_lifecycle, so reaching here with
         # create_requests > 0 is defensive and still fails closed.
         created = runner._guard.ledger.create_requests if runner._guard is not None else 0
+        final_counts = _provable_final_open_counts(runner._final_state)
         if created == 0:
             reason = f"STOP_PREFLIGHT_PROTOCOL_ERROR:{exc}"
             lifecycle = {
@@ -1269,8 +1296,10 @@ def run_mutation_lifecycle(
                 "unexpected_mutations": 0,
                 "production_contacted": False,
                 "read_retries": 0,
-                "final_open_regular_orders": 0,
-                "final_open_algo_orders": 0,
+                "final_open_regular_orders": (
+                    final_counts[0] if final_counts is not None else None
+                ),
+                "final_open_algo_orders": (final_counts[1] if final_counts is not None else None),
             }
         else:
             reason = f"BLOCKED_CLEANUP_UNPROVEN:{exc}"
@@ -1284,8 +1313,10 @@ def run_mutation_lifecycle(
                 "unexpected_mutations": 1,
                 "production_contacted": bool(runner._transport.production_contacted),
                 "read_retries": ledger.read_retry_requests,
-                "final_open_regular_orders": 0,
-                "final_open_algo_orders": 0,
+                "final_open_regular_orders": (
+                    final_counts[0] if final_counts is not None else None
+                ),
+                "final_open_algo_orders": (final_counts[1] if final_counts is not None else None),
             }
         payload = _base_payload(
             status="STOP",
@@ -1309,6 +1340,7 @@ def run_mutation_lifecycle(
         )
         payload.update(binding)
         ledger = runner._guard.ledger if runner._guard is not None else None
+        final_counts = _provable_final_open_counts(runner._final_state)
         payload["lifecycle"] = {
             "create_requests": ledger.create_requests if ledger is not None else 0,
             "cancel_requests": ledger.cancel_requests if ledger is not None else 0,
@@ -1320,8 +1352,8 @@ def run_mutation_lifecycle(
             "unexpected_mutations": 1 if runner._unexpected_fill_detected else 0,
             "production_contacted": bool(runner._transport.production_contacted),
             "read_retries": ledger.read_retry_requests if ledger is not None else 0,
-            "final_open_regular_orders": 0,
-            "final_open_algo_orders": 0,
+            "final_open_regular_orders": (final_counts[0] if final_counts is not None else None),
+            "final_open_algo_orders": (final_counts[1] if final_counts is not None else None),
         }
         payload["containment"] = {
             "containment_occurred": exc.containment_occurred,
