@@ -2,23 +2,37 @@
 
 These tests prove the timeout boundary guarantee:
 
-* NO_MUTATION_THREAD_SURVIVES_TIMEOUT_BOUNDARY — when the transport raises
-  ``DEMO_HTTP_TIMEOUT``, every in-flight worker thread (urllib is synchronous
-  and cannot be cancelled by asyncio) has already converged, so no CREATE /
-  CANCEL request can still be executing;
-* a timed-out CREATE is never retried;
-* the runner routes a timed-out mutation into ownership-query containment and
-  ends BLOCKED — a clean happy-path PASS is unreachable, so a "late mutation"
-  landing after a clean verdict is impossible.
+* NO_QUEUED_OR_RUNNING_MUTATION_SURVIVES_TIMEOUT_BOUNDARY — when the transport
+  raises ``DEMO_HTTP_TIMEOUT``, every tracked request has converged, whether it
+  was already running on a worker thread (urllib is synchronous and cannot be
+  cancelled by asyncio) or still sitting in the executor queue.  A request that
+  has been submitted but not started is counted, a request that is RUNNING but
+  has not yet entered the worker frame is counted, and a drain that cannot
+  prove convergence within its absolute deadline escalates to
+  ``BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED`` instead of returning quietly;
+* failure classification is by "could the mutation bytes have been emitted",
+  not by Python exception type: a post-send failure becomes
+  ``DEMO_HTTP_UNKNOWN_MUTATION_STATE`` and is routed through the ownership
+  query, while a connect-phase failure stays an ordinary STOP;
+* a timed-out or unknown-state CREATE is never retried;
+* the runner routes such a mutation into ownership-query containment and ends
+  BLOCKED — a clean happy-path PASS is unreachable, so a "late mutation"
+  landing after a clean verdict is impossible.  A probe proven ``FILLED`` runs
+  the frozen section-14 containment (it is not skipped by the inapplicable
+  owned-order-OPEN proof).
 
-No real credential, no Binance, no Demo mutation: the slow server is a local
-HTTP origin and the runner uses a fixture-driven fake transport.
+No real credential, no Binance, no Demo mutation: the slow / abrupt servers are
+local sockets and the runner uses a fixture-driven fake transport.
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures.thread as _cf_thread
+import contextlib
 import http.server
+import socket
+import struct
 import threading
 import time
 from decimal import Decimal
@@ -32,7 +46,12 @@ from global_quant.gate1b.demo_transport import (
     DemoLifecycleTransport,
     _RedirectSafeHttpClient,
 )
-from global_quant.gate1b.mutation_protocol import AccountState, LimitOrderFilters, SymbolState
+from global_quant.gate1b.mutation_protocol import (
+    AccountState,
+    LimitOrderFilters,
+    MarketCloseFilters,
+    SymbolState,
+)
 from global_quant.gate1b.mutation_runner import (
     MutationRunnerError,
     run_mutation_lifecycle,
@@ -121,6 +140,52 @@ class _SlowSignedClient:
         )
 
 
+class _AbruptCloseOrigin:
+    """Origin B: accepts the connection, reads the request, then resets it.
+
+    This reproduces the only dangerous send-phase failure: the request bytes
+    (a CREATE) have provably reached the socket and may have reached the venue,
+    but no response is returned.  ``SO_LINGER(1, 0)`` makes ``close()`` emit a
+    TCP RST so the client observes a reset rather than a clean EOF.
+    """
+
+    def __init__(self) -> None:
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(8)
+        self.request_bytes_received = 0
+        self._running = True
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    @property
+    def base_url(self) -> str:
+        host, port = self._sock.getsockname()
+        return f"http://{host}:{port}"
+
+    def _serve(self) -> None:
+        while self._running:
+            try:
+                conn, _ = self._sock.accept()
+            except OSError:
+                return
+            with contextlib.suppress(OSError):
+                conn.settimeout(2.0)
+                data = conn.recv(65536)
+                self.request_bytes_received += len(data)
+                conn.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                )
+            with contextlib.suppress(OSError):
+                conn.close()
+
+    def close(self) -> None:
+        self._running = False
+        with contextlib.suppress(OSError):
+            self._sock.close()
+
+
 # ---------------------------------------------------------------------------
 # Transport-level: drain guarantee
 # ---------------------------------------------------------------------------
@@ -146,8 +211,9 @@ class TestTransportDrain:
         assert client.pending_count() == 0
 
     def test_signed_timeout_drains_before_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """End-to-end: when _signed raises DEMO_HTTP_TIMEOUT, no worker thread
-        survives the boundary (NO_MUTATION_THREAD_SURVIVES_TIMEOUT_BOUNDARY)."""
+        """End-to-end: when _signed raises DEMO_HTTP_TIMEOUT, nothing queued or
+        running survives the boundary
+        (NO_QUEUED_OR_RUNNING_MUTATION_SURVIVES_TIMEOUT_BOUNDARY)."""
         monkeypatch.setattr(dt, "_REQUEST_TIMEOUT_SECONDS", 0.5)
         origin = _SlowOrigin(delay_seconds=3.0)
         try:
@@ -218,6 +284,249 @@ class TestTransportDrain:
 
 
 # ---------------------------------------------------------------------------
+# Attack A: a submitted-but-not-started request must already be tracked.
+# ---------------------------------------------------------------------------
+
+
+class TestQueuedRequestTracking:
+    def test_saturated_executor_counts_queued_request(self) -> None:
+        """The executor has one worker.  While request 1 occupies it, request 2
+        is *queued*: its callable has never run and the origin has never seen
+        it.  ``pending_count()`` must nonetheless report 2 — tracking covers
+        queued + running, not running-and-registered only."""
+        origin = _SlowOrigin(delay_seconds=1.0)
+        client = _RedirectSafeHttpClient(timeout_secs=5.0, max_workers=1)
+        observed: dict[str, int] = {}
+
+        async def scenario() -> None:
+            first = asyncio.ensure_future(
+                client.request("GET", origin.base_url + "/first", headers={})
+            )
+            # Let the worker pick request 1 up and reach the origin.
+            for _ in range(200):
+                if origin.request_count >= 1:
+                    break
+                await asyncio.sleep(0.005)
+            second = asyncio.ensure_future(
+                client.request("GET", origin.base_url + "/second", headers={})
+            )
+            # Yield until the second coroutine has registered and submitted.
+            for _ in range(200):
+                if client.pending_count() >= 2:
+                    break
+                await asyncio.sleep(0.005)
+            observed["pending"] = client.pending_count()
+            observed["origin_requests"] = origin.request_count
+
+            # The drain must cancel the queued work item (it can never run) and
+            # wait for the running one; it must not report a clean boundary
+            # while either is outstanding.
+            await client.drain(deadline_secs=5.0)
+            observed["pending_after_drain"] = client.pending_count()
+            observed["origin_requests_after_drain"] = origin.request_count
+
+            for task in (first, second):
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
+
+        try:
+            asyncio.run(scenario())
+        finally:
+            client.close()
+            origin.close()
+
+        assert observed["origin_requests"] == 1, (
+            "premise broken: the second request must still be queued"
+        )
+        assert observed["pending"] == 2, (
+            "a submitted-but-not-started request was invisible to pending_count()"
+        )
+        assert observed["pending_after_drain"] == 0
+        # The cancelled work item must never have executed.
+        assert observed["origin_requests_after_drain"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Attack B: the RUNNING-but-not-yet-inside-the-worker window.
+# ---------------------------------------------------------------------------
+
+
+class TestRunningBeforeWorkerEntryWindow:
+    def test_window_between_running_and_worker_entry_is_tracked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CPython marks the future RUNNING in ``_WorkItem.run()`` *before* it
+        calls the submitted callable.  In that window ``cancel()`` already
+        fails, so the coroutine must not clear the token, and the worker frame
+        has not been entered yet, so its ``finally`` cannot have cleared it
+        either.  The token must therefore still be registered.
+
+        The window is unobservable from the public API, so this test
+        reimplements ``_WorkItem.run`` faithfully and pauses inside it.
+        """
+        client = _RedirectSafeHttpClient(timeout_secs=1.0, max_workers=1)
+        in_window = threading.Event()
+        resume = threading.Event()
+        observed: dict[str, Any] = {}
+
+        def patched_run(work_item: Any) -> None:
+            if not work_item.future.set_running_or_notify_cancel():
+                return
+            # --- inside the uncancellable window -----------------------------
+            observed["running"] = work_item.future.running()
+            observed["cancel_result"] = work_item.future.cancel()
+            observed["pending_in_window"] = client.pending_count()
+            in_window.set()
+            resume.wait(5.0)
+            # --- faithful continuation of CPython's _WorkItem.run ------------
+            try:
+                result = work_item.fn(*work_item.args, **work_item.kwargs)
+            except BaseException as exc:
+                work_item.future.set_exception(exc)
+            else:
+                work_item.future.set_result(result)
+
+        monkeypatch.setattr(_cf_thread._WorkItem, "run", patched_run)
+
+        async def scenario() -> None:
+            task = asyncio.ensure_future(
+                client.request("GET", "http://127.0.0.1:1/never", headers={})
+            )
+            for _ in range(400):
+                if in_window.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            observed["pending_from_loop"] = client.pending_count()
+            resume.set()
+            with contextlib.suppress(BaseException):
+                await task
+            observed["pending_after"] = client.pending_count()
+
+        try:
+            asyncio.run(scenario())
+        finally:
+            resume.set()
+            client.close()
+
+        assert in_window.is_set(), "the window was never reached"
+        assert observed["running"] is True
+        assert observed["cancel_result"] is False, (
+            "premise broken: cancel() must fail once the future is RUNNING"
+        )
+        assert observed["pending_in_window"] == 1, (
+            "a RUNNING-but-not-yet-entered request was invisible to pending_count()"
+        )
+        assert observed["pending_from_loop"] == 1
+        assert observed["pending_after"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Attack D: the drain has an absolute deadline and fails closed on expiry.
+# ---------------------------------------------------------------------------
+
+
+class TestDrainDeadline:
+    def test_unconverged_drain_fails_closed(self) -> None:
+        """A drain that cannot prove convergence inside its absolute deadline
+        must raise BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED, never return."""
+        origin = _SlowOrigin(delay_seconds=3.0)
+        client = _RedirectSafeHttpClient(timeout_secs=10.0, max_workers=1)
+        captured: dict[str, Any] = {}
+
+        async def scenario() -> None:
+            task = asyncio.ensure_future(
+                client.request("GET", origin.base_url + "/slow", headers={})
+            )
+            for _ in range(400):
+                if origin.request_count >= 1:
+                    break
+                await asyncio.sleep(0.005)
+            started = time.monotonic()
+            with pytest.raises(MutationRunnerError) as exc:
+                await client.drain(deadline_secs=0.15)
+            captured["reason"] = exc.value.reason
+            captured["elapsed"] = time.monotonic() - started
+            captured["pending"] = client.pending_count()
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+
+        try:
+            asyncio.run(scenario())
+        finally:
+            client.close()
+            origin.close()
+
+        assert captured["reason"] == "BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED"
+        # The deadline is absolute: the drain neither returned early nor waited
+        # for the (3 s) origin.
+        assert 0.1 <= captured["elapsed"] < 2.0, captured["elapsed"]
+        assert captured["pending"] >= 1
+
+    def test_converged_drain_returns(self) -> None:
+        """The deadline must not turn a converging drain into a false BLOCKED."""
+        client = _RedirectSafeHttpClient(timeout_secs=1.0, max_workers=2)
+        try:
+            asyncio.run(client.drain(deadline_secs=0.5))
+        finally:
+            client.close()
+        assert client.pending_count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Attack E1: send-phase failure is classified by emitted bytes, not by type.
+# ---------------------------------------------------------------------------
+
+
+class TestSendPhaseClassification:
+    def test_post_send_reset_is_unknown_mutation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Request bytes reached the socket and the peer reset the connection:
+        the mutation state is UNKNOWN and must fail closed into
+        DEMO_HTTP_UNKNOWN_MUTATION_STATE (not a plain transport failure)."""
+        monkeypatch.setattr(dt, "_REQUEST_TIMEOUT_SECONDS", 2.0)
+        origin = _AbruptCloseOrigin()
+        transport = None
+        try:
+            signed = _SlowSignedClient(origin.base_url, timeout_secs=2.0)
+            transport = DemoLifecycleTransport(http_client=signed)
+            with pytest.raises(MutationRunnerError) as exc:
+                transport.fetch_book()
+            assert exc.value.reason.startswith("DEMO_HTTP_UNKNOWN_MUTATION_STATE"), (
+                exc.value.reason
+            )
+            assert origin.request_bytes_received > 0, (
+                "premise broken: the request bytes never reached the peer"
+            )
+            # The unknown-mutation boundary drains too: nothing is left queued.
+            assert transport.pending_request_count() == 0
+        finally:
+            if transport is not None:
+                transport.close()
+            origin.close()
+
+    def test_connect_phase_failure_is_not_unknown_mutation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Zero bytes emitted is mechanically provable, so a refused connection
+        stays an ordinary STOP and never claims an unknown mutation."""
+        monkeypatch.setattr(dt, "_REQUEST_TIMEOUT_SECONDS", 2.0)
+        transport = None
+        try:
+            signed = _SlowSignedClient("http://127.0.0.1:1", timeout_secs=2.0)
+            transport = DemoLifecycleTransport(http_client=signed)
+            with pytest.raises(MutationRunnerError) as exc:
+                transport.fetch_book()
+            assert "UNKNOWN_MUTATION_STATE" not in exc.value.reason, exc.value.reason
+            assert exc.value.reason.startswith("DEMO_HTTP_FAILURE_"), exc.value.reason
+        finally:
+            if transport is not None:
+                transport.close()
+
+
+# ---------------------------------------------------------------------------
 # Runner-level: timed-out mutation -> ownership query containment -> BLOCKED
 # ---------------------------------------------------------------------------
 
@@ -271,6 +580,63 @@ def _symbol_state() -> SymbolState:
         ),
         uninterpreted_applicable_filter_types=(),
     )
+
+
+def _market_close_filters() -> MarketCloseFilters:
+    return MarketCloseFilters(
+        min_quantity=Decimal("0.001"),
+        max_quantity=Decimal("100.000"),
+        step_size=Decimal("0.001"),
+        min_notional=Decimal("5"),
+        market_lot_size_filter_count=1,
+        min_notional_filter_count=1,
+        uninterpreted_applicable_filter_types=(),
+    )
+
+
+def _clean_final_state() -> dict[str, Any]:
+    return {
+        "nonzero_positions": (),
+        "open_regular_orders": 0,
+        "open_algo_orders": 0,
+        "account_config_matches": True,
+    }
+
+
+def _reconcile_owned(residual: Decimal) -> dict[str, Any]:
+    return {
+        "residual_quantity": residual,
+        "position_direction": "LONG",
+        "open_remainder_quantity": Decimal("0"),
+        "other_activity_absent": True,
+    }
+
+
+def _filled_containment_overrides(residual: Decimal = Decimal("0.002")) -> dict[str, Any]:
+    """Fixture for a probe proven FILLED after an unsettled mutation.
+
+    Supplies everything section 14 needs so the containment can actually run to
+    completion: the market-close filter contract, the owned-position
+    reconciliation, the emergency-close ack/terminal query and the post
+    containment final state.
+    """
+    return {
+        "query_status": "FILLED",
+        "query_executed_quantity": residual,
+        "terminal_status": "FILLED",
+        "terminal_executed_quantity": residual,
+        "market_close_filters": _market_close_filters(),
+        "reconcile_state": _reconcile_owned(residual),
+        "emergency_close_ack": {
+            "orderId": "2",
+            "status": "NEW",
+            "clientOrderId": "g1b16c-aaaaaaaa-0123456789abcdef-1",
+        },
+        "emergency_query_status": "FILLED",
+        "emergency_query_executed_quantity": residual,
+        "containment_final_state": _clean_final_state(),
+        "final_state": _clean_final_state(),
+    }
 
 
 def _make_transport(**overrides: Any) -> Any:
@@ -375,21 +741,55 @@ class TestRunnerTimeoutContainment:
     def test_create_timeout_order_filled_containment_blocked(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """CREATE times out; ownership query proves a fill; section-14
-        containment runs; verdict is BLOCKED."""
-        transport = _make_transport(
-            query_status="FILLED",
-            query_executed_quantity=Decimal("0.1"),
-            terminal_status="FILLED",
-            terminal_executed_quantity=Decimal("0.1"),
-            final_state={
-                "nonzero_positions": (("ETHUSDT", Decimal("0.1")),),
-                "open_regular_orders": 0,
-                "open_algo_orders": 0,
-                "account_config_matches": True,
-            },
-            market_close_filters=None,
-        )
+        """Attack C: CREATE times out and the ownership query proves the probe
+        FILLED.
+
+        The guard's owned-order proof only admits NEW/PARTIALLY_FILLED, so a
+        naive implementation aborts on OWNERSHIP_PROOF_MISMATCH and silently
+        skips section 14 for the single most dangerous outcome. This asserts the
+        containment actually ran: an emergency reduce-only close was attempted
+        and the final state was re-confirmed, while the verdict stays BLOCKED
+        and the CREATE is never retried.
+        """
+        transport = _make_transport(**_filled_containment_overrides())
+
+        create_calls = {"n": 0}
+        emergency_calls = {"n": 0}
+        original_emergency = transport.send_emergency_close
+
+        def timeout_create(reservation: Any) -> dict[str, str]:
+            create_calls["n"] += 1
+            raise MutationRunnerError("DEMO_HTTP_TIMEOUT")
+
+        def count_emergency(reservation: Any) -> dict[str, str]:
+            emergency_calls["n"] += 1
+            return original_emergency(reservation)
+
+        transport.send_create = timeout_create  # type: ignore[method-assign]
+        transport.send_emergency_close = count_emergency  # type: ignore[method-assign]
+
+        exit_code, payload = self._run(transport, tmp_path, monkeypatch)
+
+        assert exit_code != 0
+        assert payload["status"] != "PASS"
+        assert any("TIMEOUT" in r for r in payload["reason_codes"]), payload["reason_codes"]
+        assert create_calls["n"] == 1, "CREATE must not be retried"
+        assert emergency_calls["n"] >= 1, "section-14 containment never ran for a FILLED probe"
+        containment = payload["containment"]
+        assert containment["containment_occurred"] is True, containment
+        assert containment["emergency_close_attempts"] >= 1, containment
+        assert containment["observed_terminal_status"] == "FILLED", containment
+
+    def test_filled_without_completable_containment_escalates(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A proven fill whose section-14 containment cannot complete must not
+        be reported with the ordinary timeout reason: the residual position is
+        still open, so the failure is escalated to its own BLOCKED reason."""
+        overrides = _filled_containment_overrides()
+        # Break the reconciliation so the owned-position proof is unprovable.
+        overrides["reconcile_state"] = {}
+        transport = _make_transport(**overrides)
 
         def timeout_create(reservation: Any) -> dict[str, str]:
             raise MutationRunnerError("DEMO_HTTP_TIMEOUT")
@@ -399,7 +799,73 @@ class TestRunnerTimeoutContainment:
         exit_code, payload = self._run(transport, tmp_path, monkeypatch)
         assert exit_code != 0
         assert payload["status"] != "PASS"
-        assert any("TIMEOUT" in r for r in payload["reason_codes"])
+        assert payload["reason_codes"] == ["BLOCKED_MUTATION_TIMEOUT_CONTAINMENT_UNPROVEN"], (
+            payload["reason_codes"]
+        )
+        assert payload["containment"]["containment_occurred"] is False
+
+    def test_unknown_mutation_state_runs_ownership_containment(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attack E: a CREATE that failed *after* its bytes reached the socket
+        is an UNKNOWN mutation, not a plain STOP.
+
+        It must be routed through the same deterministic ownership query and
+        containment as a timeout, must never re-POST the CREATE, and must end
+        BLOCKED.
+        """
+        transport = _make_transport(**_filled_containment_overrides())
+
+        create_calls = {"n": 0}
+        query_calls = {"n": 0}
+        emergency_calls = {"n": 0}
+        original_query = transport.send_query_order
+        original_emergency = transport.send_emergency_close
+
+        def unknown_create(reservation: Any) -> dict[str, str]:
+            create_calls["n"] += 1
+            raise MutationRunnerError("DEMO_HTTP_UNKNOWN_MUTATION_STATE:CONNECTIONRESETERROR")
+
+        def count_query(reservation: Any):
+            query_calls["n"] += 1
+            return original_query(reservation)
+
+        def count_emergency(reservation: Any) -> dict[str, str]:
+            emergency_calls["n"] += 1
+            return original_emergency(reservation)
+
+        transport.send_create = unknown_create  # type: ignore[method-assign]
+        transport.send_query_order = count_query  # type: ignore[method-assign]
+        transport.send_emergency_close = count_emergency  # type: ignore[method-assign]
+
+        exit_code, payload = self._run(transport, tmp_path, monkeypatch)
+
+        assert exit_code != 0
+        assert payload["status"] != "PASS"
+        assert create_calls["n"] == 1, "CREATE retry count must be 0"
+        assert query_calls["n"] >= 1, "unknown mutation state skipped the ownership query"
+        assert emergency_calls["n"] >= 1, "unknown mutation state skipped section-14 containment"
+        containment = payload["containment"]
+        assert containment["containment_occurred"] is True, containment
+        assert containment["emergency_close_attempts"] >= 1, containment
+
+    def test_unknown_mutation_state_before_create_is_plain_stop(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No CREATE has been reserved yet, so there is nothing to contain: the
+        unsettled-mutation predicate must not fire on a preflight read."""
+        transport = _make_transport()
+
+        def unknown_account() -> AccountState:
+            raise MutationRunnerError("DEMO_HTTP_UNKNOWN_MUTATION_STATE:OSERROR")
+
+        transport.fetch_account_state = unknown_account  # type: ignore[method-assign]
+
+        exit_code, payload = self._run(transport, tmp_path, monkeypatch)
+        assert exit_code != 0
+        assert payload["status"] != "PASS"
+        assert payload["containment"]["containment_occurred"] is False
+        assert payload["containment"]["emergency_close_attempts"] == 0
 
     def test_create_timeout_order_unprovable_blocked(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch

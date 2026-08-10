@@ -409,38 +409,64 @@ class MutationRunner:
             # state; route it into the existing bounded fail-closed cleanup.
             self._fail_closed_after_protocol_error(exc)
         except MutationRunnerError as exc:
-            # Timeout boundary: a mutation (CREATE/CANCEL) request returned
-            # DEMO_HTTP_TIMEOUT. The transport has already drained the in-flight
-            # worker thread, so no mutation can complete after this point. The
-            # mutation outcome is UNKNOWN but settled: query the deterministic
-            # clientOrderId, run the frozen targeted cancel / containment, and
-            # end BLOCKED. A clean PASS is unreachable and CREATE is never
-            # retried. All other MutationRunnerError values are re-raised
-            # unchanged (their original reason must reach the evidence writer).
-            if self._is_mutation_timeout(exc):
+            # Unsettled-mutation boundary: a mutation (CREATE/CANCEL) request
+            # either timed out (DEMO_HTTP_TIMEOUT) or failed after its request
+            # bytes had already reached the socket
+            # (DEMO_HTTP_UNKNOWN_MUTATION_STATE). Both mean "the venue may have
+            # seen this mutation". The transport has already drained every
+            # queued/running request, so no mutation can complete after this
+            # point. The outcome is UNKNOWN but settled: query the
+            # deterministic clientOrderId, run the frozen targeted cancel /
+            # containment, and end BLOCKED. A clean PASS is unreachable and
+            # CREATE is never retried. All other MutationRunnerError values are
+            # re-raised unchanged (their original reason must reach the
+            # evidence writer).
+            if self._is_unsettled_mutation(exc):
                 self._timeout_containment()
             raise
 
-    def _is_mutation_timeout(self, exc: MutationRunnerError) -> bool:
+    def _is_unsettled_mutation(self, exc: MutationRunnerError) -> bool:
+        """True when a reserved mutation may have reached the venue.
+
+        Classification is by "could the mutation bytes have been emitted", not
+        by Python exception type:
+
+        * ``DEMO_HTTP_TIMEOUT`` — the request was still outstanding when the
+          frozen single-request timeout fired;
+        * ``DEMO_HTTP_UNKNOWN_MUTATION_STATE:*`` — the transport proved that
+          request bytes had already been handed to the socket before the
+          failure (a post-send ``OSError``/``URLError``/reset).
+
+        A connect-phase failure is provably zero-bytes-emitted and therefore
+        never reaches this predicate; it stays an ordinary STOP.
+        """
+        reason = str(getattr(exc, "reason", ""))
+        unsettled = reason == "DEMO_HTTP_TIMEOUT" or reason.startswith(
+            "DEMO_HTTP_UNKNOWN_MUTATION_STATE"
+        )
         return (
-            getattr(exc, "reason", "") == "DEMO_HTTP_TIMEOUT"
-            and self._guard is not None
-            and self._guard.ledger.create_requests > 0
+            unsettled and self._guard is not None and self._guard.ledger.create_requests > 0
         )
 
     def _timeout_containment(self) -> NoReturn:
-        """Contain a timed-out mutation request.
+        """Contain a timed-out / unknown-state mutation request.
 
         Guarantees (mechanical):
 
-        * NO_MUTATION_THREAD_SURVIVES_TIMEOUT_BOUNDARY — the transport drained
-          every in-flight worker thread before raising ``DEMO_HTTP_TIMEOUT``,
-          so no CREATE/CANCEL request is still executing here;
+        * NO_QUEUED_OR_RUNNING_MUTATION_SURVIVES_TIMEOUT_BOUNDARY — the
+          transport drained every tracked request, queued **or** running,
+          before raising ``DEMO_HTTP_TIMEOUT`` /
+          ``DEMO_HTTP_UNKNOWN_MUTATION_STATE``; a drain that cannot prove
+          convergence escalates to
+          ``BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED`` instead of returning,
+          so no CREATE/CANCEL request is still queued or executing here;
         * mutation outcome is UNKNOWN but settled — a single ownership query on
           the deterministic clientOrderId establishes whether the order landed;
         * if the order is open, the frozen targeted cancel is applied; if a
-          fill is observed, the section-14 containment runs; the final account
-          state is re-confirmed;
+          fill is observed — including a terminal ``FILLED`` that the guard's
+          owned-order-OPEN proof cannot admit — the section-14 containment
+          runs; the final account state is re-confirmed and the evidence
+          closeout is written;
         * the verdict is BLOCKED — the run can never be reclassified as a clean
           happy-path PASS, and the CREATE is never retried.
         """
@@ -453,15 +479,21 @@ class MutationRunner:
             with contextlib.suppress(MutationProtocolError, MutationRunnerError):
                 self._cancel_after_timeout_ownership()
 
-        if (
-            self._unexpected_fill_detected or self._terminal_executed_quantity > 0
-        ) and not self._containment_occurred:
+        fill_proven = self._unexpected_fill_detected or self._terminal_executed_quantity > 0
+        if fill_proven and not self._containment_occurred:
             with contextlib.suppress(MutationProtocolError, MutationRunnerError):
                 self._containment_phase()
 
         with contextlib.suppress(MutationProtocolError, MutationRunnerError):
             self._final_phase()
             self._build_evidence()
+
+        if fill_proven and not self._containment_occurred:
+            # A fill was mechanically proven but section 14 could not be
+            # completed. That must never be reported with the same reason as an
+            # ordinary timeout whose probe never filled: the residual position
+            # is still open and the operator has to intervene.
+            self._raise_timeout_blocked("BLOCKED_MUTATION_TIMEOUT_CONTAINMENT_UNPROVEN")
 
         self._raise_timeout_blocked("BLOCKED_MUTATION_TIMEOUT")
 
@@ -524,6 +556,17 @@ class MutationRunner:
 
         Establishes whether the timed-out CREATE landed. A fill or non-open
         state marks the run as having observed an unexpected mutation.
+
+        The guard's owned-order proof asserts "this order is owned **and
+        open**" and therefore only admits ``NEW``/``PARTIALLY_FILLED``. When
+        the query proves a terminal state instead (``FILLED``/``CANCELED``/
+        ``EXPIRED``/``EXPIRED_IN_MATCH``) the open-order proof is inapplicable,
+        so it is deliberately not issued: issuing it would raise
+        ``OWNERSHIP_PROOF_MISMATCH`` and abort the caller before section 14,
+        which would silently skip containment for the single most dangerous
+        outcome (a filled probe). Ownership of a terminal fill is instead
+        proven by the section-14 owned-*position* proof, which explicitly
+        accepts ``FILLED``.
         """
         self._elapsed += Decimal("0.001")
         query = self.guard.reserve(
@@ -545,6 +588,11 @@ class MutationRunner:
         self._terminal_executed_quantity = executed
         if executed != 0 or status not in {"NEW", "PARTIALLY_FILLED", "CANCELED", "EXPIRED"}:
             self._unexpected_fill_detected = True
+        if status not in {"NEW", "PARTIALLY_FILLED"}:
+            # Terminal state: the owned-order-OPEN proof does not apply. The
+            # ownership question is already answered by this observation and
+            # the caller routes a fill into section-14 containment.
+            return
         order_proof = OwnedOrderProof(
             intent_sha256=self.intent.intent_sha256,
             symbol=SYMBOL,

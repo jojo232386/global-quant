@@ -28,8 +28,11 @@ Design rules (frozen protocol section 2.1 / 3 / 7 / 11):
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
+import functools
 import json
+import socket
 import threading
 import time as _time
 import urllib.error
@@ -54,6 +57,22 @@ from global_quant.gate1b.mutation_runner import MutationRunnerError
 
 # Frozen single-request timeout (protocol section 11).
 _REQUEST_TIMEOUT_SECONDS = 5.0
+# Absolute deadline applied by ``_RedirectSafeHttpClient.drain()``. Drain runs
+# only after a request already breached the frozen single-request timeout, so
+# the worker's own total-request watchdog (same 5 s budget, armed when the
+# request started) has either already fired or is about to; this grace window
+# covers the socket teardown and the worker unwind. Expiry is never a silent
+# return: it escalates to BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED.
+_DRAIN_DEADLINE_SECONDS = 3.0
+# Poll interval used while waiting for tracked requests to converge. The drain
+# path is rare (post-timeout only), so polling on the event loop keeps the wait
+# deadline-exact without occupying an executor slot.
+_DRAIN_POLL_SECONDS = 0.005
+# Dedicated worker pool for synchronous urllib calls. Owning the pool (instead
+# of asyncio's shared default executor) is what makes the submitted
+# ``concurrent.futures.Future`` reachable, which is required to decide token
+# ownership from the future's own state machine.
+_HTTP_WORKER_THREADS = 4
 # Signed recvWindow applied to every signed query (protocol section 23).
 _RECV_WINDOW_STR = str(RECEIVE_WINDOW_MS)
 
@@ -144,6 +163,154 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise MutationRunnerError(f"DEMO_HTTP_REDIRECT_DETECTED:{code}")
 
 
+# ---------------------------------------------------------------------------
+# Total-request deadline watchdog + mutation byte-emission tracking.
+#
+# A socket timeout is a *per-blocking-operation* bound, not a total-request
+# bound: an origin that trickles one byte inside every timeout window keeps the
+# worker thread alive without limit, so the socket timeout can never be used to
+# argue that ``drain()`` converges.  Each request therefore arms an independent
+# watchdog for the same frozen budget; on expiry it shuts the underlying socket
+# down so the blocked worker unwinds.
+#
+# The same per-request state records whether any request byte was handed to the
+# socket.  Failure classification is then based on "were mutation bytes possibly
+# emitted", not on the Python exception type: a connect-phase failure is
+# provably zero-bytes (plain STOP), while any post-send failure is an UNKNOWN
+# mutation that must be routed through the deterministic ownership query.
+# ---------------------------------------------------------------------------
+
+
+def _force_close_connection(connection: Any) -> None:
+    """Best-effort forced teardown of one HTTP connection."""
+    sock = getattr(connection, "sock", None)
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+    with contextlib.suppress(Exception):
+        connection.close()
+
+
+class _RequestExecutionState:
+    """Per-request state owned by the worker thread executing that request."""
+
+    __slots__ = ("_bytes_emitted", "_connections", "_expired", "_lock", "_timer")
+
+    def __init__(self, total_deadline_secs: float) -> None:
+        self._lock = threading.Lock()
+        self._connections: list[Any] = []
+        self._expired = False
+        self._bytes_emitted = False
+        self._timer = threading.Timer(total_deadline_secs, self._expire)
+        self._timer.daemon = True
+
+    # -- total-request watchdog ---------------------------------------------
+
+    def start(self) -> None:
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.cancel()
+
+    def attach(self, connection: Any) -> None:
+        """Register a live connection so the watchdog can tear it down."""
+        with self._lock:
+            if not self._expired:
+                self._connections.append(connection)
+                return
+        # The deadline already fired before this connection existed.
+        _force_close_connection(connection)
+
+    def _expire(self) -> None:
+        with self._lock:
+            self._expired = True
+            connections = list(self._connections)
+        for connection in connections:
+            _force_close_connection(connection)
+
+    @property
+    def deadline_expired(self) -> bool:
+        with self._lock:
+            return self._expired
+
+    # -- mutation byte emission ---------------------------------------------
+
+    def note_bytes_emitted(self) -> None:
+        with self._lock:
+            self._bytes_emitted = True
+
+    @property
+    def bytes_emitted(self) -> bool:
+        with self._lock:
+            return self._bytes_emitted
+
+
+_REQUEST_STATE = threading.local()
+
+
+def _current_request_state() -> _RequestExecutionState | None:
+    return getattr(_REQUEST_STATE, "state", None)
+
+
+@functools.cache
+def _watchdog_connection_class(base: type) -> type:
+    """Subclass ``base`` so every connection reports to the request state.
+
+    ``connect()`` registers the live socket with the watchdog *after* the
+    connection succeeded (during DNS/connect the socket does not exist yet;
+    that phase is bounded by the socket timeout handed to
+    ``create_connection``).  ``send()`` marks byte emission only once a socket
+    exists, so a connect-phase failure stays provably zero-bytes-emitted.
+    """
+
+    class _WatchdogConnection(base):  # type: ignore[misc, valid-type]
+        def connect(self) -> None:
+            super().connect()
+            state = _current_request_state()
+            if state is not None:
+                state.attach(self)
+
+        def send(self, data: Any) -> None:
+            if self.sock is None and self.auto_open:
+                # Mirrors HTTPConnection.send so the connect happens before the
+                # byte-emission flag is set, never after.
+                self.connect()
+            if self.sock is not None:
+                state = _current_request_state()
+                if state is not None:
+                    state.note_bytes_emitted()
+            super().send(data)
+
+    _WatchdogConnection.__name__ = f"_Watchdog{base.__name__}"
+    _WatchdogConnection.__qualname__ = _WatchdogConnection.__name__
+    return _WatchdogConnection
+
+
+class _WatchdogHTTPHandler(urllib.request.HTTPHandler):
+    def do_open(self, http_class: type, req: Any, **kwargs: Any) -> Any:
+        return super().do_open(_watchdog_connection_class(http_class), req, **kwargs)
+
+
+class _WatchdogHTTPSHandler(urllib.request.HTTPSHandler):
+    def do_open(self, http_class: type, req: Any, **kwargs: Any) -> Any:
+        return super().do_open(_watchdog_connection_class(http_class), req, **kwargs)
+
+
+class _InFlightRequest:
+    """One tracked HTTP request (queued or running).
+
+    The token is created and registered by the awaiting coroutine *before* the
+    work item is submitted, so a submitted-but-not-started request — and the
+    uncancellable window between ``set_running_or_notify_cancel()`` and worker
+    entry — are both already visible to ``pending_count()``.
+    """
+
+    __slots__ = ("future",)
+
+    def __init__(self) -> None:
+        self.future: concurrent.futures.Future[Any] | None = None
+
+
 class _RedirectSafeHttpClient:
     """Stdlib HTTP client with redirects disabled; replaces the pyo3 client.
 
@@ -151,21 +318,40 @@ class _RedirectSafeHttpClient:
     timeout_secs)`` interface as the pyo3 ``HttpClient`` so it can be swapped
     into ``BinanceHttpClient._client`` without touching the signing layer.
 
-    In-flight tracking: every synchronous urllib request runs on a worker
-    thread that ``asyncio`` cannot cancel.  ``drain()`` waits for all worker
-    threads to converge so the timeout boundary is a hard guarantee that no
-    request (in particular no CREATE/CANCEL mutation) is still executing after
-    ``DemoLifecycleTransport._signed`` raises ``DEMO_HTTP_TIMEOUT``.
+    In-flight tracking (invariant
+    ``NO_QUEUED_OR_RUNNING_MUTATION_SURVIVES_TIMEOUT_BOUNDARY``): every
+    synchronous urllib request runs on a worker thread that ``asyncio`` cannot
+    cancel.  A token is registered by the awaiting coroutine *before* the work
+    item is submitted, so ``pending_count()`` reports ``queued + running`` —
+    never running-and-registered only.  ``drain()`` first cancels every token
+    whose future is still ``PENDING`` (a successful ``cancel()`` proves the
+    callable can never run) and then waits, under an absolute deadline, for the
+    tokens it could not cancel.  A drain that cannot prove convergence raises
+    ``BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED`` instead of returning, so no
+    caller is ever told the timeout boundary is clean while a CREATE/CANCEL
+    mutation may still be queued or executing.
     """
 
-    def __init__(self, timeout_secs: float = _REQUEST_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        timeout_secs: float = _REQUEST_TIMEOUT_SECONDS,
+        *,
+        drain_deadline_secs: float = _DRAIN_DEADLINE_SECONDS,
+        max_workers: int = _HTTP_WORKER_THREADS,
+    ) -> None:
         self._timeout_secs = timeout_secs
+        self._drain_deadline_secs = drain_deadline_secs
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),  # never read env proxy variables
+            _WatchdogHTTPHandler(),
+            _WatchdogHTTPSHandler(),
             _NoRedirectHandler(),
         )
         self._pending_lock = threading.Lock()
-        self._pending_events: set[threading.Event] = set()
+        self._pending: set[_InFlightRequest] = set()
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="g1b-http"
+        )
 
     async def request(
         self,
@@ -177,52 +363,101 @@ class _RedirectSafeHttpClient:
         keys: Any = None,
         timeout_secs: float | None = None,
     ) -> _HttpResponse:
-        return await asyncio.to_thread(
-            self._guarded_request, method, url, headers, body, timeout_secs
-        )
+        # Registration happens here, on the coroutine side, before the work
+        # item exists. There is no await between registration and submission,
+        # and the event loop is single-threaded, so no observer can ever see a
+        # submitted request that is not yet tracked.
+        tracked = _InFlightRequest()
+        with self._pending_lock:
+            self._pending.add(tracked)
+        try:
+            future = self._executor.submit(
+                self._guarded_request, tracked, method, url, headers, body, timeout_secs
+            )
+        except BaseException:
+            # Submission failed (pool shut down / broken): the callable can
+            # never run, so the coroutine owns the token.
+            self._release(tracked)
+            raise
+        tracked.future = future
+        try:
+            return await asyncio.wrap_future(future)
+        except BaseException:
+            # The awaiting coroutine is abandoning this request (typically the
+            # frozen wait_for timeout cancelling it). Ownership of the token is
+            # decided by the future's own state machine, under its condition
+            # lock, so exactly one side clears it:
+            #   cancel() is True  -> PENDING/CANCELLED: the callable can never
+            #                        run, the coroutine clears the token;
+            #   cancel() is False -> RUNNING or FINISHED: the worker function
+            #                        has been (or will be) entered and its
+            #                        finally clears the token.
+            # ``set_running_or_notify_cancel()`` and ``cancel()`` are mutually
+            # exclusive, so neither double-clearing nor a missed clear is
+            # reachable.
+            if future.cancel():
+                self._release(tracked)
+            raise
+
+    def _release(self, tracked: _InFlightRequest) -> None:
+        """Clear one token. Idempotent by construction (set discard)."""
+        with self._pending_lock:
+            self._pending.discard(tracked)
 
     def _guarded_request(
         self,
+        tracked: _InFlightRequest,
         method: Any,
         url: str,
         headers: Any,
         body: bytes | None,
         timeout_secs: float | None,
     ) -> _HttpResponse:
-        # Runs on the asyncio worker thread. Register a completion event so
-        # drain() can prove convergence even if the awaiting coroutine timed
-        # out and abandoned this future.
-        event = threading.Event()
-        with self._pending_lock:
-            self._pending_events.add(event)
+        # Runs on the worker thread. CPython's ``_WorkItem.run()`` calls this
+        # function unconditionally once ``set_running_or_notify_cancel()``
+        # returned True, so reaching this frame guarantees the finally below
+        # runs and the token is released exactly once.
         try:
             return self._request_sync(method, url, headers, body, timeout_secs)
         finally:
-            with self._pending_lock:
-                self._pending_events.discard(event)
-            event.set()
+            self._release(tracked)
 
     def pending_count(self) -> int:
-        """Number of worker threads currently executing a request."""
+        """Number of tracked requests that are queued **or** running."""
         with self._pending_lock:
-            return len(self._pending_events)
+            return len(self._pending)
 
-    async def drain(self) -> None:
-        """Wait until every in-flight worker thread has converged.
+    async def drain(self, deadline_secs: float | None = None) -> None:
+        """Prove that no tracked request can still execute, or fail closed.
 
-        Each worker sets its completion event before exiting; ``event.wait()``
-        blocks until then.  urllib's socket timeout bounds each worker's
-        lifetime, so drain converges in bounded time.
+        Phase 1 reclaims every still-``PENDING`` future: a successful
+        ``cancel()`` means the callable will never be invoked, so its token is
+        cleared by this coroutine.  Phase 2 waits for the tokens that could not
+        be cancelled (running, or running-but-not-yet-inside-the-worker) until
+        an absolute deadline.  Deadline expiry raises
+        ``BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED`` — the boundary is never
+        declared clean by a silent return.
         """
-        loop = asyncio.get_running_loop()
+        budget = self._drain_deadline_secs if deadline_secs is None else deadline_secs
+        deadline = _time.monotonic() + budget
+        with self._pending_lock:
+            snapshot = list(self._pending)
+        for tracked in snapshot:
+            future = tracked.future
+            if future is not None and future.cancel():
+                self._release(tracked)
         while True:
             with self._pending_lock:
-                pending = list(self._pending_events)
-            if not pending:
+                remaining = len(self._pending)
+            if remaining == 0:
                 return
-            await asyncio.gather(
-                *(loop.run_in_executor(None, event.wait) for event in pending)
-            )
+            if _time.monotonic() >= deadline:
+                raise MutationRunnerError("BLOCKED_MUTATION_TIMEOUT_DRAIN_UNCONVERGED")
+            await asyncio.sleep(_DRAIN_POLL_SECONDS)
+
+    def close(self) -> None:
+        """Shut the worker pool down; queued work items are cancelled."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _request_sync(
         self,
@@ -232,12 +467,45 @@ class _RedirectSafeHttpClient:
         body: bytes | None,
         timeout_secs: float | None,
     ) -> _HttpResponse:
+        timeout = self._timeout_secs if timeout_secs is None else float(timeout_secs)
+        state = _RequestExecutionState(timeout)
+        _REQUEST_STATE.state = state
+        state.start()
+        try:
+            return self._open_sync(method, url, headers, body, timeout)
+        except (MutationRunnerError, TimeoutError):
+            # Redirect fail-closed keeps its frozen reason; a timeout keeps its
+            # own boundary (the caller drains and runs timeout containment).
+            raise
+        except Exception as exc:
+            if state.bytes_emitted:
+                # Request bytes reached the socket: it cannot be proven that
+                # the venue never saw this mutation. Fail closed into the
+                # UNKNOWN-mutation class so the runner runs the deterministic
+                # ownership query instead of a plain STOP.
+                raise MutationRunnerError(
+                    f"DEMO_HTTP_UNKNOWN_MUTATION_STATE:{type(exc).__name__.upper()}"
+                ) from exc
+            # Connect/DNS phase: zero bytes emitted is mechanically provable,
+            # so no order can have landed and a plain STOP is correct.
+            raise
+        finally:
+            state.stop()
+            _REQUEST_STATE.state = None
+
+    def _open_sync(
+        self,
+        method: Any,
+        url: str,
+        headers: Any,
+        body: bytes | None,
+        timeout: float,
+    ) -> _HttpResponse:
         method_name = str(method).split(".")[-1].upper()
         header_map = {str(k): str(v) for k, v in (headers or {}).items()}
         request = urllib.request.Request(
             url, data=body, headers=header_map, method=method_name
         )
-        timeout = self._timeout_secs if timeout_secs is None else float(timeout_secs)
         try:
             response = self._opener.open(request, timeout=timeout)
         except urllib.error.HTTPError as exc:
@@ -322,6 +590,12 @@ class DemoLifecycleTransport:
         if loop is not None and not loop.is_closed():
             loop.close()
         self._loop = None
+        # The worker pool is owned by this adapter (it is what makes submitted
+        # futures reachable), so it must be released here; otherwise its
+        # non-daemon threads outlive the transport.
+        client = getattr(self.http_client, "_client", None)
+        if isinstance(client, _RedirectSafeHttpClient):
+            client.close()
 
     def __del__(self) -> None:  # pragma: no cover - best-effort cleanup
         with contextlib.suppress(Exception):
@@ -350,7 +624,13 @@ class DemoLifecycleTransport:
             # this boundary.
             await self._drain_inflight()
             raise MutationRunnerError("DEMO_HTTP_TIMEOUT") from exc
-        except MutationRunnerError:
+        except MutationRunnerError as exc:
+            if str(exc.reason).startswith("DEMO_HTTP_UNKNOWN_MUTATION_STATE"):
+                # Same boundary guarantee as the timeout path: before the
+                # caller is told the mutation state is UNKNOWN and proceeds to
+                # the ownership query, prove that nothing else is still queued
+                # or running on a worker thread.
+                await self._drain_inflight()
             raise
         except Exception as exc:
             # Nautilus raises BinanceClientError/BinanceServerError on >=400 or
@@ -376,7 +656,12 @@ class DemoLifecycleTransport:
         self._loop.run_until_complete(self._drain_inflight())
 
     def pending_request_count(self) -> int:
-        """Number of HTTP requests still executing on worker threads."""
+        """Number of HTTP requests that are **queued or running**.
+
+        A request is counted from before it is submitted to the worker pool
+        until the worker frame that owns it has unwound, so a
+        submitted-but-not-yet-started request is never reported as zero.
+        """
         client = getattr(self.http_client, "_client", None)
         if isinstance(client, _RedirectSafeHttpClient):
             return client.pending_count()
