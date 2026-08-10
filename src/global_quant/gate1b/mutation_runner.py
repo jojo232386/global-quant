@@ -408,6 +408,155 @@ class MutationRunner:
             # error must not surface as a bare exception or discard lifecycle
             # state; route it into the existing bounded fail-closed cleanup.
             self._fail_closed_after_protocol_error(exc)
+        except MutationRunnerError as exc:
+            # Timeout boundary: a mutation (CREATE/CANCEL) request returned
+            # DEMO_HTTP_TIMEOUT. The transport has already drained the in-flight
+            # worker thread, so no mutation can complete after this point. The
+            # mutation outcome is UNKNOWN but settled: query the deterministic
+            # clientOrderId, run the frozen targeted cancel / containment, and
+            # end BLOCKED. A clean PASS is unreachable and CREATE is never
+            # retried. All other MutationRunnerError values are re-raised
+            # unchanged (their original reason must reach the evidence writer).
+            if self._is_mutation_timeout(exc):
+                self._timeout_containment()
+            raise
+
+    def _is_mutation_timeout(self, exc: MutationRunnerError) -> bool:
+        return (
+            getattr(exc, "reason", "") == "DEMO_HTTP_TIMEOUT"
+            and self._guard is not None
+            and self._guard.ledger.create_requests > 0
+        )
+
+    def _timeout_containment(self) -> NoReturn:
+        """Contain a timed-out mutation request.
+
+        Guarantees (mechanical):
+
+        * NO_MUTATION_THREAD_SURVIVES_TIMEOUT_BOUNDARY — the transport drained
+          every in-flight worker thread before raising ``DEMO_HTTP_TIMEOUT``,
+          so no CREATE/CANCEL request is still executing here;
+        * mutation outcome is UNKNOWN but settled — a single ownership query on
+          the deterministic clientOrderId establishes whether the order landed;
+        * if the order is open, the frozen targeted cancel is applied; if a
+          fill is observed, the section-14 containment runs; the final account
+          state is re-confirmed;
+        * the verdict is BLOCKED — the run can never be reclassified as a clean
+          happy-path PASS, and the CREATE is never retried.
+        """
+        try:
+            self._ownership_query_after_mutation_timeout()
+        except (MutationProtocolError, MutationRunnerError):
+            self._raise_timeout_blocked("BLOCKED_MUTATION_TIMEOUT_UNPROVEN")
+
+        if self._terminal_status in {"NEW", "PARTIALLY_FILLED"}:
+            with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+                self._cancel_after_timeout_ownership()
+
+        if (
+            self._unexpected_fill_detected or self._terminal_executed_quantity > 0
+        ) and not self._containment_occurred:
+            with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+                self._containment_phase()
+
+        with contextlib.suppress(MutationProtocolError, MutationRunnerError):
+            self._final_phase()
+            self._build_evidence()
+
+        self._raise_timeout_blocked("BLOCKED_MUTATION_TIMEOUT")
+
+    def _cancel_after_timeout_ownership(self) -> None:
+        """Targeted cancel of the timed-out order already proven owned-open.
+
+        The ownership query already admitted the owned-order proof (stage is
+        ``OWNED_ORDER_OPEN``), so this issues the frozen targeted DELETE and a
+        fresh terminal query, exactly like the partial-fill remainder cancel
+        but without re-issuing the owned-order proof (the guard would reject a
+        second note at ``OWNED_ORDER_OPEN``).
+        """
+        self._elapsed += Decimal("0.001")
+        cancel_reservation = self.guard.reserve(
+            origin=DEMO_HTTP_ORIGIN,
+            method="DELETE",
+            path="/fapi/v1/order",
+            purpose=RequestPurpose.CANCEL,
+            parameters=self.intent.cancel_parameters,
+            elapsed_seconds=self._elapsed,
+            retry_index=0,
+        )
+        self._cancel_status = self._transport.send_cancel(cancel_reservation)
+
+        self._elapsed += Decimal("0.001")
+        terminal_reservation = self.guard.reserve(
+            origin=DEMO_HTTP_ORIGIN,
+            method="GET",
+            path="/fapi/v1/order",
+            purpose=RequestPurpose.READ,
+            parameters=self.intent.query_parameters,
+            elapsed_seconds=self._elapsed,
+            retry_index=0,
+        )
+        self._transport.read(terminal_reservation)
+        self._register_read(terminal_reservation)
+        terminal_status, terminal_executed = self._transport.send_terminal_query(
+            terminal_reservation
+        )
+        terminal_executed = _validated_executed_quantity(
+            terminal_executed, context="TIMEOUT_TERMINAL_QUERY"
+        )
+        self._terminal_status = terminal_status
+        self._terminal_executed_quantity = terminal_executed
+
+    def _raise_timeout_blocked(self, reason: str) -> NoReturn:
+        emergency_close_attempts = (
+            self._guard.ledger.emergency_close_requests if self._guard is not None else 0
+        )
+        raise MutationRunnerError(
+            reason,
+            containment_occurred=self._containment_occurred,
+            observed_terminal_status=self._terminal_status,
+            observed_terminal_executed_quantity=self._terminal_executed_quantity,
+            emergency_close_attempts=emergency_close_attempts,
+        )
+
+    def _ownership_query_after_mutation_timeout(self) -> None:
+        """Single ownership query on the deterministic clientOrderId.
+
+        Establishes whether the timed-out CREATE landed. A fill or non-open
+        state marks the run as having observed an unexpected mutation.
+        """
+        self._elapsed += Decimal("0.001")
+        query = self.guard.reserve(
+            origin=DEMO_HTTP_ORIGIN,
+            method="GET",
+            path="/fapi/v1/order",
+            purpose=RequestPurpose.READ,
+            parameters=self.intent.query_parameters,
+            elapsed_seconds=self._elapsed,
+            retry_index=0,
+        )
+        self._transport.read(query)
+        self._register_read(query)
+        status, executed, _accepted = self._transport.send_query_order(query)
+        executed = _validated_executed_quantity(executed, context="TIMEOUT_OWNERSHIP_QUERY")
+        self._query_status = status
+        self._executed_quantity = executed
+        self._terminal_status = status
+        self._terminal_executed_quantity = executed
+        if executed != 0 or status not in {"NEW", "PARTIALLY_FILLED", "CANCELED", "EXPIRED"}:
+            self._unexpected_fill_detected = True
+        order_proof = OwnedOrderProof(
+            intent_sha256=self.intent.intent_sha256,
+            symbol=SYMBOL,
+            client_order_id=self.intent.client_order_id,
+            status=status,
+            executed_quantity=executed,
+            observed_after_http_attempt=self.guard.ledger.total_http_requests,
+            source_request_sha256=query.request_sha256,
+            accepted_elapsed_seconds=self._create_elapsed,
+            observed_elapsed_seconds=self._elapsed,
+        )
+        self.guard.note_owned_order_proof(order_proof)
 
     def _fail_closed_after_protocol_error(self, exc: MutationProtocolError) -> NoReturn:
         """Post-create ``MutationProtocolError`` recovery (Finding B).

@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import threading
 import time as _time
 import urllib.error
 import urllib.request
@@ -149,6 +150,12 @@ class _RedirectSafeHttpClient:
     Implements the same ``request(method, url, params, headers, body, keys,
     timeout_secs)`` interface as the pyo3 ``HttpClient`` so it can be swapped
     into ``BinanceHttpClient._client`` without touching the signing layer.
+
+    In-flight tracking: every synchronous urllib request runs on a worker
+    thread that ``asyncio`` cannot cancel.  ``drain()`` waits for all worker
+    threads to converge so the timeout boundary is a hard guarantee that no
+    request (in particular no CREATE/CANCEL mutation) is still executing after
+    ``DemoLifecycleTransport._signed`` raises ``DEMO_HTTP_TIMEOUT``.
     """
 
     def __init__(self, timeout_secs: float = _REQUEST_TIMEOUT_SECONDS) -> None:
@@ -157,6 +164,8 @@ class _RedirectSafeHttpClient:
             urllib.request.ProxyHandler({}),  # never read env proxy variables
             _NoRedirectHandler(),
         )
+        self._pending_lock = threading.Lock()
+        self._pending_events: set[threading.Event] = set()
 
     async def request(
         self,
@@ -169,8 +178,51 @@ class _RedirectSafeHttpClient:
         timeout_secs: float | None = None,
     ) -> _HttpResponse:
         return await asyncio.to_thread(
-            self._request_sync, method, url, headers, body, timeout_secs
+            self._guarded_request, method, url, headers, body, timeout_secs
         )
+
+    def _guarded_request(
+        self,
+        method: Any,
+        url: str,
+        headers: Any,
+        body: bytes | None,
+        timeout_secs: float | None,
+    ) -> _HttpResponse:
+        # Runs on the asyncio worker thread. Register a completion event so
+        # drain() can prove convergence even if the awaiting coroutine timed
+        # out and abandoned this future.
+        event = threading.Event()
+        with self._pending_lock:
+            self._pending_events.add(event)
+        try:
+            return self._request_sync(method, url, headers, body, timeout_secs)
+        finally:
+            with self._pending_lock:
+                self._pending_events.discard(event)
+            event.set()
+
+    def pending_count(self) -> int:
+        """Number of worker threads currently executing a request."""
+        with self._pending_lock:
+            return len(self._pending_events)
+
+    async def drain(self) -> None:
+        """Wait until every in-flight worker thread has converged.
+
+        Each worker sets its completion event before exiting; ``event.wait()``
+        blocks until then.  urllib's socket timeout bounds each worker's
+        lifetime, so drain converges in bounded time.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            with self._pending_lock:
+                pending = list(self._pending_events)
+            if not pending:
+                return
+            await asyncio.gather(
+                *(loop.run_in_executor(None, event.wait) for event in pending)
+            )
 
     def _request_sync(
         self,
@@ -290,6 +342,13 @@ class DemoLifecycleTransport:
                 timeout=_REQUEST_TIMEOUT_SECONDS,
             )
         except TimeoutError as exc:
+            # Timeout boundary guarantee: the timed-out request executes on a
+            # worker thread that asyncio cannot cancel, so it may still be
+            # completing (possibly a CREATE/CANCEL mutation). Before any caller
+            # is told TIMEOUT and proceeds to query / containment / final-state,
+            # wait for that thread to converge.  No mutation request survives
+            # this boundary.
+            await self._drain_inflight()
             raise MutationRunnerError("DEMO_HTTP_TIMEOUT") from exc
         except MutationRunnerError:
             raise
@@ -300,6 +359,28 @@ class DemoLifecycleTransport:
             raise MutationRunnerError(
                 f"DEMO_HTTP_FAILURE_{type(exc).__name__.upper()}"
             ) from exc
+
+    async def _drain_inflight(self) -> None:
+        client = getattr(self.http_client, "_client", None)
+        if isinstance(client, _RedirectSafeHttpClient):
+            await client.drain()
+
+    def drain_inflight(self) -> None:
+        """Synchronously wait for any in-flight worker thread to converge.
+
+        Used by the runner after a mutation timeout so the ownership query
+        cannot race a still-running CREATE/CANCEL request.
+        """
+        if self._loop is None:
+            return
+        self._loop.run_until_complete(self._drain_inflight())
+
+    def pending_request_count(self) -> int:
+        """Number of HTTP requests still executing on worker threads."""
+        client = getattr(self.http_client, "_client", None)
+        if isinstance(client, _RedirectSafeHttpClient):
+            return client.pending_count()
+        return 0
 
     def _get_json(self, path: str, params: Mapping[str, object]) -> Any:
         raw = self._run(self._signed(HttpMethod.GET, path, params))
