@@ -468,7 +468,7 @@ class TestCliReviewGating:
         payload = json.loads(
             (_canonical_session_dir(tmp_path) / "cli-verdict.json").read_text(encoding="utf-8")
         )
-        assert payload["protocol_version"] == "1.7"
+        assert payload["protocol_version"] == "1.8"
         assert payload["status"] == "PASS_READY_FOR_INDEPENDENT_CREDENTIAL_RUNTIME_REVIEW"
         assert payload["reason_codes"] == ["INDEPENDENT_REVIEW_ARTIFACT_ABSENT"]
         assert payload["authorization_claimed"] is False

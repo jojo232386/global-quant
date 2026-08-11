@@ -7,10 +7,10 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from enum import StrEnum
 
-PROTOCOL_VERSION = "1.7"
+PROTOCOL_VERSION = "1.8"
 PROTOCOL_STATUS = "FROZEN_OPTION_A_APPROVED"
 SYMBOL = "ETHUSDT"
 MAX_NOTIONAL_USDT = Decimal("25")
@@ -70,6 +70,7 @@ _GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SESSION_NONCE = re.compile(r"^[0-9a-f]{16}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _AUTHORIZATION_ID = re.compile(r"^g1b16-[0-9a-f]{16}$")
+_FILTER_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 class MutationProtocolError(ValueError):
@@ -472,6 +473,214 @@ class MarketCloseFilters:
             sort_keys=True,
         ).encode("ascii")
         return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredFilterEvidence:
+    """Canonical public metadata retained for a non-static symbol filter."""
+
+    filter_type: str
+    canonical_metadata_json: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.filter_type) is not str
+            or _FILTER_TYPE.fullmatch(self.filter_type) is None
+            or type(self.canonical_metadata_json) is not str
+        ):
+            raise MutationProtocolError("INVALID_FILTER_METADATA")
+        try:
+            metadata = json.loads(self.canonical_metadata_json)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise MutationProtocolError("INVALID_FILTER_METADATA") from exc
+        if (
+            type(metadata) is not dict
+            or metadata.get("filterType") != self.filter_type
+            or json.dumps(
+                metadata,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            != self.canonical_metadata_json
+        ):
+            raise MutationProtocolError("INVALID_FILTER_METADATA")
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        """Return a detached JSON object for evidence serialization."""
+
+        value = json.loads(self.canonical_metadata_json)
+        if type(value) is not dict:  # pragma: no cover - constructor proves this
+            raise MutationProtocolError("INVALID_FILTER_METADATA")
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialFreeFilterPreparation:
+    """Read-only admission result which can never authorize a mutation."""
+
+    static_filter_types: tuple[str, ...]
+    authenticated_check_required: tuple[DeferredFilterEvidence, ...]
+    unresolved_exchange_rules: tuple[DeferredFilterEvidence, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.static_filter_types) is not tuple
+            or self.static_filter_types != tuple(sorted(_REQUIRED_FILTER_TYPES))
+            or type(self.authenticated_check_required) is not tuple
+            or type(self.unresolved_exchange_rules) is not tuple
+            or any(
+                type(item) is not DeferredFilterEvidence
+                for item in self.authenticated_check_required + self.unresolved_exchange_rules
+            )
+            or any(
+                item.filter_type != "MAX_NUM_ORDERS" for item in self.authenticated_check_required
+            )
+        ):
+            raise MutationProtocolError("INVALID_FILTER_PREPARATION")
+
+    @property
+    def preparation_ready(self) -> bool:
+        """Static metadata is usable for preparation and read-only investigation."""
+
+        return True
+
+    @property
+    def order_authorization_ready(self) -> bool:
+        """Credential-free evidence never proves account or mutation readiness."""
+
+        return False
+
+    def require_order_authorization_ready(self) -> None:
+        """Mechanically prevent this read-only result from crossing the mutation gate."""
+
+        if self.unresolved_exchange_rules:
+            raise MutationProtocolError("ORDER_AUTHORIZATION_DENIED:UNRESOLVED_EXCHANGE_RULES")
+        if self.authenticated_check_required:
+            raise MutationProtocolError("ORDER_AUTHORIZATION_DENIED:AUTHENTICATED_CHECK_REQUIRED")
+        raise MutationProtocolError("ORDER_AUTHORIZATION_DENIED:AUTHENTICATED_PREFLIGHT_REQUIRED")
+
+    @property
+    def evidence_payload(self) -> dict[str, object]:
+        """Machine-readable evidence without changing the acceptance artifact schema."""
+
+        return {
+            "authenticated_check_required": [
+                {"filter_type": item.filter_type, "metadata": item.metadata}
+                for item in self.authenticated_check_required
+            ],
+            "order_authorization_ready": self.order_authorization_ready,
+            "preparation_ready": self.preparation_ready,
+            "static_filter_types": list(self.static_filter_types),
+            "unresolved_exchange_rules": [
+                {"filter_type": item.filter_type, "metadata": item.metadata}
+                for item in self.unresolved_exchange_rules
+            ],
+        }
+
+
+def _filter_evidence(value: Mapping[str, object]) -> DeferredFilterEvidence:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise MutationProtocolError("INVALID_FILTER_METADATA")
+    filter_type = value.get("filterType")
+    if type(filter_type) is not str or _FILTER_TYPE.fullmatch(filter_type) is None:
+        raise MutationProtocolError("INVALID_FILTER_METADATA")
+    try:
+        canonical = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise MutationProtocolError("INVALID_FILTER_METADATA") from exc
+    return DeferredFilterEvidence(
+        filter_type=filter_type,
+        canonical_metadata_json=canonical,
+    )
+
+
+def _filter_decimal(
+    metadata: Mapping[str, object],
+    field_name: str,
+) -> Decimal:
+    value = metadata.get(field_name)
+    if type(value) is not str:
+        raise MutationProtocolError("INVALID_FILTER_METADATA")
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise MutationProtocolError("INVALID_FILTER_METADATA") from exc
+    if not parsed.is_finite() or parsed <= 0:
+        raise MutationProtocolError("INVALID_FILTER_METADATA")
+    return parsed
+
+
+def evaluate_credential_free_filter_preparation(
+    filters: tuple[Mapping[str, object], ...],
+) -> CredentialFreeFilterPreparation:
+    """Validate supported static filters and defer every non-static rule safely.
+
+    ``MAX_NUM_ORDERS`` is retained as an authenticated account-state check. Every
+    other extra filter is retained as unresolved. This function is preparation
+    only; its result is structurally incapable of authorizing an order.
+    """
+
+    if type(filters) is not tuple or not filters:
+        raise MutationProtocolError("INVALID_FILTER_METADATA")
+    evidence = tuple(_filter_evidence(item) for item in filters)
+    by_type: dict[str, list[DeferredFilterEvidence]] = {}
+    for item in evidence:
+        by_type.setdefault(item.filter_type, []).append(item)
+    if any(len(by_type.get(filter_type, ())) != 1 for filter_type in _REQUIRED_FILTER_TYPES):
+        raise MutationProtocolError("FILTER_CARDINALITY_MISMATCH")
+
+    price = by_type["PRICE_FILTER"][0].metadata
+    lot = by_type["LOT_SIZE"][0].metadata
+    market_lot = by_type["MARKET_LOT_SIZE"][0].metadata
+    notional = by_type["MIN_NOTIONAL"][0].metadata
+    percent = by_type["PERCENT_PRICE"][0].metadata
+    minimum_notional = _filter_decimal(notional, "notional")
+    LimitOrderFilters(
+        min_price=_filter_decimal(price, "minPrice"),
+        max_price=_filter_decimal(price, "maxPrice"),
+        tick_size=_filter_decimal(price, "tickSize"),
+        min_quantity=_filter_decimal(lot, "minQty"),
+        max_quantity=_filter_decimal(lot, "maxQty"),
+        step_size=_filter_decimal(lot, "stepSize"),
+        min_notional=minimum_notional,
+        percent_price_multiplier_down=_filter_decimal(percent, "multiplierDown"),
+        percent_price_multiplier_up=_filter_decimal(percent, "multiplierUp"),
+    )
+    MarketCloseFilters(
+        min_quantity=_filter_decimal(market_lot, "minQty"),
+        max_quantity=_filter_decimal(market_lot, "maxQty"),
+        step_size=_filter_decimal(market_lot, "stepSize"),
+        min_notional=minimum_notional,
+        market_lot_size_filter_count=1,
+        min_notional_filter_count=1,
+        uninterpreted_applicable_filter_types=(),
+    )
+
+    authenticated: list[DeferredFilterEvidence] = []
+    unresolved: list[DeferredFilterEvidence] = []
+    for filter_type in sorted(set(by_type).difference(_REQUIRED_FILTER_TYPES)):
+        items = by_type[filter_type]
+        if filter_type == "MAX_NUM_ORDERS" and len(items) == 1:
+            metadata = items[0].metadata
+            limit = metadata.get("limit")
+            if set(metadata) == {"filterType", "limit"} and type(limit) is int and limit > 0:
+                authenticated.append(items[0])
+                continue
+        unresolved.extend(items)
+    return CredentialFreeFilterPreparation(
+        static_filter_types=tuple(sorted(_REQUIRED_FILTER_TYPES)),
+        authenticated_check_required=tuple(authenticated),
+        unresolved_exchange_rules=tuple(unresolved),
+    )
 
 
 @dataclass(frozen=True)

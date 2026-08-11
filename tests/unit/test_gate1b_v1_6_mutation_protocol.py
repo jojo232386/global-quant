@@ -107,7 +107,7 @@ def passing_lifecycle(**overrides: object) -> LifecycleEvidence:
 
 
 def test_frozen_candidate_constants_are_minimal() -> None:
-    assert PROTOCOL_VERSION == "1.7"
+    assert PROTOCOL_VERSION == "1.8"
     assert PROTOCOL_STATUS == "FROZEN_OPTION_A_APPROVED"
     assert SYMBOL == "ETHUSDT"
     assert Decimal("25") == MAX_NOTIONAL_USDT
