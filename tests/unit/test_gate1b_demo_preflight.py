@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
+import global_quant.gate1b.demo_preflight as demo_preflight_module
 from global_quant.gate1b.demo_preflight import (
-    build_demo_http_apis,
     collect_account_preflight,
+    run_signed_preflight,
     sanitized_preflight_evidence,
 )
 from global_quant.gate1b.preflight import evaluate_account_preflight
-from global_quant.gate1b.safety import EXPECTED_DEMO_ENDPOINTS, DemoCredentials
+from global_quant.gate1b.safety import DemoCredentials
 
 
 class FakeAccountApi:
@@ -99,15 +103,26 @@ def test_collect_account_preflight_queries_every_risk_surface() -> None:
     assert snapshot.trading_instruments == frozenset({"BTCUSDT", "ETHUSDT"})
 
 
-def test_http_apis_are_pinned_to_demo_usdt_futures() -> None:
-    apis = build_demo_http_apis(
-        DemoCredentials(api_key="demo-key-test-only", api_secret="demo-secret-test-only"),
-    )
+def test_legacy_public_signed_preflight_fails_closed_without_network() -> None:
+    with pytest.raises(RuntimeError, match="PROCESS_BOUND_CREDENTIAL_SESSION_REQUIRED"):
+        asyncio.run(
+            run_signed_preflight(
+                DemoCredentials(
+                    api_key="demo-key-test-only",
+                    api_secret="demo-secret-test-only",
+                )
+            )
+        )
 
-    assert apis.client.base_url == EXPECTED_DEMO_ENDPOINTS.http
-    assert apis.account.client is apis.client
-    assert apis.market.client is apis.client
-    assert apis.account._timestamp().isdigit()
+
+def test_public_preflight_module_exposes_no_raw_signed_account_api_builder() -> None:
+    source = inspect.getsource(demo_preflight_module)
+
+    assert not hasattr(demo_preflight_module, "DemoHttpApis")
+    assert not hasattr(demo_preflight_module, "build_demo_http_apis")
+    assert "BinanceFuturesAccountHttpAPI" not in source
+    assert "new_order" not in source
+    assert "cancel_order" not in source
 
 
 def test_sanitized_evidence_cannot_contain_demo_credentials() -> None:

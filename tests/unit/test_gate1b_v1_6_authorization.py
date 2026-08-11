@@ -22,6 +22,7 @@ import pytest
 from global_quant.gate1b.authorization import (
     AuthorizationError,
     AuthorizationRecord,
+    AuthorizationRegistry,
     claim_authorization,
     create_authorization,
     mark_consumed,
@@ -95,6 +96,156 @@ class TestManifestPermissions:
         os.chmod(path, 0o600)
         with pytest.raises(AuthorizationError):
             read_manifest(path)
+
+    def test_extra_fields_rejected_instead_of_accepting_credential_material(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        payload = json.loads(_record().to_json())
+        payload["api_secret"] = "credential-canary"
+        path = tmp_path / "auth.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        os.chmod(path, 0o600)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_MANIFEST_FIELDS"):
+            read_manifest(path)
+
+    def test_atomic_manifest_replace_fsyncs_file_and_parent_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        observed_modes: list[int] = []
+        real_fsync = os.fsync
+
+        def recording_fsync(fd: int) -> None:
+            observed_modes.append(os.fstat(fd).st_mode)
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", recording_fsync)
+
+        write_manifest(tmp_path / "auth.json", _record())
+
+        assert any(stat.S_ISREG(mode) for mode in observed_modes)
+        assert any(stat.S_ISDIR(mode) for mode in observed_modes)
+
+    def test_temporary_path_substitution_cannot_return_durable_authority(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "auth.json"
+        write_manifest(path, _record())
+        attacker_bytes = (
+            _record(authorization_id="g1b16-ffffffffffffffff").to_json().encode("ascii")
+        )
+        real_replace = os.replace
+
+        def substitute_then_replace(
+            source: str,
+            destination: str,
+            *,
+            src_dir_fd: int | None = None,
+            dst_dir_fd: int | None = None,
+        ) -> None:
+            assert src_dir_fd is not None
+            assert dst_dir_fd is not None
+            os.unlink(source, dir_fd=src_dir_fd)
+            descriptor = os.open(
+                source,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=src_dir_fd,
+            )
+            try:
+                os.write(descriptor, attacker_bytes)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            real_replace(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(os, "replace", substitute_then_replace)
+
+        with pytest.raises(
+            AuthorizationError,
+            match="AUTHORIZATION_TEMPORARY_INODE_CHANGED",
+        ):
+            mark_consumed(path, _record())
+
+    def test_parent_path_swap_cannot_return_after_fsyncing_decoy_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        parent = tmp_path / "authorization-root"
+        parent.mkdir(mode=0o700)
+        moved = tmp_path / "moved-authorization-root"
+        real_fsync = os.fsync
+        swapped = False
+
+        def swap_before_directory_fsync(descriptor: int) -> None:
+            nonlocal swapped
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode) and not swapped:
+                swapped = True
+                parent.rename(moved)
+                parent.mkdir(mode=0o700)
+            real_fsync(descriptor)
+
+        monkeypatch.setattr(os, "fsync", swap_before_directory_fsync)
+
+        with pytest.raises(
+            AuthorizationError,
+            match="AUTHORIZATION_DIRECTORY_PATH_RACE",
+        ):
+            write_manifest(parent / "auth.json", _record())
+
+        assert swapped is True
+        assert (moved / "auth.json").exists()
+        assert not (parent / "auth.json").exists()
+
+    def test_lock_and_publication_share_one_directory_identity(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        parent = tmp_path / "authorization-root"
+        parent.mkdir(mode=0o700)
+        path = parent / "auth.json"
+        moved = tmp_path / "moved-authorization-root"
+        real_open = os.open
+        swapped = False
+
+        def swap_after_lock(
+            candidate: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            nonlocal swapped
+            descriptor = real_open(candidate, flags, mode, dir_fd=dir_fd)
+            if os.fsdecode(candidate).endswith(".lock") and not swapped:
+                swapped = True
+                parent.rename(moved)
+                parent.mkdir(mode=0o700)
+            return descriptor
+
+        monkeypatch.setattr(os, "open", swap_after_lock)
+
+        with pytest.raises(
+            AuthorizationError,
+            match="AUTHORIZATION_DIRECTORY_PATH_RACE",
+        ):
+            write_manifest(path, _record())
+
+        assert swapped is True
+        assert not (moved / "auth.json").exists()
+        assert not (parent / "auth.json").exists()
 
 
 class TestValidation:
@@ -220,6 +371,106 @@ class TestCreation:
         assert "secret" not in text
         assert "BINANCE" not in text
 
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "authorization_id",
+            "protocol_commit",
+            "protocol_tag_object",
+            "protocol_sha256",
+            "runtime_commit",
+        ],
+    )
+    def test_all_identity_fields_reject_trailing_newline(self, field: str) -> None:
+        values = {
+            "protocol_commit": _PROTOCOL,
+            "protocol_tag_object": _TAG_OBJECT,
+            "protocol_sha256": _SHA,
+            "runtime_commit": _RUNTIME,
+            "authorization_id": _AUTH_ID,
+        }
+        values[field] += "\n"
+
+        with pytest.raises(AuthorizationError):
+            create_authorization(**values)
+
+    def test_record_rejects_non_string_created_at_credential_canary(self) -> None:
+        payload = json.loads(_record().to_json())
+        payload["created_at"] = {"api_secret": "credential-canary"}
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_MANIFEST_FIELD_TYPE"):
+            AuthorizationRecord.from_mapping(payload)
+
+    def test_manifest_rejects_duplicate_key_even_when_last_value_is_valid(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        canonical = _record().to_json()
+        raw = canonical.replace(
+            '  "created_at": "2026-08-10T00:00:00+00:00",',
+            '  "created_at": "credential-canary",\n  "created_at": "2026-08-10T00:00:00+00:00",',
+        )
+        path = tmp_path / "auth.json"
+        path.write_text(raw, encoding="utf-8")
+        os.chmod(path, 0o600)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_MANIFEST_DUPLICATE_KEY"):
+            read_manifest(path)
+
+    def test_same_authorization_in_alternate_session_cannot_regain_primary(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime_root = tmp_path / "evidence" / "runtime"
+        runtime_root.mkdir(parents=True, mode=0o700)
+        retained = runtime_root / "gate1b-v1.6-mutation-old" / "aaaaaaaaaaaaaaaa"
+        retained.mkdir(parents=True, mode=0o700)
+        intent = retained / "intent.json"
+        intent.write_text(
+            json.dumps({"authorization_id": _AUTH_ID}, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        os.chmod(intent, 0o600)
+        registry = AuthorizationRegistry(runtime_root)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_RETAINED_ATTEMPT_EXISTS"):
+            registry.create(_record())
+
+        assert not registry.manifest_path(_AUTH_ID).exists()
+
+    def test_registry_path_is_canonical_and_not_selected_by_session_dir(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime_root = tmp_path / "evidence" / "runtime"
+        runtime_root.mkdir(parents=True, mode=0o700)
+        registry = AuthorizationRegistry(runtime_root)
+
+        manifest = registry.create(_record())
+
+        assert manifest == registry.manifest_path(_AUTH_ID)
+        assert manifest.parent == runtime_root / "gate1b-v1.6-authorizations"
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_RETAINED_ATTEMPT_EXISTS"):
+            registry.create(_record())
+
+    def test_retained_scan_rejects_duplicate_authorization_id_keys(self, tmp_path: Path) -> None:
+        runtime_root = tmp_path / "evidence" / "runtime"
+        runtime_root.mkdir(parents=True, mode=0o700)
+        retained = runtime_root / "gate1b-v1.6-mutation-old" / "aaaaaaaaaaaaaaaa"
+        retained.parent.mkdir(mode=0o700)
+        retained.mkdir(mode=0o700)
+        intent = retained / "intent.json"
+        intent.write_text(
+            '{"authorization_id":"g1b16-0123456789abcdef",'
+            '"authorization_id":"g1b16-ffffffffffffffff"}\n',
+            encoding="ascii",
+        )
+        os.chmod(intent, 0o600)
+        registry = AuthorizationRegistry(runtime_root)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_RETAINED_SCAN_INVALID"):
+            registry.create(_record())
+
 
 class TestRecoveryAuthorization:
     def test_only_consumed_record_can_transition_to_recovery(self, tmp_path: Path) -> None:
@@ -273,8 +524,9 @@ class TestRecoveryAuthorization:
             )
 
     def test_recovery_remains_recovery_only_across_repeated_sessions(self, tmp_path: Path) -> None:
-        path = _write(tmp_path / "auth.json", _record(status="CONSUMED"))
-        recovery = mark_recovery(path, read_manifest(path))
+        path = _write(tmp_path / "auth.json", _record())
+        consumed = mark_consumed(path, read_manifest(path))
+        recovery = mark_recovery(path, consumed)
 
         first = validate_recovery_authorization_for_runtime(
             recovery,
@@ -303,6 +555,30 @@ class TestRecoveryAuthorization:
                 protocol_sha256=_SHA,
                 runtime_commit=_RUNTIME,
             )
+
+    def test_generic_writer_cannot_restore_recovery_to_active(self, tmp_path: Path) -> None:
+        active = _record()
+        path = _write(tmp_path / "auth.json", active)
+        consumed = mark_consumed(path, active)
+        recovery = mark_recovery(path, consumed)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_MANIFEST_EXISTS"):
+            write_manifest(path, active)
+
+        assert read_manifest(path) == recovery
+
+    def test_recovery_transition_uses_same_lock_as_claim(self, tmp_path: Path) -> None:
+        active = _record()
+        path = _write(tmp_path / "auth.json", active)
+        consumed = mark_consumed(path, active)
+        lock_path = Path(f"{path}.lock")
+        lock_path.write_text("held", encoding="ascii")
+        os.chmod(lock_path, 0o600)
+
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_CONCURRENT_TRANSITION"):
+            mark_recovery(path, consumed)
+
+        assert read_manifest(path) == consumed
 
 
 class TestAtomicConcurrentClaim:

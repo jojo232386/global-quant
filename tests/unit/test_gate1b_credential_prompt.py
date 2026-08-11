@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,130 +11,37 @@ import global_quant.gate1b.credential_prompt as credential_prompt
 from global_quant.gate1b.credential_prompt import CredentialPromptError
 
 
-def test_prompted_preflight_refuses_live_or_testnet_environment_before_prompt(tmp_path) -> None:
-    prompted = False
-
-    def forbidden_prompt(_label: str) -> str:
-        nonlocal prompted
-        prompted = True
-        raise AssertionError("credential prompt should not run")
-
-    with pytest.raises(CredentialPromptError, match="CREDENTIAL_ENVIRONMENT_MUST_BE_EMPTY"):
-        credential_prompt.run_prompted_preflight(
-            evidence_dir=tmp_path,
-            parent_environ={"BINANCE_API_KEY": "live-value-must-never-be-read"},
-            prompt_secret=forbidden_prompt,
-            input_is_tty=True,
+def test_importing_credential_helpers_does_not_load_legacy_runner() -> None:
+    source_root = str(Path(__file__).resolve().parents[2] / "src")
+    script = "\n".join(
+        (
+            "import sys",
+            f"sys.path.insert(0, {source_root!r})",
+            "import global_quant.gate1b.credential_prompt",
+            "assert 'global_quant.gate1b.runner' not in sys.modules",
+            "assert 'global_quant.gate1b.mutation_runner' not in sys.modules",
         )
-
-    assert prompted is False
-
-
-def test_prompted_preflight_refuses_preexisting_demo_environment_before_prompt(tmp_path) -> None:
-    with pytest.raises(CredentialPromptError, match="CREDENTIAL_ENVIRONMENT_MUST_BE_EMPTY"):
-        credential_prompt.run_prompted_preflight(
-            evidence_dir=tmp_path,
-            parent_environ={"BINANCE_DEMO_API_KEY": "stale-demo-key"},
-            prompt_secret=lambda _label: "must-not-be-used",
-            input_is_tty=True,
-        )
-
-
-def test_prompted_preflight_requires_an_interactive_terminal(tmp_path) -> None:
-    with pytest.raises(CredentialPromptError, match="INTERACTIVE_TERMINAL_REQUIRED"):
-        credential_prompt.run_prompted_preflight(
-            evidence_dir=tmp_path,
-            parent_environ={},
-            prompt_secret=lambda _label: "must-not-be-used",
-            input_is_tty=False,
-        )
-
-
-def test_prompted_preflight_injects_secrets_only_into_in_process_mapping(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    answers = iter(("ephemeral-demo-key", "ephemeral-demo-secret"))
-    captured: dict[str, object] = {}
-
-    def fake_run_preflight(*, environ, confirm_demo_only, evidence_dir):
-        captured["environ"] = dict(environ)
-        captured["confirm_demo_only"] = confirm_demo_only
-        captured["evidence_dir"] = evidence_dir
-        evidence = Path(evidence_dir) / "preflight.json"
-        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
-        return 0, evidence
-
-    monkeypatch.setattr(credential_prompt, "run_preflight", fake_run_preflight)
-
-    exit_code, evidence_path = credential_prompt.run_prompted_preflight(
-        evidence_dir=tmp_path,
-        parent_environ={},
-        prompt_secret=lambda _label: next(answers),
-        input_is_tty=True,
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
     )
 
-    assert exit_code == 0
-    assert evidence_path == tmp_path / "preflight.json"
-    assert captured == {
-        "environ": {
-            "BINANCE_DEMO_API_KEY": "ephemeral-demo-key",
-            "BINANCE_DEMO_API_SECRET": "ephemeral-demo-secret",
-        },
-        "confirm_demo_only": True,
-        "evidence_dir": tmp_path,
-    }
+    assert completed.returncode == 0, completed.stderr
 
 
-def test_prompted_preflight_reads_ed25519_private_key_from_secure_file(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    captured: dict[str, str] = {}
-    private_key = tmp_path / "demo.pem"
-    private_key.write_text(
-        "-----BEGIN PRIVATE KEY-----\n"
-        "base64-private-material-test-only\n"
-        "-----END PRIVATE KEY-----\n",
-        encoding="ascii",
+def test_legacy_prompted_credential_execution_surfaces_are_retired() -> None:
+    assert not hasattr(credential_prompt, "run_preflight")
+    assert not hasattr(credential_prompt, "run_prompted_preflight")
+
+
+def test_legacy_prompted_entrypoint_is_a_sanitized_stop(capsys) -> None:
+    assert credential_prompt.main(["--anything"]) == 1
+    assert capsys.readouterr().out == (
+        '{"exit_code": 1, "reason": "LEGACY_CREDENTIAL_ENTRYPOINT_RETIRED"}\n'
     )
-    private_key.chmod(0o600)
-
-    def fake_run_preflight(*, environ, confirm_demo_only, evidence_dir):
-        captured.update(environ)
-        evidence = Path(evidence_dir) / "preflight.json"
-        evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
-        return 0, evidence
-
-    monkeypatch.setattr(credential_prompt, "run_preflight", fake_run_preflight)
-
-    exit_code, _ = credential_prompt.run_prompted_preflight(
-        evidence_dir=tmp_path,
-        parent_environ={},
-        prompt_secret=lambda _label: "ed25519-demo-key",
-        input_is_tty=True,
-        key_type="ed25519",
-        private_key_file=private_key,
-    )
-
-    assert exit_code == 0
-    assert captured["BINANCE_DEMO_API_KEY"] == "ed25519-demo-key"
-    assert captured["BINANCE_DEMO_API_SECRET"] == (
-        "-----BEGIN PRIVATE KEY-----\n"
-        "base64-private-material-test-only\n"
-        "-----END PRIVATE KEY-----\n"
-    )
-
-
-def test_ed25519_private_key_file_is_required(tmp_path) -> None:
-    with pytest.raises(CredentialPromptError, match="ED25519_PRIVATE_KEY_FILE_REQUIRED"):
-        credential_prompt.run_prompted_preflight(
-            evidence_dir=tmp_path,
-            parent_environ={},
-            prompt_secret=lambda _label: "ed25519-demo-key",
-            input_is_tty=True,
-            key_type="ed25519",
-        )
 
 
 @pytest.mark.parametrize(
@@ -152,9 +61,7 @@ def test_ed25519_private_key_requires_bounded_complete_pem(value) -> None:
 def test_ed25519_private_key_file_refuses_insecure_permissions(tmp_path) -> None:
     private_key = tmp_path / "insecure.pem"
     private_key.write_text(
-        "-----BEGIN PRIVATE KEY-----\n"
-        "body\n"
-        "-----END PRIVATE KEY-----\n",
+        "-----BEGIN PRIVATE KEY-----\nbody\n-----END PRIVATE KEY-----\n",
         encoding="ascii",
     )
     private_key.chmod(0o644)
@@ -197,29 +104,3 @@ def test_ed25519_private_key_file_refuses_oversize_content(tmp_path) -> None:
 
     with pytest.raises(CredentialPromptError, match="PRIVATE_KEY_SIZE_INVALID"):
         credential_prompt.read_ed25519_private_key(private_key)
-
-
-def test_core_dump_guard_sets_hard_and_soft_limits_to_zero(monkeypatch) -> None:
-    captured: list[tuple[int, tuple[int, int]]] = []
-    monkeypatch.setattr(
-        credential_prompt.resource,
-        "setrlimit",
-        lambda resource_id, limits: captured.append((resource_id, limits)),
-    )
-
-    credential_prompt.disable_core_dumps()
-
-    assert captured == [(credential_prompt.resource.RLIMIT_CORE, (0, 0))]
-
-
-@pytest.mark.parametrize("answers", [("", "secret"), ("key", "")])
-def test_prompted_preflight_rejects_empty_values(tmp_path, answers) -> None:
-    values = iter(answers)
-
-    with pytest.raises(CredentialPromptError, match="EMPTY_DEMO_CREDENTIAL"):
-        credential_prompt.run_prompted_preflight(
-            evidence_dir=tmp_path,
-            parent_environ={},
-            prompt_secret=lambda _label: next(values),
-            input_is_tty=True,
-        )

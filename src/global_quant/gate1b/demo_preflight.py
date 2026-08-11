@@ -2,61 +2,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
-
-from nautilus_trader.adapters.binance import BinanceAccountType
-from nautilus_trader.adapters.binance.common.enums import BinanceEnvironment
-from nautilus_trader.adapters.binance.factories import get_cached_binance_http_client
-from nautilus_trader.adapters.binance.futures.http.account import (
-    BinanceFuturesAccountHttpAPI,
-)
-from nautilus_trader.adapters.binance.futures.http.market import BinanceFuturesMarketHttpAPI
-from nautilus_trader.adapters.binance.http.client import BinanceHttpClient
-from nautilus_trader.common.component import LiveClock
 
 from global_quant.gate1b.preflight import (
     AccountPreflight,
     PreflightResult,
-    evaluate_account_preflight,
 )
-from global_quant.gate1b.safety import (
-    DemoCredentials,
-    resolve_demo_endpoints,
-    validate_demo_endpoints,
-)
-
-
-@dataclass(frozen=True)
-class DemoHttpApis:
-    client: BinanceHttpClient
-    account: BinanceFuturesAccountHttpAPI
-    market: BinanceFuturesMarketHttpAPI
-
-
-def build_demo_http_apis(credentials: DemoCredentials) -> DemoHttpApis:
-    endpoints = resolve_demo_endpoints()
-    validate_demo_endpoints(endpoints)
-    account_type = BinanceAccountType.USDT_FUTURES
-    clock = LiveClock()
-    client = get_cached_binance_http_client(
-        clock=clock,
-        account_type=account_type,
-        api_key=credentials.api_key,
-        api_secret=credentials.api_secret,
-        base_url=None,
-        environment=BinanceEnvironment.DEMO,
-        is_us=False,
-        proxy_url=None,
-    )
-    if client.base_url != endpoints.http:
-        raise RuntimeError("DEMO_HTTP_ENDPOINT_MISMATCH")
-    return DemoHttpApis(
-        client=client,
-        account=BinanceFuturesAccountHttpAPI(client, clock, account_type),
-        market=BinanceFuturesMarketHttpAPI(client, account_type),
-    )
+from global_quant.gate1b.safety import DemoCredentials
 
 
 async def collect_account_preflight(
@@ -130,14 +83,11 @@ def sanitized_preflight_evidence(
 
 
 async def run_signed_preflight(
-    credentials: DemoCredentials,
+    _credentials: DemoCredentials,
 ) -> tuple[AccountPreflight, PreflightResult]:
-    apis = build_demo_http_apis(credentials)
-    snapshot = await collect_account_preflight(
-        account_api=apis.account,
-        market_api=apis.market,
-    )
-    return snapshot, evaluate_account_preflight(snapshot)
+    """Retired public credential path; v1.6 reads run only in the child transport."""
+
+    raise RuntimeError("PROCESS_BOUND_CREDENTIAL_SESSION_REQUIRED")
 
 
 def _enum_value(value: object) -> str:

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import inspect
 from decimal import Decimal
 
-from nautilus_trader.adapters.binance import BINANCE
-from nautilus_trader.adapters.binance import BinanceAccountType
-from nautilus_trader.adapters.binance.common.enums import BinanceEnvironment
-
+import global_quant.gate1b.runtime as runtime_module
 from global_quant.gate1a.strategy import FixedTargetStrategy
-from global_quant.gate1b.runtime import DemoRuntimeInputs
-from global_quant.gate1b.runtime import build_demo_node
-from global_quant.gate1b.runtime import build_demo_node_config
+from global_quant.gate1b.runtime import (
+    DemoRuntimeInputs,
+    OfflineBuildNode,
+    build_demo_node,
+    build_demo_node_config,
+)
 from global_quant.gate1b.safety import DemoCredentials
 
 
@@ -27,29 +28,27 @@ def runtime_inputs(tmp_path) -> DemoRuntimeInputs:
     )
 
 
-def test_trading_node_config_is_demo_reconciled_and_risk_bounded(tmp_path) -> None:
+def test_build_config_is_credential_free_offline_and_risk_bounded(tmp_path) -> None:
     config = build_demo_node_config(runtime_inputs(tmp_path))
 
-    data = config.data_clients[BINANCE]
-    execution = config.exec_clients[BINANCE]
-    assert data.environment is BinanceEnvironment.DEMO
-    assert execution.environment is BinanceEnvironment.DEMO
-    assert data.account_type is BinanceAccountType.USDT_FUTURES
-    assert execution.account_type is BinanceAccountType.USDT_FUTURES
-    assert config.exec_engine.reconciliation is True
-    assert config.exec_engine.open_check_open_only is False
-    assert config.exec_engine.graceful_shutdown_on_exception is True
-    assert config.risk_engine.bypass is False
-    assert config.risk_engine.max_notional_per_order == {
-        "BTCUSDT-PERP.BINANCE": 200,
-        "ETHUSDT-PERP.BINANCE": 200,
-    }
-    assert config.risk_engine.max_order_submit_rate == "32/12:00:00"
+    assert config.network_enabled is False
+    assert config.mutation_enabled is False
+    assert config.instrument_ids == (
+        runtime_module.BTC_ID,
+        runtime_module.ETH_ID,
+    )
+    assert config.max_notional_per_instrument == Decimal("200")
+    assert config.max_submitted_orders == 32
+    assert "demo-key-test-only" not in repr(config)
+    assert "demo-secret-test-only" not in repr(config)
 
 
 def test_node_builds_offline_with_shared_strategy_and_does_not_connect(tmp_path) -> None:
     node, strategy = build_demo_node(runtime_inputs(tmp_path))
     try:
+        assert isinstance(node, OfflineBuildNode)
+        assert node.config.network_enabled is False
+        assert node.config.mutation_enabled is False
         assert isinstance(strategy, FixedTargetStrategy)
         assert strategy.config.max_notional_per_instrument == Decimal("200")
         assert set(strategy.config.external_order_claims) == {
@@ -58,3 +57,22 @@ def test_node_builds_offline_with_shared_strategy_and_does_not_connect(tmp_path)
         }
     finally:
         node.dispose()
+    assert node.disposed is True
+
+
+def test_runtime_inputs_do_not_retain_compatibility_credentials(tmp_path) -> None:
+    inputs = runtime_inputs(tmp_path)
+
+    assert inputs.credentials is None
+    assert "demo-key-test-only" not in repr(inputs)
+    assert "demo-secret-test-only" not in repr(inputs)
+
+
+def test_legacy_runtime_has_no_live_execution_factory_or_public_mutation_node() -> None:
+    source = inspect.getsource(runtime_module)
+
+    assert "BinanceLiveExecClientFactory" not in source
+    assert "BinanceLiveDataClientFactory" not in source
+    assert "add_exec_client_factory" not in source
+    assert "exec_clients" not in source
+    assert "TradingNode" not in source

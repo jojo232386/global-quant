@@ -1,27 +1,10 @@
 from __future__ import annotations
 
-import argparse
-import getpass
 import json
 import os
-import resource
 import stat
-import sys
-from collections.abc import Callable
-from collections.abc import Mapping
 from pathlib import Path
 
-from global_quant.gate1b.runner import run_preflight
-from global_quant.gate1b.safety import CONFLICTING_CREDENTIAL_NAMES
-from global_quant.gate1b.safety import DEMO_KEY_NAME
-from global_quant.gate1b.safety import DEMO_SECRET_NAME
-
-
-ALL_BINANCE_CREDENTIAL_NAMES = (
-    DEMO_KEY_NAME,
-    DEMO_SECRET_NAME,
-    *CONFLICTING_CREDENTIAL_NAMES,
-)
 ED25519_BEGIN = "-----BEGIN PRIVATE KEY-----"
 ED25519_END = "-----END PRIVATE KEY-----"
 MAX_PRIVATE_KEY_LINES = 64
@@ -29,98 +12,20 @@ MAX_PRIVATE_KEY_BYTES = 16 * 1024
 
 
 class CredentialPromptError(RuntimeError):
-    """Raised before prompting when ephemeral credential injection is unsafe."""
-
-
-def run_prompted_preflight(
-    *,
-    evidence_dir: Path,
-    parent_environ: Mapping[str, str],
-    prompt_secret: Callable[[str], str] = getpass.getpass,
-    input_is_tty: bool,
-    key_type: str = "hmac",
-    private_key_file: Path | None = None,
-    core_dump_guard: Callable[[], None] | None = None,
-) -> tuple[int, Path]:
-    _validate_parent_environment(parent_environ)
-    if not input_is_tty:
-        raise CredentialPromptError("INTERACTIVE_TERMINAL_REQUIRED")
-    (core_dump_guard or disable_core_dumps)()
-
-    if key_type == "ed25519":
-        if private_key_file is None:
-            raise CredentialPromptError("ED25519_PRIVATE_KEY_FILE_REQUIRED")
-        api_secret = read_ed25519_private_key(private_key_file)
-    elif key_type == "hmac":
-        if private_key_file is not None:
-            raise CredentialPromptError("PRIVATE_KEY_FILE_FORBIDDEN_FOR_HMAC")
-        api_secret = ""
-    else:
-        raise CredentialPromptError("UNSUPPORTED_DEMO_KEY_TYPE")
-
-    api_key = prompt_secret("Demo API key (hidden): ")
-    if not api_key:
-        raise CredentialPromptError("EMPTY_DEMO_CREDENTIAL")
-    if key_type == "hmac":
-        api_secret = prompt_secret("Demo API secret (hidden): ")
-        if not api_secret:
-            raise CredentialPromptError("EMPTY_DEMO_CREDENTIAL")
-
-    ephemeral = {
-        DEMO_KEY_NAME: api_key,
-        DEMO_SECRET_NAME: api_secret,
-    }
-    try:
-        return run_preflight(
-            environ=ephemeral,
-            confirm_demo_only=True,
-            evidence_dir=Path(evidence_dir),
-        )
-    finally:
-        ephemeral.clear()
-        api_key = ""
-        api_secret = ""
+    """The child-local private-key reader rejected its input."""
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--preflight", action="store_true")
-    parser.add_argument("--confirm-demo-only", action="store_true")
-    parser.add_argument("--key-type", choices=("hmac", "ed25519"), required=True)
-    parser.add_argument("--private-key-file", type=Path)
-    parser.add_argument("--evidence-dir", type=Path, required=True)
-    args = parser.parse_args(argv)
+    """The legacy prompted entrypoint is permanently fail-closed."""
 
-    if not args.preflight or not args.confirm_demo_only:
-        print(json.dumps({"exit_code": 1, "reason": "EXPLICIT_PREFLIGHT_ARMING_REQUIRED"}))
-        return 1
-
-    try:
-        exit_code, path = run_prompted_preflight(
-            evidence_dir=args.evidence_dir,
-            parent_environ=os.environ,
-            input_is_tty=sys.stdin.isatty(),
-            key_type=args.key_type,
-            private_key_file=args.private_key_file,
+    del argv
+    print(
+        json.dumps(
+            {"exit_code": 1, "reason": "LEGACY_CREDENTIAL_ENTRYPOINT_RETIRED"},
+            sort_keys=True,
         )
-    except CredentialPromptError as exc:
-        print(json.dumps({"exit_code": 1, "reason": str(exc)}, sort_keys=True))
-        return 1
-
-    print(json.dumps({"exit_code": exit_code, "evidence": str(path)}, sort_keys=True))
-    return exit_code
-
-
-def _validate_parent_environment(environ: Mapping[str, str]) -> None:
-    if any(name in environ for name in ALL_BINANCE_CREDENTIAL_NAMES):
-        raise CredentialPromptError("CREDENTIAL_ENVIRONMENT_MUST_BE_EMPTY")
-
-
-def disable_core_dumps() -> None:
-    try:
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    except (OSError, ValueError) as exc:
-        raise CredentialPromptError("CORE_DUMP_GUARD_UNAVAILABLE") from exc
+    )
+    return 1
 
 
 def read_ed25519_private_key(path: Path) -> str:

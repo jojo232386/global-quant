@@ -1,33 +1,16 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+import os
+import subprocess
 from pathlib import Path
 
+import pytest
+
 import global_quant.gate1b.runner as runner
-from global_quant.gate1b.preflight import AccountPreflight
-from global_quant.gate1b.preflight import evaluate_account_preflight
 
 
-def clean_snapshot() -> AccountPreflight:
-    return AccountPreflight(
-        can_trade=True,
-        dual_side_position=False,
-        wallet_balance=Decimal("10000"),
-        nonzero_positions=(),
-        open_regular_order_ids=(),
-        open_algo_order_ids=(),
-        server_time_skew_ms=3,
-        trading_instruments=frozenset({"BTCUSDT", "ETHUSDT"}),
-    )
-
-
-def test_build_only_does_not_read_environment_credentials(tmp_path, monkeypatch) -> None:
-    def forbidden(*args, **kwargs):
-        raise AssertionError("build-only read credentials")
-
-    monkeypatch.setattr(runner, "load_demo_credentials", forbidden)
-
+def test_build_only_does_not_read_environment_credentials(tmp_path) -> None:
     exit_code, evidence_path = runner.run_build_only(tmp_path)
     payload = json.loads(evidence_path.read_text())
 
@@ -38,67 +21,80 @@ def test_build_only_does_not_read_environment_credentials(tmp_path, monkeypatch)
     assert payload["credentials_read"] is False
 
 
-def test_missing_demo_credentials_is_inconclusive_without_network(tmp_path) -> None:
-    exit_code, evidence_path = runner.run_preflight(
-        environ={},
-        confirm_demo_only=True,
-        evidence_dir=tmp_path,
-    )
-    payload = json.loads(evidence_path.read_text())
+def test_legacy_signed_preflight_surface_is_absent() -> None:
+    source = Path(runner.__file__).read_text()
 
-    assert exit_code == 2
-    assert payload["status"] == "INCONCLUSIVE"
-    assert payload["reason_codes"] == ["MISSING_DEMO_CREDENTIALS"]
-    assert payload["network_accessed"] is False
+    assert not hasattr(runner, "run_preflight")
+    for forbidden_name in (
+        "load_demo_credentials",
+        "run_signed_preflight",
+        "DEMO_KEY_NAME",
+        "DEMO_SECRET_NAME",
+        '"--preflight"',
+        '"--confirm-demo-only"',
+    ):
+        assert forbidden_name not in source
 
 
-def test_conflicting_credential_scope_stops_before_network(tmp_path) -> None:
-    exit_code, evidence_path = runner.run_preflight(
-        environ={
-            "BINANCE_DEMO_API_KEY": "demo-key",
-            "BINANCE_DEMO_API_SECRET": "demo-secret",
-            "BINANCE_API_KEY": "live-key-must-never-be-read",
+def test_main_rejects_preflight_before_environment_access(monkeypatch) -> None:
+    class EnvironmentTrap(dict[str, str]):
+        @staticmethod
+        def _reject_credential(name: str) -> None:
+            if name.startswith("BINANCE_"):
+                raise AssertionError(f"legacy preflight accessed environment: {name}")
+
+        def get(self, name: str, default=None):
+            self._reject_credential(name)
+            return super().get(name, default)
+
+        def __getitem__(self, name: str) -> str:
+            self._reject_credential(name)
+            return super().__getitem__(name)
+
+        def __contains__(self, name: object) -> bool:
+            if isinstance(name, str):
+                self._reject_credential(name)
+            return super().__contains__(name)
+
+    monkeypatch.setattr(runner.os, "environ", EnvironmentTrap())
+
+    with pytest.raises(SystemExit) as exc_info:
+        runner.main(["--preflight"])
+
+    assert exc_info.value.code == 2
+
+
+def test_demo_script_rejects_preflight_without_credential_evidence(tmp_path) -> None:
+    api_key = "runner-preflight-api-key-canary"
+    api_secret = "runner-preflight-api-secret-canary"
+    evidence_dir = tmp_path / "evidence"
+    completed = subprocess.run(
+        [
+            str(Path(os.sys.executable)),
+            str(runner.PROJECT_ROOT / "scripts" / "run_gate_1b_demo.py"),
+            "--preflight",
+            "--evidence-dir",
+            str(evidence_dir),
+        ],
+        cwd=runner.PROJECT_ROOT,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": str(runner.PROJECT_ROOT / "src"),
+            "BINANCE_DEMO_API_KEY": api_key,
+            "BINANCE_DEMO_API_SECRET": api_secret,
         },
-        confirm_demo_only=True,
-        evidence_dir=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
     )
-    payload = json.loads(evidence_path.read_text())
 
-    assert exit_code == 1
-    assert payload["status"] == "STOP"
-    assert payload["reason_codes"] == ["CONFLICTING_CREDENTIAL_SCOPE"]
-    assert payload["network_accessed"] is False
-    assert "live-key-must-never-be-read" not in evidence_path.read_text()
-
-
-def test_successful_preflight_writes_only_sanitized_evidence(tmp_path, monkeypatch) -> None:
-    snapshot = clean_snapshot()
-
-    async def fake_signed_preflight(credentials):
-        assert credentials.api_key == "sensitive-demo-key"
-        return snapshot, evaluate_account_preflight(snapshot)
-
-    monkeypatch.setattr(runner, "run_signed_preflight", fake_signed_preflight)
-    exit_code, evidence_path = runner.run_preflight(
-        environ={
-            "BINANCE_DEMO_API_KEY": "sensitive-demo-key",
-            "BINANCE_DEMO_API_SECRET": "sensitive-demo-secret",
-        },
-        confirm_demo_only=True,
-        evidence_dir=tmp_path,
-    )
-    encoded = evidence_path.read_text()
-    payload = json.loads(encoded)
-
-    assert exit_code == 0
-    assert payload["status"] == "PASS"
-    assert payload["network_accessed"] is True
-    assert payload["credential_presence"] == {
-        "BINANCE_DEMO_API_KEY": True,
-        "BINANCE_DEMO_API_SECRET": True,
-    }
-    assert "sensitive-demo-key" not in encoded
-    assert "sensitive-demo-secret" not in encoded
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 2
+    assert "error:" in output
+    assert "--build-only" in output
+    assert api_key not in output
+    assert api_secret not in output
+    assert not evidence_dir.exists()
 
 
 def test_default_evidence_and_config_hash_bind_gate1b_v1_4() -> None:

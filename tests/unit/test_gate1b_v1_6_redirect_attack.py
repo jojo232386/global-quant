@@ -16,17 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import http.server
-import os
 import threading
-from typing import Any
+import time
+from typing import Any, ClassVar
 
 import pytest
 
-from global_quant.gate1b.demo_transport import (
-    _RedirectSafeHttpClient,
+from global_quant.gate1b.credential_http import (
+    CredentialHttpError,
     _install_redirect_safe_client,
+    _RedirectSafeHttpClient,
 )
-from global_quant.gate1b.mutation_runner import MutationRunnerError
 
 _REDIRECT_CODES = (301, 302, 303, 307, 308)
 _OTHER_3XX_CODES = (300, 304)
@@ -35,7 +35,7 @@ _OTHER_3XX_CODES = (300, 304)
 class _CountingHandler(http.server.BaseHTTPRequestHandler):
     """Records every request the origin receives."""
 
-    counts: list[dict[str, Any]] = []
+    counts: ClassVar[list[dict[str, Any]]] = []
 
     def _record(self) -> None:
         self.counts.append(
@@ -45,19 +45,19 @@ class _CountingHandler(http.server.BaseHTTPRequestHandler):
             }
         )
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._record()
         self._respond()
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         self._record()
         self._respond()
 
-    def do_DELETE(self) -> None:  # noqa: N802
+    def do_DELETE(self) -> None:
         self._record()
         self._respond()
 
-    def do_PATCH(self) -> None:  # noqa: N802
+    def do_PATCH(self) -> None:
         self._record()
         self._respond()
 
@@ -87,16 +87,16 @@ class _RedirectHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._redirect()
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         self._redirect()
 
-    def do_DELETE(self) -> None:  # noqa: N802
+    def do_DELETE(self) -> None:
         self._redirect()
 
-    def do_PATCH(self) -> None:  # noqa: N802
+    def do_PATCH(self) -> None:
         self._redirect()
 
     def log_message(self, *args: Any) -> None:  # pragma: no cover
@@ -135,7 +135,9 @@ def origins() -> Any:
 
 
 def _client() -> _RedirectSafeHttpClient:
-    return _RedirectSafeHttpClient()
+    client = _RedirectSafeHttpClient()
+    client.authorize_absolute_deadline(time.monotonic_ns() + 5_000_000_000)
+    return client
 
 
 def _run(coro: Any) -> Any:
@@ -149,11 +151,13 @@ class TestRedirectAttack:
         origin_a, origin_b = origins
         _RedirectHandler.redirect_code = code
         client = _client()
-        with pytest.raises(MutationRunnerError) as exc:
-            _run(client.request(
-                _http_method("GET"),
-                origin_a.base_url + "/path",
-            ))
+        with pytest.raises(CredentialHttpError) as exc:
+            _run(
+                client.request(
+                    _http_method("GET"),
+                    origin_a.base_url + "/path",
+                )
+            )
         assert "DEMO_HTTP_REDIRECT_DETECTED" in str(exc.value)
         assert origin_b.request_count == 0, (
             f"second origin received {origin_b.request_count} request(s) for {code}"
@@ -164,12 +168,14 @@ class TestRedirectAttack:
         origin_a, origin_b = origins
         _RedirectHandler.redirect_code = code
         client = _client()
-        with pytest.raises(MutationRunnerError):
-            _run(client.request(
-                _http_method("GET"),
-                origin_a.base_url + "/path",
-                headers={"X-MBX-APIKEY": "demo-fake-key"},
-            ))
+        with pytest.raises(CredentialHttpError):
+            _run(
+                client.request(
+                    _http_method("GET"),
+                    origin_a.base_url + "/path",
+                    headers={"X-MBX-APIKEY": "demo-fake-key"},
+                )
+            )
         assert origin_b.request_count == 0
         assert len(_CountingHandler.counts) == 0, "no origin received a credential header"
 
@@ -178,13 +184,15 @@ class TestRedirectAttack:
         origin_a, origin_b = origins
         _RedirectHandler.redirect_code = code
         client = _client()
-        with pytest.raises(MutationRunnerError):
-            _run(client.request(
-                _http_method("POST"),
-                origin_a.base_url + "/fapi/v1/order",
-                headers={"X-MBX-APIKEY": "demo-fake-key"},
-                body=b'{"symbol": "ETHUSDT"}',
-            ))
+        with pytest.raises(CredentialHttpError):
+            _run(
+                client.request(
+                    _http_method("POST"),
+                    origin_a.base_url + "/fapi/v1/order",
+                    headers={"X-MBX-APIKEY": "demo-fake-key"},
+                    body=b'{"symbol": "ETHUSDT"}',
+                )
+            )
         # exactly one attempt to origin A, zero to origin B (no retry)
         assert origin_b.request_count == 0
         assert len(_CountingHandler.counts) == 0
@@ -194,26 +202,32 @@ class TestRedirectAttack:
         origin_a, origin_b = origins
         _RedirectHandler.redirect_code = code
         client = _client()
-        with pytest.raises(MutationRunnerError) as exc:
-            _run(client.request(
-                _http_method("GET"),
-                origin_a.base_url + "/path",
-            ))
+        with pytest.raises(CredentialHttpError) as exc:
+            _run(
+                client.request(
+                    _http_method("GET"),
+                    origin_a.base_url + "/path",
+                )
+            )
         assert "DEMO_HTTP_REDIRECT_DETECTED" in str(exc.value)
         assert origin_b.request_count == 0
 
-    def test_proxy_env_variables_ignored(self, origins: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_proxy_env_variables_ignored(
+        self, origins: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         origin_a, origin_b = origins
         _RedirectHandler.redirect_code = 302
         monkeypatch.setenv("HTTP_PROXY", origin_b.base_url)
         monkeypatch.setenv("HTTPS_PROXY", origin_b.base_url)
         monkeypatch.setenv("ALL_PROXY", origin_b.base_url)
         client = _client()
-        with pytest.raises(MutationRunnerError):
-            _run(client.request(
-                _http_method("GET"),
-                origin_a.base_url + "/path",
-            ))
+        with pytest.raises(CredentialHttpError):
+            _run(
+                client.request(
+                    _http_method("GET"),
+                    origin_a.base_url + "/path",
+                )
+            )
         assert origin_b.request_count == 0, "proxy env must never route the request"
 
     def test_install_replaces_client_on_binance_shaped_object(self) -> None:
