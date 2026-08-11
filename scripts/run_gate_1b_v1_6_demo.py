@@ -43,6 +43,7 @@ from global_quant.gate1b.execution_journal import (  # noqa: E402
 )
 from global_quant.gate1b.execution_projection import ExecutionProjector  # noqa: E402
 from global_quant.gate1b.final_evidence import FinalEvidenceFinalizer  # noqa: E402
+from global_quant.gate1b.mutation_protocol import PROTOCOL_VERSION  # noqa: E402
 from global_quant.gate1b.process_boundary import (  # noqa: E402
     CredentialProcessSupervisor,
     CredentialWorkload,
@@ -280,7 +281,7 @@ def _base_payload(
 ) -> dict[str, Any]:
     return {
         "gate": "NT-GATE-1B",
-        "protocol_version": "1.6",
+        "protocol_version": PROTOCOL_VERSION,
         "mode": "CREDENTIAL_BEARING_DEMO_CLI",
         "status": status,
         "reason_codes": reason_codes,

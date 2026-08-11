@@ -107,10 +107,10 @@ def passing_lifecycle(**overrides: object) -> LifecycleEvidence:
 
 
 def test_frozen_candidate_constants_are_minimal() -> None:
-    assert PROTOCOL_VERSION == "1.6"
+    assert PROTOCOL_VERSION == "1.7"
     assert PROTOCOL_STATUS == "FROZEN_OPTION_A_APPROVED"
     assert SYMBOL == "ETHUSDT"
-    assert Decimal("10") == MAX_NOTIONAL_USDT
+    assert Decimal("25") == MAX_NOTIONAL_USDT
     assert PRICE_DISCOUNT_BPS == 100
     assert NORMAL_MUTATION_REQUESTS == 2
     assert MAX_HARD_MUTATION_REQUESTS == 4
@@ -1145,13 +1145,52 @@ def test_quantity_rounds_up_to_step_without_exceeding_cap() -> None:
     assert order.notional == Decimal("7.42500")
 
 
-def test_quantity_is_never_scaled_above_frozen_notional_cap() -> None:
+def test_v1_7_current_demo_filter_fixture_derives_minimum_legal_order_under_cap() -> None:
+    order = derive_limit_order(
+        best_bid=Decimal("1881.88"),
+        best_ask=Decimal("1881.90"),
+        mark_price=Decimal("1881.98552326"),
+        filters=filters(
+            min_price="39.86",
+            max_price="306177",
+            tick_size="0.01",
+            min_quantity="0.001",
+            max_quantity="10000",
+            step_size="0.001",
+            min_notional="20",
+            percent_price_multiplier_down="0.9500",
+            percent_price_multiplier_up="1.0500",
+        ),
+    )
+
+    assert order.symbol == "ETHUSDT"
+    assert order.side == "BUY"
+    assert order.order_type == "LIMIT"
+    assert order.time_in_force == "GTX"
+    assert order.price == Decimal("1863.06")
+    assert order.quantity == Decimal("0.011")
+    assert order.notional == Decimal("20.49366")
+    assert order.notional <= MAX_NOTIONAL_USDT
+
+
+def test_v1_7_step_rounding_above_frozen_notional_cap_fails_closed() -> None:
     with pytest.raises(MutationProtocolError, match="NOTIONAL_CAP_EXCEEDED"):
         derive_limit_order(
             best_bid=Decimal("2500.00"),
             best_ask=Decimal("2500.01"),
             mark_price=Decimal("2500.00"),
-            filters=filters(min_quantity="0.005"),
+            filters=filters(min_notional="25"),
+        )
+
+
+def test_v1_7_exchange_minimum_above_cap_never_escalates_cap() -> None:
+    assert Decimal("25") == MAX_NOTIONAL_USDT
+    with pytest.raises(MutationProtocolError, match="NOTIONAL_CAP_EXCEEDED"):
+        derive_limit_order(
+            best_bid=Decimal("2500.00"),
+            best_ask=Decimal("2500.01"),
+            mark_price=Decimal("2500.00"),
+            filters=filters(min_notional="26"),
         )
 
 
@@ -1216,8 +1255,8 @@ def test_decimal_derivation_is_independent_of_process_global_precision() -> None
         getcontext().prec = 1
         with pytest.raises(MutationProtocolError, match="FROZEN_ORDER_CONTRACT_MISMATCH"):
             FrozenLimitOrder(
-                price=Decimal("9999999"),
-                quantity=Decimal("0.0000011"),
+                price=Decimal("25000001"),
+                quantity=Decimal("0.000001"),
             )
     finally:
         getcontext().prec = original_precision

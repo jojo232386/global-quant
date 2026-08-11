@@ -10,10 +10,10 @@ from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 from enum import StrEnum
 
-PROTOCOL_VERSION = "1.6"
+PROTOCOL_VERSION = "1.7"
 PROTOCOL_STATUS = "FROZEN_OPTION_A_APPROVED"
 SYMBOL = "ETHUSDT"
-MAX_NOTIONAL_USDT = Decimal("10")
+MAX_NOTIONAL_USDT = Decimal("25")
 PRICE_DISCOUNT_BPS = 100
 NORMAL_MUTATION_REQUESTS = 2
 MAX_HARD_MUTATION_REQUESTS = 4
