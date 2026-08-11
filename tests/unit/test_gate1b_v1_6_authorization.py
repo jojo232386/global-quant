@@ -25,8 +25,10 @@ from global_quant.gate1b.authorization import (
     claim_authorization,
     create_authorization,
     mark_consumed,
+    mark_recovery,
     read_manifest,
     validate_authorization_for_runtime,
+    validate_recovery_authorization_for_runtime,
     write_manifest,
 )
 
@@ -217,6 +219,92 @@ class TestCreation:
         assert "api_key" not in text
         assert "secret" not in text
         assert "BINANCE" not in text
+
+
+class TestRecoveryAuthorization:
+    def test_only_consumed_record_can_transition_to_recovery(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / "auth.json", _record())
+
+        with pytest.raises(AuthorizationError, match="RECOVERY_REQUIRES_CONSUMED"):
+            mark_recovery(path, _record())
+
+        consumed = mark_consumed(path, _record())
+        recovery = mark_recovery(path, consumed)
+
+        assert recovery.status == "RECOVERY"
+        assert read_manifest(path) == recovery
+
+    def test_recovery_validation_preserves_exact_binding_and_identity(self) -> None:
+        recovery = _record(status="RECOVERY")
+
+        validated = validate_recovery_authorization_for_runtime(
+            recovery,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+
+        assert validated is recovery
+        assert validated.status == "RECOVERY"
+
+    @pytest.mark.parametrize("status", ["ACTIVE", "CONSUMED"])
+    def test_non_recovery_status_cannot_authorize_recovery(self, status: str) -> None:
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_NOT_RECOVERY"):
+            validate_recovery_authorization_for_runtime(
+                _record(status=status),
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit=_RUNTIME,
+            )
+
+    def test_recovery_binding_mismatch_fails_closed(self) -> None:
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_RUNTIME_REPLAY"):
+            validate_recovery_authorization_for_runtime(
+                _record(status="RECOVERY"),
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit="0" * 40,
+            )
+
+    def test_recovery_remains_recovery_only_across_repeated_sessions(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path / "auth.json", _record(status="CONSUMED"))
+        recovery = mark_recovery(path, read_manifest(path))
+
+        first = validate_recovery_authorization_for_runtime(
+            recovery,
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+        second = validate_recovery_authorization_for_runtime(
+            read_manifest(path),
+            authorization_id=_AUTH_ID,
+            protocol_commit=_PROTOCOL,
+            protocol_tag_object=_TAG_OBJECT,
+            protocol_sha256=_SHA,
+            runtime_commit=_RUNTIME,
+        )
+
+        assert first.status == second.status == "RECOVERY"
+        with pytest.raises(AuthorizationError, match="AUTHORIZATION_RECOVERY_ONLY"):
+            validate_authorization_for_runtime(
+                second,
+                authorization_id=_AUTH_ID,
+                protocol_commit=_PROTOCOL,
+                protocol_tag_object=_TAG_OBJECT,
+                protocol_sha256=_SHA,
+                runtime_commit=_RUNTIME,
+            )
 
 
 class TestAtomicConcurrentClaim:

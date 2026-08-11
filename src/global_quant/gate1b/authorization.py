@@ -215,6 +215,63 @@ def validate_authorization_for_runtime(
     CONSUMED after the lifecycle completes.
     """
 
+    _validate_authorization_binding(
+        record,
+        authorization_id=authorization_id,
+        protocol_commit=protocol_commit,
+        protocol_tag_object=protocol_tag_object,
+        protocol_sha256=protocol_sha256,
+        runtime_commit=runtime_commit,
+    )
+    if record.status == "CONSUMED":
+        raise AuthorizationError("AUTHORIZATION_ALREADY_CONSUMED")
+    if record.status == "RECOVERY":
+        raise AuthorizationError("AUTHORIZATION_RECOVERY_ONLY")
+    if record.status != "ACTIVE":
+        raise AuthorizationError(f"AUTHORIZATION_INVALID_STATUS:{record.status}")
+    return record
+
+
+def validate_recovery_authorization_for_runtime(
+    record: AuthorizationRecord,
+    *,
+    authorization_id: str,
+    protocol_commit: str,
+    protocol_tag_object: str,
+    protocol_sha256: str,
+    runtime_commit: str,
+) -> AuthorizationRecord:
+    """Validate the same exact binding for a strictly recovery-only session.
+
+    Recovery validation never changes the record back to ``ACTIVE`` and never
+    grants a normal create capability.  A ``RECOVERY`` record intentionally
+    remains reusable after a recovery child crashes; the execution journal's
+    generation gate separately guarantees that only one credential-bearing
+    generation is active at a time.
+    """
+
+    _validate_authorization_binding(
+        record,
+        authorization_id=authorization_id,
+        protocol_commit=protocol_commit,
+        protocol_tag_object=protocol_tag_object,
+        protocol_sha256=protocol_sha256,
+        runtime_commit=runtime_commit,
+    )
+    if record.status != "RECOVERY":
+        raise AuthorizationError(f"AUTHORIZATION_NOT_RECOVERY:{record.status}")
+    return record
+
+
+def _validate_authorization_binding(
+    record: AuthorizationRecord,
+    *,
+    authorization_id: str,
+    protocol_commit: str,
+    protocol_tag_object: str,
+    protocol_sha256: str,
+    runtime_commit: str,
+) -> None:
     if record.authorization_id != authorization_id:
         raise AuthorizationError("AUTHORIZATION_ID_MISMATCH")
     if record.protocol_commit != protocol_commit:
@@ -225,13 +282,6 @@ def validate_authorization_for_runtime(
         raise AuthorizationError("AUTHORIZATION_PROTOCOL_HASH_REPLAY")
     if record.runtime_commit != runtime_commit:
         raise AuthorizationError("AUTHORIZATION_RUNTIME_REPLAY")
-    if record.status == "CONSUMED":
-        raise AuthorizationError("AUTHORIZATION_ALREADY_CONSUMED")
-    if record.status == "RECOVERY":
-        raise AuthorizationError("AUTHORIZATION_RECOVERY_ONLY")
-    if record.status != "ACTIVE":
-        raise AuthorizationError(f"AUTHORIZATION_INVALID_STATUS:{record.status}")
-    return record
 
 
 def mark_consumed(path: Path, record: AuthorizationRecord) -> AuthorizationRecord:
@@ -248,6 +298,32 @@ def mark_consumed(path: Path, record: AuthorizationRecord) -> AuthorizationRecor
     )
     write_manifest(path, consumed)
     return consumed
+
+
+def mark_recovery(path: Path, record: AuthorizationRecord) -> AuthorizationRecord:
+    """Persist the one-way ``CONSUMED`` to ``RECOVERY`` transition.
+
+    This transition is used only after durable mutation evidence requires a
+    later cleanup session.  It cannot mint a new authorization ID and cannot
+    restore ``ACTIVE``/CREATE authority.
+    """
+
+    if record.status != "CONSUMED":
+        raise AuthorizationError(f"RECOVERY_REQUIRES_CONSUMED:{record.status}")
+    current = read_manifest(path)
+    if current != record:
+        raise AuthorizationError("RECOVERY_RECORD_MISMATCH")
+    recovery = AuthorizationRecord(
+        authorization_id=record.authorization_id,
+        protocol_commit=record.protocol_commit,
+        protocol_tag_object=record.protocol_tag_object,
+        protocol_sha256=record.protocol_sha256,
+        runtime_commit=record.runtime_commit,
+        created_at=record.created_at,
+        status="RECOVERY",
+    )
+    write_manifest(path, recovery)
+    return recovery
 
 
 # ---------------------------------------------------------------------------
