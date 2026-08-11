@@ -26,6 +26,7 @@ import os
 import re
 import stat
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,19 +52,22 @@ class AuthorizationRecord:
     status: str  # "ACTIVE" | "CONSUMED" | "RECOVERY"
 
     def to_json(self) -> str:
-        return json.dumps(
-            {
-                "authorization_id": self.authorization_id,
-                "protocol_commit": self.protocol_commit,
-                "protocol_tag_object": self.protocol_tag_object,
-                "protocol_sha256": self.protocol_sha256,
-                "runtime_commit": self.runtime_commit,
-                "created_at": self.created_at,
-                "status": self.status,
-            },
-            sort_keys=True,
-            indent=2,
-        ) + "\n"
+        return (
+            json.dumps(
+                {
+                    "authorization_id": self.authorization_id,
+                    "protocol_commit": self.protocol_commit,
+                    "protocol_tag_object": self.protocol_tag_object,
+                    "protocol_sha256": self.protocol_sha256,
+                    "runtime_commit": self.runtime_commit,
+                    "created_at": self.created_at,
+                    "status": self.status,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
 
     @classmethod
     def from_mapping(cls, data: dict[str, object]) -> AuthorizationRecord:
@@ -393,9 +397,7 @@ def claim_authorization(
             runtime_commit=runtime_commit,
         )
         if record.status != "ACTIVE":
-            raise AuthorizationError(
-                f"AUTHORIZATION_NOT_ACTIVE:{record.status}:{authorization_id}"
-            )
+            raise AuthorizationError(f"AUTHORIZATION_NOT_ACTIVE:{record.status}:{authorization_id}")
         # --- atomically write CONSUMED ------------------------------------
         return mark_consumed(path, record)
     finally:
@@ -403,7 +405,5 @@ def claim_authorization(
 
 
 def _remove_lock(lock_path: Path) -> None:
-    try:
+    with suppress(OSError):
         lock_path.unlink(missing_ok=True)
-    except OSError:
-        pass

@@ -272,9 +272,7 @@ class TestRecoveryAuthorization:
                 runtime_commit="0" * 40,
             )
 
-    def test_recovery_remains_recovery_only_across_repeated_sessions(
-        self, tmp_path: Path
-    ) -> None:
+    def test_recovery_remains_recovery_only_across_repeated_sessions(self, tmp_path: Path) -> None:
         path = _write(tmp_path / "auth.json", _record(status="CONSUMED"))
         recovery = mark_recovery(path, read_manifest(path))
 
@@ -355,7 +353,6 @@ class TestAtomicConcurrentClaim:
         asserts exactly one succeeded.
         """
         import os as _os
-        import sys as _sys
 
         path = _write(tmp_path / "auth.json", _record())
 
@@ -420,7 +417,9 @@ class TestAtomicConcurrentClaim:
 
         assert len(successes) == 1, f"Expected exactly 1 success, got {successes}"
         assert len(failures) == 1, f"Expected exactly 1 failure, got {failures}"
-        assert "CONCURRENT" in failures[0]["error"] or "CONSUMED" in failures[0]["error"] or "NOT_ACTIVE" in failures[0]["error"]
+        assert any(
+            reason in failures[0]["error"] for reason in ("CONCURRENT", "CONSUMED", "NOT_ACTIVE")
+        )
 
         # Verify on-disk state is CONSUMED (only one claim persisted)
         reloaded = read_manifest(path)
