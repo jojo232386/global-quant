@@ -38,7 +38,7 @@ from global_quant.gate1b.safety import (
     validate_demo_endpoints,
 )
 
-PROTOCOL_VERSION = "1.10"
+PROTOCOL_VERSION = "1.11"
 DEMO_HTTP_ORIGIN = "https://demo-fapi.binance.com"
 SYMBOL = "ETHUSDT"
 POSITION_RISK_CONTROL_STATUS = "UNRESOLVED_SAFE_BLOCK"
@@ -318,13 +318,16 @@ class _GetOnlySignedClient(Protocol):
 class _ExistingDemoGetOnlySignedClient:
     """Demo signer whose code surface can emit authenticated GET only."""
 
-    __slots__ = ("__closed", "__http_client", "__loop")
+    __slots__ = ("__closed", "__http_client", "__loop", "__timestamp_ms")
 
-    def __init__(self, http_client: object) -> None:
+    def __init__(self, http_client: object, *, timestamp_ms: Callable[[], int]) -> None:
         if getattr(http_client, "base_url", None) != DEMO_HTTP_ORIGIN:
             raise ReadOnlyPreflightError("DEMO_HTTP_ORIGIN_MISMATCH")
+        if not callable(timestamp_ms):
+            raise ReadOnlyPreflightError("READ_TIMESTAMP_SOURCE_REQUIRED")
         _install_redirect_safe_client(http_client)
         self.__http_client = http_client
+        self.__timestamp_ms = timestamp_ms
         self.__loop = asyncio.new_event_loop()
         self.__closed = False
 
@@ -352,6 +355,11 @@ class _ExistingDemoGetOnlySignedClient:
         client = getattr(self.__http_client, "_client", None)
         if not isinstance(client, _RedirectSafeHttpClient):
             raise ReadOnlyPreflightError("REDIRECT_SAFE_CLIENT_REQUIRED")
+        timestamp_ms = self.__timestamp_ms()
+        if type(timestamp_ms) is not int or not 10**12 <= timestamp_ms < 10**13:
+            raise ReadOnlyPreflightError("READ_TIMESTAMP_INVALID")
+        signed_parameters = dict(parameters)
+        signed_parameters["timestamp"] = str(timestamp_ms)
         client.authorize_absolute_deadline(absolute_deadline_ns)
         try:
             return self.__loop.run_until_complete(
@@ -359,7 +367,7 @@ class _ExistingDemoGetOnlySignedClient:
                     self.__http_client.sign_request(
                         HttpMethod.GET,
                         path,
-                        dict(parameters),
+                        signed_parameters,
                     ),
                     timeout=remaining_seconds,
                 )
@@ -566,8 +574,9 @@ def build_authenticated_read_only_transport(
     try:
         endpoints = resolve_demo_endpoints()
         validate_demo_endpoints(endpoints)
+        clock = LiveClock()
         http_client = get_cached_binance_http_client(
-            clock=LiveClock(),
+            clock=clock,
             account_type=BinanceAccountType.USDT_FUTURES,
             api_key=credentials.api_key,
             api_secret=credentials.api_secret,
@@ -582,7 +591,10 @@ def build_authenticated_read_only_transport(
         raise ReadOnlyPreflightError("DEMO_HTTP_ORIGIN_MISMATCH")
     signed_client: _ExistingDemoGetOnlySignedClient | None = None
     try:
-        signed_client = _ExistingDemoGetOnlySignedClient(http_client)
+        signed_client = _ExistingDemoGetOnlySignedClient(
+            http_client,
+            timestamp_ms=clock.timestamp_ms,
+        )
         return AuthenticatedReadOnlyPreflightTransport(
             signed_client,
             _construction_token=_TRANSPORT_CONSTRUCTION_TOKEN,

@@ -1,4 +1,4 @@
-"""Hidden-prompt CLI for the isolated v1.10 authenticated read-only preflight."""
+"""Hidden-prompt CLI for the isolated v1.11 authenticated read-only preflight."""
 
 from __future__ import annotations
 

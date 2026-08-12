@@ -1,7 +1,7 @@
 {
   "artifact_schema_version": "1",
   "manifest_schema_version": 1,
-  "pass_verdict": "PASS_GATE1B_V1_10_READ_ONLY_DIAGNOSTICS",
-  "protocol_path": "protocols/NT_GATE_1B_V1_10.md",
-  "protocol_version": "1.10"
+  "pass_verdict": "PASS_GATE1B_V1_11_SIGNED_READ_ONLY_CORRECTNESS",
+  "protocol_path": "protocols/NT_GATE_1B_V1_11.md",
+  "protocol_version": "1.11"
 }

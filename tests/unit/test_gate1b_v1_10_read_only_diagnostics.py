@@ -105,7 +105,7 @@ def test_binance_error_exposes_only_structured_numeric_diagnostics(
         "category": category,
         "endpoint": "SYMBOL_CONFIG",
         "http_status": 400,
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": "SYMBOL_CONFIG_REQUEST",
         "status": "STOP",
     }
@@ -126,7 +126,7 @@ def test_http_error_without_safe_binance_code_omits_raw_response_data() -> None:
         "category": "HTTP_FAILURE",
         "endpoint": "SYMBOL_CONFIG",
         "http_status": 503,
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": "SYMBOL_CONFIG_REQUEST",
         "status": "STOP",
     }
@@ -152,7 +152,7 @@ def test_network_and_tls_failures_expose_no_raw_exception(
     assert payload == {
         "category": category,
         "endpoint": "SYMBOL_CONFIG",
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": "SYMBOL_CONFIG_REQUEST",
         "status": "STOP",
     }
@@ -191,7 +191,7 @@ def test_request_failure_stage_is_endpoint_specific(
     assert caught.value.diagnostic.to_stop_payload() == {  # type: ignore[union-attr]
         "category": "OTHER_SAFE_ERROR",
         "endpoint": endpoint_name,
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": stage,
         "status": "STOP",
     }
@@ -218,7 +218,7 @@ def test_response_validation_stage_is_endpoint_specific(
     assert caught.value.diagnostic.to_stop_payload() == {  # type: ignore[union-attr]
         "category": "RESPONSE_VALIDATION_FAILED",
         "endpoint": endpoint_name,
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": stage,
         "status": "STOP",
     }
@@ -254,7 +254,7 @@ def test_cli_redacts_exception_attack_and_stops_after_one_attempt(capsys) -> Non
         "category": "SIGNATURE_INVALID",
         "endpoint": "SYMBOL_CONFIG",
         "http_status": 400,
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": "SYMBOL_CONFIG_REQUEST",
         "status": "STOP",
     }

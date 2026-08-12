@@ -220,7 +220,7 @@ def test_prompted_entrypoint_never_prints_credentials_signature_or_exception(cap
     assert "signature" not in output.lower()
     assert json.loads(output) == {
         "category": "LOCAL_INPUT_FAILURE",
-        "protocol_version": "1.10",
+        "protocol_version": "1.11",
         "stage": "CREDENTIAL_INPUT",
         "status": "STOP",
     }
