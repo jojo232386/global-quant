@@ -61,10 +61,33 @@ The entrypoint can return the current `ETHUSDT` open-order count for a later
 gate. This implementation does not claim the account satisfies the public
 limit and does not change order authorization.
 
+## Independent machine acceptance artifact
+
+Independent acceptance of this v1.9 candidate uses a credential-free, offline
+artifact verifier:
+
+```text
+python scripts/verify_gate_1b_v1_9_acceptance.py --artifact <owner-only-artifact-path>
+```
+
+The v1.9 artifact must carry `protocol_version = 1.9`, an independent reviewer
+identity, a v1.9 PASS verdict, P0--P3 finding counts, the exact reviewed
+candidate SHA, the matching `protocol_commit`, the SHA-256 of this protocol
+document as tracked at that candidate, and a canonical artifact digest. The
+verifier derives the candidate SHA and protocol bytes from local Git objects;
+it does not read a working-tree protocol file as authority.
+
+No final-accepted tag is an input to the v1.9 verifier. A v1.6 legacy artifact
+has no v1.9 protocol version and therefore cannot satisfy this acceptance path.
+The real artifact and any final certification ref are produced only by a fresh
+independent reviewer after the candidate is committed; implementation and tests
+may use synthetic fixtures only.
+
 ## Explicit non-changes
 
 - Existing mutation/order path: unchanged.
-- Independent-review artifact schema: unchanged.
+- Existing v1.6 artifact verification path: preserved only for explicit v1.6
+  runtime verification; it cannot replay into v1.9 acceptance.
 - Real credentials: not used during implementation or tests.
 - Authenticated account query: not sent during implementation or tests.
 - Account mutation, Demo order, or Production access: not performed.
