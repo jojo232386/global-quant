@@ -218,7 +218,12 @@ def test_prompted_entrypoint_never_prints_credentials_signature_or_exception(cap
     assert _API_KEY not in output
     assert _API_SECRET not in output
     assert "signature" not in output.lower()
-    assert json.loads(output)["reason"] == "AUTHENTICATED_READ_ONLY_PREFLIGHT_FAILED"
+    assert json.loads(output) == {
+        "category": "LOCAL_INPUT_FAILURE",
+        "protocol_version": "1.10",
+        "stage": "CREDENTIAL_INPUT",
+        "status": "STOP",
+    }
 
 
 def test_cli_requires_exact_demo_only_arming_before_prompt_or_network(capsys) -> None:

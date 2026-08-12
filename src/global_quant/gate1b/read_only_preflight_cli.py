@@ -1,4 +1,4 @@
-"""Hidden-prompt CLI for the isolated v1.9 authenticated read-only preflight."""
+"""Hidden-prompt CLI for the isolated v1.10 authenticated read-only preflight."""
 
 from __future__ import annotations
 
@@ -19,14 +19,19 @@ from global_quant.gate1b.read_only_preflight import (
     POSITION_RISK_CONTROL_STATUS,
     PROTOCOL_VERSION,
     AuthenticatedReadOnlyPreflightTransport,
+    DiagnosticCategory,
+    DiagnosticStage,
+    ReadOnlyPreflightError,
+    SafeReadOnlyDiagnostic,
     build_authenticated_read_only_transport,
 )
 from global_quant.gate1b.safety import DemoCredentials
 
 _STOP_PAYLOAD = {
     "protocol_version": PROTOCOL_VERSION,
-    "reason": "AUTHENTICATED_READ_ONLY_PREFLIGHT_FAILED",
     "status": "STOP",
+    "stage": DiagnosticStage.CREDENTIAL_INPUT.value,
+    "category": DiagnosticCategory.LOCAL_INPUT_FAILURE.value,
 }
 
 
@@ -95,8 +100,16 @@ def run_prompted_read_only_preflight(
         }
         print(_encoded_secret_free(payload, forbidden_values))
         return 0
-    except BaseException:
-        print(json.dumps(_STOP_PAYLOAD, sort_keys=True))
+    except BaseException as exc:
+        diagnostic = (
+            exc.diagnostic
+            if isinstance(exc, ReadOnlyPreflightError) and exc.diagnostic is not None
+            else SafeReadOnlyDiagnostic(
+                stage=DiagnosticStage.CREDENTIAL_INPUT,
+                category=DiagnosticCategory.LOCAL_INPUT_FAILURE,
+            )
+        )
+        print(_encoded_secret_free(diagnostic.to_stop_payload(), forbidden_values))
         return 1
     finally:
         if transport is not None:

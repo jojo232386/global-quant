@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import ssl
 import time
+import urllib.error
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -21,12 +23,12 @@ from typing import Protocol
 from nautilus_trader.adapters.binance import BinanceAccountType
 from nautilus_trader.adapters.binance.common.enums import BinanceEnvironment
 from nautilus_trader.adapters.binance.factories import get_cached_binance_http_client
+from nautilus_trader.adapters.binance.http.error import BinanceError
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.core.nautilus_pyo3 import HttpMethod
 
 from global_quant.gate1b.credential_http import (
     _REQUEST_TIMEOUT_SECONDS,
-    CredentialHttpError,
     _install_redirect_safe_client,
     _RedirectSafeHttpClient,
 )
@@ -36,7 +38,7 @@ from global_quant.gate1b.safety import (
     validate_demo_endpoints,
 )
 
-PROTOCOL_VERSION = "1.9"
+PROTOCOL_VERSION = "1.10"
 DEMO_HTTP_ORIGIN = "https://demo-fapi.binance.com"
 SYMBOL = "ETHUSDT"
 POSITION_RISK_CONTROL_STATUS = "UNRESOLVED_SAFE_BLOCK"
@@ -46,17 +48,195 @@ MAX_NUM_ORDERS_STATUS = "AUTHENTICATED_STATE_AVAILABLE_NOT_EVALUATED"
 class ReadOnlyPreflightError(RuntimeError):
     """Fail-closed read-only capability error with a non-secret reason."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        diagnostic: SafeReadOnlyDiagnostic | None = None,
+    ) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.diagnostic = diagnostic
+
+
+class DiagnosticCategory(StrEnum):
+    """Complete v1.10 failure-category output allowlist."""
+
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
+    SIGNATURE_INVALID = "SIGNATURE_INVALID"
+    TIMESTAMP_OR_CLOCK_SKEW = "TIMESTAMP_OR_CLOCK_SKEW"
+    API_PERMISSION_INSUFFICIENT = "API_PERMISSION_INSUFFICIENT"
+    BINANCE_API_ERROR = "BINANCE_API_ERROR"
+    NETWORK_FAILURE = "NETWORK_FAILURE"
+    TLS_FAILURE = "TLS_FAILURE"
+    HTTP_FAILURE = "HTTP_FAILURE"
+    RESPONSE_VALIDATION_FAILED = "RESPONSE_VALIDATION_FAILED"
+    LOCAL_INPUT_FAILURE = "LOCAL_INPUT_FAILURE"
+    OTHER_SAFE_ERROR = "OTHER_SAFE_ERROR"
+
+
+class DiagnosticStage(StrEnum):
+    """Complete v1.10 failure-stage output allowlist."""
+
+    CREDENTIAL_INPUT = "CREDENTIAL_INPUT"
+    SYMBOL_CONFIG_REQUEST = "SYMBOL_CONFIG_REQUEST"
+    SYMBOL_CONFIG_RESPONSE = "SYMBOL_CONFIG_RESPONSE"
+    OPEN_ORDERS_REQUEST = "OPEN_ORDERS_REQUEST"
+    OPEN_ORDERS_RESPONSE = "OPEN_ORDERS_RESPONSE"
+    POSITION_RISK_REQUEST = "POSITION_RISK_REQUEST"
+    POSITION_RISK_RESPONSE = "POSITION_RISK_RESPONSE"
 
 
 class ReadOnlyEndpoint(StrEnum):
-    """The complete authenticated endpoint allowlist for protocol v1.9."""
+    """The unchanged authenticated endpoint allowlist for protocol v1.10."""
 
     SYMBOL_CONFIGURATION = "/fapi/v1/symbolConfig"
     OPEN_ORDERS = "/fapi/v1/openOrders"
     POSITION_STATE = "/fapi/v3/positionRisk"
+
+
+_ENDPOINT_SYMBOLS = {
+    ReadOnlyEndpoint.SYMBOL_CONFIGURATION: "SYMBOL_CONFIG",
+    ReadOnlyEndpoint.OPEN_ORDERS: "OPEN_ORDERS",
+    ReadOnlyEndpoint.POSITION_STATE: "POSITION_RISK",
+}
+_REQUEST_STAGES = {
+    ReadOnlyEndpoint.SYMBOL_CONFIGURATION: DiagnosticStage.SYMBOL_CONFIG_REQUEST,
+    ReadOnlyEndpoint.OPEN_ORDERS: DiagnosticStage.OPEN_ORDERS_REQUEST,
+    ReadOnlyEndpoint.POSITION_STATE: DiagnosticStage.POSITION_RISK_REQUEST,
+}
+_RESPONSE_STAGES = {
+    ReadOnlyEndpoint.SYMBOL_CONFIGURATION: DiagnosticStage.SYMBOL_CONFIG_RESPONSE,
+    ReadOnlyEndpoint.OPEN_ORDERS: DiagnosticStage.OPEN_ORDERS_RESPONSE,
+    ReadOnlyEndpoint.POSITION_STATE: DiagnosticStage.POSITION_RISK_RESPONSE,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class SafeReadOnlyDiagnostic:
+    """Strictly allowlisted diagnostic data; never retains a raw exception."""
+
+    stage: DiagnosticStage
+    category: DiagnosticCategory
+    endpoint: ReadOnlyEndpoint | None = None
+    http_status: int | None = None
+    binance_code: int | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.stage) is not DiagnosticStage or type(self.category) is not DiagnosticCategory:
+            raise ValueError("SAFE_DIAGNOSTIC_INVALID")
+        if self.endpoint is not None and type(self.endpoint) is not ReadOnlyEndpoint:
+            raise ValueError("SAFE_DIAGNOSTIC_INVALID")
+        if self.http_status is not None and (
+            type(self.http_status) is not int or not 100 <= self.http_status <= 599
+        ):
+            raise ValueError("SAFE_DIAGNOSTIC_INVALID")
+        if self.binance_code is not None and (
+            type(self.binance_code) is not int or abs(self.binance_code) > 999_999_999
+        ):
+            raise ValueError("SAFE_DIAGNOSTIC_INVALID")
+
+    def to_stop_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "protocol_version": PROTOCOL_VERSION,
+            "status": "STOP",
+            "stage": self.stage.value,
+            "category": self.category.value,
+        }
+        if self.endpoint is not None:
+            payload["endpoint"] = _ENDPOINT_SYMBOLS[self.endpoint]
+        if self.http_status is not None:
+            payload["http_status"] = self.http_status
+        if self.binance_code is not None:
+            payload["binance_code"] = self.binance_code
+        return payload
+
+
+def _exception_chain(error: BaseException) -> tuple[BaseException, ...]:
+    """Return a bounded type-inspection chain without rendering any exception."""
+
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and len(chain) < 8 and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        nested = current.__cause__
+        if nested is None and isinstance(current, urllib.error.URLError):
+            reason = current.reason
+            nested = reason if isinstance(reason, BaseException) else None
+        if nested is None:
+            nested = current.__context__
+        current = nested
+    return tuple(chain)
+
+
+def _safe_binance_fields(error: BinanceError) -> tuple[int | None, int | None]:
+    status = error.status if type(error.status) is int and 100 <= error.status <= 599 else None
+    message = error.message
+    code: int | None = None
+    if type(message) is dict:
+        candidate = message.get("code")
+        if type(candidate) is int and abs(candidate) <= 999_999_999:
+            code = candidate
+    return status, code
+
+
+def _request_failure_diagnostic(
+    endpoint: ReadOnlyEndpoint,
+    error: BaseException,
+) -> SafeReadOnlyDiagnostic:
+    chain = _exception_chain(error)
+    for candidate in chain:
+        if isinstance(candidate, BinanceError):
+            http_status, binance_code = _safe_binance_fields(candidate)
+            category = {
+                -1002: DiagnosticCategory.AUTHENTICATION_FAILED,
+                -1021: DiagnosticCategory.TIMESTAMP_OR_CLOCK_SKEW,
+                -1022: DiagnosticCategory.SIGNATURE_INVALID,
+                -2014: DiagnosticCategory.AUTHENTICATION_FAILED,
+                -2015: DiagnosticCategory.AUTHENTICATION_FAILED,
+            }.get(binance_code)
+            if category is None:
+                category = (
+                    DiagnosticCategory.BINANCE_API_ERROR
+                    if binance_code is not None
+                    else DiagnosticCategory.HTTP_FAILURE
+                )
+            return SafeReadOnlyDiagnostic(
+                stage=_REQUEST_STAGES[endpoint],
+                category=category,
+                endpoint=endpoint,
+                http_status=http_status,
+                binance_code=binance_code,
+            )
+    if any(isinstance(candidate, ssl.SSLError | ssl.CertificateError) for candidate in chain):
+        category = DiagnosticCategory.TLS_FAILURE
+    elif any(isinstance(candidate, urllib.error.HTTPError) for candidate in chain):
+        category = DiagnosticCategory.HTTP_FAILURE
+    elif any(
+        isinstance(candidate, TimeoutError | ConnectionError | urllib.error.URLError | OSError)
+        for candidate in chain
+    ):
+        category = DiagnosticCategory.NETWORK_FAILURE
+    else:
+        category = DiagnosticCategory.OTHER_SAFE_ERROR
+    return SafeReadOnlyDiagnostic(
+        stage=_REQUEST_STAGES[endpoint],
+        category=category,
+        endpoint=endpoint,
+    )
+
+
+def _response_failure(endpoint: ReadOnlyEndpoint) -> ReadOnlyPreflightError:
+    return ReadOnlyPreflightError(
+        "READ_RESPONSE_INVALID",
+        diagnostic=SafeReadOnlyDiagnostic(
+            stage=_RESPONSE_STAGES[endpoint],
+            category=DiagnosticCategory.RESPONSE_VALIDATION_FAILED,
+            endpoint=endpoint,
+        ),
+    )
 
 
 _ALLOWED_PATHS = frozenset(endpoint.value for endpoint in ReadOnlyEndpoint)
@@ -184,10 +364,11 @@ class _ExistingDemoGetOnlySignedClient:
                     timeout=remaining_seconds,
                 )
             )
-        except (TimeoutError, CredentialHttpError):
-            raise ReadOnlyPreflightError("READ_ONLY_IO_FAILED") from None
-        except BaseException:
-            raise ReadOnlyPreflightError("READ_ONLY_IO_FAILED") from None
+        except BaseException as exc:
+            raise ReadOnlyPreflightError(
+                "READ_ONLY_IO_FAILED",
+                diagnostic=_request_failure_diagnostic(ReadOnlyEndpoint(path), exc),
+            ) from None
         finally:
             client.cancel_absolute_deadline(absolute_deadline_ns)
 
@@ -256,34 +437,43 @@ class AuthenticatedReadOnlyPreflightTransport:
         if type(absolute_deadline_ns) is not int or absolute_deadline_ns <= time.monotonic_ns():
             raise ReadOnlyPreflightError("ABSOLUTE_DEADLINE_EXHAUSTED")
 
+        endpoint = ReadOnlyEndpoint(path)
         try:
             raw = self.__signed_client.get(
                 path,
                 dict(parameters),
                 absolute_deadline_ns=absolute_deadline_ns,
             )
-        except ReadOnlyPreflightError:
-            raise
-        except BaseException:
-            raise ReadOnlyPreflightError("READ_ONLY_IO_FAILED") from None
+        except ReadOnlyPreflightError as exc:
+            if exc.diagnostic is not None:
+                raise
+            raise ReadOnlyPreflightError(
+                "READ_ONLY_IO_FAILED",
+                diagnostic=_request_failure_diagnostic(endpoint, exc),
+            ) from None
+        except BaseException as exc:
+            raise ReadOnlyPreflightError(
+                "READ_ONLY_IO_FAILED",
+                diagnostic=_request_failure_diagnostic(endpoint, exc),
+            ) from None
         if type(raw) is not bytes:
-            raise ReadOnlyPreflightError("READ_RESPONSE_INVALID")
+            raise _response_failure(endpoint)
         try:
             decoded = json.loads(
                 raw,
                 object_pairs_hook=_unique_object,
                 parse_constant=_reject_json_constant,
             )
-        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
-            raise ReadOnlyPreflightError("READ_RESPONSE_INVALID") from None
-        return self._sanitize(ReadOnlyEndpoint(path), decoded)
+            return self._sanitize(endpoint, decoded)
+        except (UnicodeDecodeError, ValueError, ReadOnlyPreflightError):
+            raise _response_failure(endpoint) from None
 
     def run_fixed_preflight(
         self,
         *,
         deadline_factory: Callable[[], int] | None = None,
     ) -> tuple[ReadOnlyResult, ...]:
-        """Run the complete v1.9 capability without authorizing an order."""
+        """Run the unchanged fixed GET capability without authorizing an order."""
 
         make_deadline = deadline_factory or (
             lambda: time.monotonic_ns() + int(_REQUEST_TIMEOUT_SECONDS * 1_000_000_000)
