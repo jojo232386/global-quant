@@ -1,9 +1,0 @@
-{
-  "completed_at": "2026-08-06T00:40:28.865126+00:00",
-  "config_hash": "acd6244cff3eef323d5923503a81927a152e50c5d6b2ac95f799ce07c78c6087",
-  "credentials_read": false,
-  "mode": "BUILD_ONLY",
-  "network_accessed": false,
-  "source_hash": "baa75f3d62061d8ab0e3a97b178479f3032ccb395e6e0eadfd5c8d2a679fc3df",
-  "status": "READY"
-}

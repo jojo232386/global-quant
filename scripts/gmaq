@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CONFIG="$ROOT_DIR/user_data/config.json"
+ENV_FILE="$ROOT_DIR/.env"
+
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE=(docker-compose)
+else
+  echo "Docker Compose is required." >&2
+  exit 1
+fi
+
+ensure_local_api_credentials() {
+  python3 - "$ENV_FILE" <<'PY'
+import os
+import pathlib
+import secrets
+import sys
+
+path = pathlib.Path(sys.argv[1])
+required = {
+    "GMAQ_API_USERNAME",
+    "GMAQ_API_PASSWORD",
+    "GMAQ_JWT_SECRET_KEY",
+    "GMAQ_WS_TOKEN",
+}
+if path.exists():
+    names = {
+        line.split("=", 1)[0]
+        for line in path.read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+    missing = required - names
+    if missing:
+        raise SystemExit("STOP: local .env is missing required GMAQ API fields")
+else:
+    values = {
+        "GMAQ_API_USERNAME": "gmaq",
+        "GMAQ_API_PASSWORD": secrets.token_urlsafe(24),
+        "GMAQ_JWT_SECRET_KEY": secrets.token_urlsafe(32),
+        "GMAQ_WS_TOKEN": secrets.token_urlsafe(32),
+    }
+    payload = "".join(f"{key}={value}\n" for key, value in values.items())
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(payload)
+PY
+}
+
+guard_dry_run() {
+  python3 - "$CONFIG" <<'PY'
+import json
+import pathlib
+import sys
+
+config = json.loads(pathlib.Path(sys.argv[1]).read_text())
+exchange = config.get("exchange", {})
+if config.get("dry_run") is not True:
+    raise SystemExit("STOP: scripts/gmaq accepts dry_run=true only")
+if exchange.get("key") or exchange.get("secret"):
+    raise SystemExit("STOP: exchange credentials must remain empty")
+if config.get("trading_mode") != "futures" or config.get("margin_mode") != "isolated":
+    raise SystemExit("STOP: expected futures/isolated configuration")
+PY
+}
+
+cd "$ROOT_DIR"
+action=${1:-status}
+case "$action" in
+  up)
+    ensure_local_api_credentials
+    guard_dry_run
+    "${COMPOSE[@]}" up -d
+    echo "FreqUI: http://127.0.0.1:8080"
+    echo "Local credentials: $ENV_FILE"
+    ;;
+  down)
+    "${COMPOSE[@]}" down --timeout 30
+    ;;
+  stop)
+    "${COMPOSE[@]}" stop --timeout 30
+    ;;
+  restart)
+    ensure_local_api_credentials
+    guard_dry_run
+    "${COMPOSE[@]}" restart --timeout 30 freqtrade
+    ;;
+  logs)
+    "${COMPOSE[@]}" logs --tail 200 -f
+    ;;
+  status|ps)
+    "${COMPOSE[@]}" ps
+    ;;
+  *)
+    echo "Usage: $0 {up|down|stop|restart|logs|status}" >&2
+    exit 2
+    ;;
+esac

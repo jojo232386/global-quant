@@ -1,67 +1,83 @@
-# global-quant
+# GMAQ
 
-Clean research and execution-engineering repository for non-A-share markets.
+GMAQ is a Freqtrade-based quantitative trading project focused on automated
+cryptocurrency futures research, dry-run validation, and controlled live
+deployment.
 
-## Project boundary
+## Current stack
 
-- This repository is only for global and crypto quantitative work.
-- It must not read, import, copy, or share code, data, environments, outputs,
-  reports, credentials, commits, or conclusions with the A-share project.
-- `/Users/ASUS/Desktop/trading-assistant` is a legacy research archive and the
-  WorkBuddy coordination inbox. Stopped SMC, ATR, SMA, and terminal-trend
-  strategies are not migrated here.
-- No real-money trading is authorized.
+- Freqtrade 2026.7 as the single active trading runtime
+- FreqUI as the operational interface
+- Binance USD-M Futures
+- Docker and Compose, with Colima supported on macOS
 
-## Gate status
+## Current status
 
-`NT-GATE-1A v1.2`: `PASS`. The final machine verdict completed at
-`2026-08-06T07:29:00.478740+08:00`, within the frozen 12-hour window.
+- Binance public market data and dry-run trading verified
+- `ETH/USDT:USDT`, isolated margin, 1x leverage
+- FreqUI verified on `http://127.0.0.1:8080`
+- persistence, restart recovery, and stopped-database backup/restore verified
+- live credentials are not configured or stored in this repository
+- live trading is not enabled
 
-The gate protocol is frozen in
-[`protocols/NT_GATE_1A_V1_2.md`](protocols/NT_GATE_1A_V1_2.md). The tested
-commit passed six independent `150/150` runs, thirteen restart groups, the real
-Strategy post-`fsync` `SIGKILL` recovery path, durable unknown-fill lockout,
-runtime version sampling, and WorkBuddy review with `P0=0` and `P1=0`. See
-[`reviews/GATE1A_V1_2_FINAL_REVIEW.md`](reviews/GATE1A_V1_2_FINAL_REVIEW.md).
+`LiveExecutionCanaryStrategy` is a runtime canary, not proven alpha.
 
-Version 1.1 remains frozen as `STOP` under tag
-`nt-gate-1a-v1.1-stop`. Version 1.2 closes only the two real Strategy callback
-P1 findings and the evidence gap. It does not prove Binance behavior, alpha,
-profitability, or live readiness.
+## Quick start
 
-This `PASS` is permanently certified only at tag `nt-gate-1a-v1.2-pass`,
-commit `297f8e0527c34ae6a220d5fc8087e0e38a6e3551`. Later commits made
-additive changes to the Gate 1A source (`src/global_quant/gate1a/`) during
-Gate 1B development; those changes are not covered by this certification, and
-no re-certification of the later tree is claimed. Tags, not branch tips, are
-the permanent certification pointers for this project.
+Requirements: Docker with Compose, plus Python 3.12 or newer for local tests.
 
-### Gate 1B
+```sh
+./scripts/gmaq up
+```
 
-Gate 1B was subsequently authorized and attempted through v1.2-v1.4:
+The first start creates random local FreqUI/API credentials in the ignored
+`.env` file. The values stay on the local machine. Open
+<http://127.0.0.1:8080> after startup.
 
-- v1.2 closed `INCONCLUSIVE` (missing Demo credentials; tag
-  `nt-gate-1b-v1.2-inconclusive`).
-- v1.3 closed `STOP` before any network access, after a credential
-  identifier (not a secret value) was caught entering agent context and
-  contained (tag `nt-gate-1b-v1.3-stop`).
-- v1.4 closed `STOP` at its wall-clock deadline before any authenticated
-  preflight (tag `nt-gate-1b-v1.4-stop`). Version 1.4 is permanently closed
-  and must never be reopened.
+Useful commands:
 
-Across v1.2-v1.4, cumulative Binance impact remained zero: no authenticated
-or signed request, account query, order, fill, fee, funding event, or
-position change.
+```sh
+./scripts/gmaq status
+./scripts/gmaq logs
+./scripts/gmaq restart
+./scripts/gmaq down
+```
 
-`NT-GATE-1B` is currently `STOP / PAUSED`. Any future retry requires a new
-protocol version, explicit authorization, a protocol frozen and tagged before
-execution, and a fresh credential pair generated only after that freeze. See
-[`ACTIVE_GATE.md`](ACTIVE_GATE.md) and
-[`CHECKPOINT_2026-08-07.md`](CHECKPOINT_2026-08-07.md) for current status.
+## Safety
 
-## GitHub
+- the committed configuration is dry-run by default;
+- Binance key and secret fields are empty;
+- the startup wrapper refuses non-dry-run or credential-bearing exchange config;
+- the initial scope is one pair, isolated margin, 1x, one open trade maximum;
+- live deployment requires a separate configuration and explicit review;
+- no active SQLite database should be copied or queried directly.
 
-The private personal remote is
-[`jojo232386/global-quant`](https://github.com/jojo232386/global-quant).
-The local repository remains the execution source of truth; pushed commits are
-the off-machine audit trail.
+## Validate
+
+```sh
+python3 -m pytest -q
+docker-compose run --rm freqtrade list-strategies \
+  --config /freqtrade/user_data/config.json
+```
+
+The next bounded reliability run is:
+
+```sh
+./scripts/reliability-soak 72
+```
+
+It accepts 48–72 hours and exercises runtime controls, restart, a short network
+interruption, stopped-database backup/restore, FreqUI reconnection, duplicate
+identity checks, and a final dry-run `forceexit all`.
+
+## Project structure
+
+- `user_data/strategies/`: GMAQ strategy logic
+- `user_data/config.json`: credential-free dry-run configuration
+- `research/`: strategy research scope and future research artifacts
+- `configs/`: live-readiness policy and planning
+- `tests/`: focused configuration and custom-behavior contracts
+- `scripts/`: safe product and reliability commands
+
+Earlier architecture remains recoverable from Git history and the published
+historical tag; it is not part of the active runtime.
