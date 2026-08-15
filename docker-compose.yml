@@ -1,0 +1,36 @@
+services:
+  runtime-init:
+    image: freqtradeorg/freqtrade:stable@sha256:50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 1000:1000 /freqtrade/runtime /freqtrade/backups"]
+    restart: "no"
+    volumes:
+      - "runtime_data:/freqtrade/runtime"
+      - "runtime_backups:/freqtrade/backups"
+
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable@sha256:50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486
+    container_name: gmaq-freqtrade
+    restart: unless-stopped
+    depends_on:
+      runtime-init:
+        condition: service_completed_successfully
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+      - "runtime_data:/freqtrade/runtime"
+      - "runtime_backups:/freqtrade/backups"
+    ports:
+      - "127.0.0.1:8080:8080"
+    command:
+      - trade
+      - --config
+      - /freqtrade/user_data/config.json
+      - --strategy
+      - LiveExecutionCanaryStrategy
+      - --db-url
+      - sqlite:////freqtrade/runtime/tradesv3.dryrun.sqlite
+
+volumes:
+  runtime_data:
+  runtime_backups:

@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+CONFIG="$ROOT_DIR/user_data/config.json"
+HOURS=${1:-72}
+
+if ! [[ "$HOURS" =~ ^(48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72)$ ]]; then
+  echo "Usage: $0 HOURS  # HOURS must be 48..72" >&2
+  exit 2
+fi
+
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE=(docker-compose)
+else
+  echo "Docker Compose is required." >&2
+  exit 1
+fi
+
+read -r API_USER API_PASSWORD < <(
+  python3 - "$CONFIG" <<'PY'
+import json
+import pathlib
+import sys
+
+config = json.loads(pathlib.Path(sys.argv[1]).read_text())
+exchange = config.get("exchange", {})
+if config.get("dry_run") is not True or exchange.get("key") or exchange.get("secret"):
+    raise SystemExit("STOP: reliability soak is credential-free dry-run only")
+api = config["api_server"]
+print(api["username"], api["password"])
+PY
+)
+
+api_get() {
+  curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
+    "http://127.0.0.1:8080/api/v1/$1"
+}
+
+api_post() {
+  local endpoint=$1
+  local payload=${2:-'{}'}
+  curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
+    -H 'Content-Type: application/json' -X POST -d "$payload" \
+    "http://127.0.0.1:8080/api/v1/$endpoint"
+}
+
+wait_ping() {
+  local attempts=0
+  until curl --fail --silent http://127.0.0.1:8080/api/v1/ping >/dev/null; do
+    attempts=$((attempts + 1))
+    if (( attempts >= 90 )); then
+      echo "STOP: FreqUI/API did not reconnect" >&2
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+wait_state() {
+  local expected=$1
+  local attempts=0
+  until [[ $(api_get show_config | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state", ""))') == "$expected" ]]; do
+    attempts=$((attempts + 1))
+    if (( attempts >= 60 )); then
+      echo "STOP: bot did not reach state=$expected" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+assert_no_duplicate_open_trades() {
+  api_get status | python3 -c '
+import json, sys
+trades = json.load(sys.stdin)
+ids = [trade["trade_id"] for trade in trades]
+pairs = [trade["pair"] for trade in trades]
+orders = [order["order_id"] for trade in trades for order in trade.get("orders", [])]
+if len(ids) != len(set(ids)) or len(pairs) != len(set(pairs)) or len(orders) != len(set(orders)):
+    raise SystemExit("STOP: duplicate open trade, pair, or order identity")
+if len(trades) > 1:
+    raise SystemExit("STOP: max_open_trades contract exceeded")
+'
+}
+
+cd "$ROOT_DIR"
+mkdir -p user_data/logs
+LOG="user_data/logs/reliability-$(date -u +%Y%m%dT%H%M%SZ).log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "RELIABILITY_START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "RELIABILITY_HOURS=$HOURS"
+./scripts/gmaq up
+wait_ping
+assert_no_duplicate_open_trades
+
+api_post pause >/dev/null
+wait_state paused
+api_post start >/dev/null
+wait_state running
+api_post stop >/dev/null
+wait_state stopped
+api_post start >/dev/null
+wait_state running
+
+"${COMPOSE[@]}" restart --timeout 30 freqtrade
+wait_ping
+assert_no_duplicate_open_trades
+
+NETWORK=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' gmaq-freqtrade)
+docker network disconnect -f "$NETWORK" gmaq-freqtrade
+sleep 15
+docker network connect "$NETWORK" gmaq-freqtrade
+wait_ping
+assert_no_duplicate_open_trades
+
+"${COMPOSE[@]}" stop --timeout 30 freqtrade
+IMAGE=$(docker inspect -f '{{.Config.Image}}' gmaq-freqtrade)
+RUNTIME_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/runtime"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
+BACKUP_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/backups"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
+docker run --rm --entrypoint python -v "$RUNTIME_VOLUME:/runtime" -v "$BACKUP_VOLUME:/backups" "$IMAGE" -c '
+import pathlib, shutil, sqlite3, time
+source = pathlib.Path("/runtime/tradesv3.dryrun.sqlite")
+backup = pathlib.Path("/backups") / f"tradesv3-{int(time.time())}.sqlite"
+restore = pathlib.Path("/runtime/restore-check.sqlite")
+shutil.copy2(source, backup)
+shutil.copy2(backup, restore)
+conn = sqlite3.connect(restore)
+assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
+conn.close()
+restore.unlink()
+print(f"DB_BACKUP_RESTORE=PASS path={backup}")
+'
+"${COMPOSE[@]}" start freqtrade
+wait_ping
+assert_no_duplicate_open_trades
+
+END_EPOCH=$(( $(date +%s) + HOURS * 3600 ))
+while (( $(date +%s) < END_EPOCH )); do
+  wait_ping
+  assert_no_duplicate_open_trades
+  sleep 300
+done
+
+api_post pause >/dev/null
+wait_state paused
+if [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -gt 0 ]]; then
+  api_post forceexit '{"tradeid":"all","ordertype":"market"}' >/dev/null
+fi
+for _ in $(seq 1 60); do
+  [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -eq 0 ]] && break
+  sleep 2
+done
+[[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -eq 0 ]]
+api_post stop >/dev/null
+"${COMPOSE[@]}" stop --timeout 30 freqtrade
+echo "OPEN_POSITION_AFTER_FINAL_STOP=0"
+echo "RELIABILITY_RESULT=PASS"
+echo "RELIABILITY_END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

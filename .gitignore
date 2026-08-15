@@ -9,8 +9,14 @@ dist/
 build/
 *.egg-info/
 
-# Gate evidence is generated locally. Only curated evidence is committed.
-evidence/runtime/
+# Freqtrade runtime state is local. The empty directories remain versioned.
+user_data/data/*
+!user_data/data/.gitkeep
+user_data/logs/*
+!user_data/logs/.gitkeep
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
 
 # WorkBuddy workspace-local data (daily logs, memory) is never committed.
 .workbuddy/
@@ -20,3 +26,4 @@ evidence/runtime/
 .env.*
 *.pem
 *.key
+*live*.json
