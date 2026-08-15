@@ -66,11 +66,7 @@
     "listen_port": 8080,
     "verbosity": "error",
     "enable_openapi": false,
-    "jwt_secret_key": "gmaq-dry-run-local-jwt-not-for-production",
-    "ws_token": "gmaq-dry-run-local-ws-not-for-production",
-    "CORS_origins": [],
-    "username": "gmaq",
-    "password": "gmaq-dry-run-local-only"
+    "CORS_origins": []
   },
   "internals": {
     "process_throttle_secs": 5

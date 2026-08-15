@@ -19,8 +19,7 @@ else
   exit 1
 fi
 
-read -r API_USER API_PASSWORD < <(
-  python3 - "$CONFIG" <<'PY'
+python3 - "$CONFIG" <<'PY'
 import json
 import pathlib
 import sys
@@ -29,10 +28,7 @@ config = json.loads(pathlib.Path(sys.argv[1]).read_text())
 exchange = config.get("exchange", {})
 if config.get("dry_run") is not True or exchange.get("key") or exchange.get("secret"):
     raise SystemExit("STOP: reliability soak is credential-free dry-run only")
-api = config["api_server"]
-print(api["username"], api["password"])
 PY
-)
 
 api_get() {
   curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
@@ -94,6 +90,19 @@ exec > >(tee -a "$LOG") 2>&1
 echo "RELIABILITY_START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "RELIABILITY_HOURS=$HOURS"
 ./scripts/gmaq up
+read -r API_USER API_PASSWORD < <(
+  python3 - "$ROOT_DIR/.env" <<'PY'
+import pathlib
+import sys
+
+values = {}
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    if line and not line.startswith("#") and "=" in line:
+        key, value = line.split("=", 1)
+        values[key] = value
+print(values["GMAQ_API_USERNAME"], values["GMAQ_API_PASSWORD"])
+PY
+)
 wait_ping
 assert_no_duplicate_open_trades
 

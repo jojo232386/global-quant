@@ -1,39 +1,56 @@
 # GMAQ
 
-`GMAQ_ACTIVE_RUNTIME = FREQTRADE`
+GMAQ is a Freqtrade-based quantitative trading project focused on automated
+cryptocurrency futures research, dry-run validation, and controlled live
+deployment.
 
-GMAQ now has one active execution truth: the pinned official Freqtrade image.
-Freqtrade owns Binance connectivity, market/account runtime, order lifecycle,
-persistence, restart recovery, execution, standard risk controls, REST API, and
-FreqUI. GMAQ owns only the canary/alpha strategy, research, project-specific
-risk limits, configuration, and focused contract tests.
+## Current stack
 
-The checked-in configuration is deliberately incapable of live trading:
+- Freqtrade 2026.7 as the single active trading runtime
+- FreqUI as the operational interface
+- Binance USD-M Futures
+- Docker and Compose, with Colima supported on macOS
 
-- `dry_run = true`;
-- Binance key and secret are empty;
-- one pair: `ETH/USDT:USDT`;
-- USD-M futures, isolated, 1x;
-- fixed 25 USDT simulated stake and one open trade maximum;
-- FreqUI is bound to `127.0.0.1:8080` by Compose;
-- the trade database and stopped backups use separate Docker named volumes;
-- `LiveExecutionCanaryStrategy` declares `NOT_PROVEN_ALPHA = TRUE`.
+## Current status
 
-No live configuration or secret overlay exists in this repository.
+- Binance public market data and dry-run trading verified
+- `ETH/USDT:USDT`, isolated margin, 1x leverage
+- FreqUI verified on `http://127.0.0.1:8080`
+- persistence, restart recovery, and stopped-database backup/restore verified
+- live credentials are not configured or stored in this repository
+- live trading is not enabled
 
-## Start the product
+`LiveExecutionCanaryStrategy` is a runtime canary, not proven alpha.
+
+## Quick start
+
+Requirements: Docker with Compose, plus Python 3.12 or newer for local tests.
 
 ```sh
 ./scripts/gmaq up
 ```
 
-Open <http://127.0.0.1:8080>. The local dry-run-only FreqUI login is `gmaq` /
-`gmaq-dry-run-local-only`; replace all API/UI secrets before any separately
-authorized deployment. Common controls are `./scripts/gmaq status`,
-`./scripts/gmaq logs`, `./scripts/gmaq restart`, and `./scripts/gmaq down`.
+The first start creates random local FreqUI/API credentials in the ignored
+`.env` file. The values stay on the local machine. Open
+<http://127.0.0.1:8080> after startup.
 
-The wrapper fails closed unless the committed config remains dry-run with empty
-exchange credentials. It intentionally cannot launch a live bot.
+Useful commands:
+
+```sh
+./scripts/gmaq status
+./scripts/gmaq logs
+./scripts/gmaq restart
+./scripts/gmaq down
+```
+
+## Safety
+
+- the committed configuration is dry-run by default;
+- Binance key and secret fields are empty;
+- the startup wrapper refuses non-dry-run or credential-bearing exchange config;
+- the initial scope is one pair, isolated margin, 1x, one open trade maximum;
+- live deployment requires a separate configuration and explicit review;
+- no active SQLite database should be copied or queried directly.
 
 ## Validate
 
@@ -49,24 +66,18 @@ The next bounded reliability run is:
 ./scripts/reliability-soak 72
 ```
 
-It accepts only 48–72 hours and only the credential-free dry-run config. It
-exercises pause/start, stop/start, restart recovery, a short container-network
-interruption, stopped-database backup and restore validation, FreqUI/API
-reconnection, duplicate-open-trade checks, and final `forceexit all` before the
-bot and container stop. This is runtime reliability validation, not alpha
-validation.
+It accepts 48–72 hours and exercises runtime controls, restart, a short network
+interruption, stopped-database backup/restore, FreqUI reconnection, duplicate
+identity checks, and a final dry-run `forceexit all`.
 
-Do not query or copy an active SQLite file. The named-volume layout avoids the
-macOS shared-filesystem I/O failure found during the spike; backups are taken
-only while the worker is stopped.
+## Project structure
 
-## Historical recovery
+- `user_data/strategies/`: GMAQ strategy logic
+- `user_data/config.json`: credential-free dry-run configuration
+- `research/`: strategy research scope and future research artifacts
+- `configs/`: live-readiness policy and planning
+- `tests/`: focused configuration and custom-behavior contracts
+- `scripts/`: safe product and reliability commands
 
-The complete pre-cutover implementation is recoverable from the annotated tag
-`gmaq-pre-freqtrade-cutover-2026-08-15`. Do not restore parts of it alongside
-Freqtrade; recovery means an explicit historical checkout, not two active
-execution stacks. The verified feasibility report remains under `research/`.
-
-Read [configs/LIVE_READINESS.md](configs/LIVE_READINESS.md) before proposing a
-first live canary. That document is planning only and grants no mutation or
-credential authority.
+Earlier architecture remains recoverable from Git history and the published
+historical tag; it is not part of the active runtime.

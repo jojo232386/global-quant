@@ -49,6 +49,10 @@ def test_active_runtime_is_credential_free_freqtrade() -> None:
     assert config["max_open_trades"] == 1
     assert config["stake_amount"] == 25
     assert config["force_entry_enable"] is False
+    assert "username" not in config["api_server"]
+    assert "password" not in config["api_server"]
+    assert "jwt_secret_key" not in config["api_server"]
+    assert "ws_token" not in config["api_server"]
     assert IMAGE_DIGEST in compose
     assert "LiveExecutionCanaryStrategy" in compose
     assert "127.0.0.1:8080:8080" in compose
@@ -57,6 +61,8 @@ def test_active_runtime_is_credential_free_freqtrade() -> None:
     assert "runtime_backups:/freqtrade/backups" in compose
     assert 'user: "0:0"' in compose
     assert "chown -R 1000:1000 /freqtrade/runtime /freqtrade/backups" in compose
+    assert "FREQTRADE__API_SERVER__PASSWORD" in compose
+    assert "FREQTRADE__API_SERVER__JWT_SECRET_KEY" in compose
 
 
 def test_canary_is_explicitly_not_alpha_and_is_fixed_at_one_x() -> None:
@@ -89,6 +95,8 @@ def test_replaced_execution_trees_are_absent() -> None:
     for path in ("src", "protocols", "evidence", "reviews", "tools", "uv.lock"):
         assert not (ROOT / path).exists()
     assert not (ROOT / "spikes").exists()
+    assert not (ROOT / "research" / "CUTOVER_REPORT_2026-08-15.md").exists()
+    assert not (ROOT / "research" / "FREQTRADE_SPIKE_2026-08-15.md").exists()
 
 
 def test_scripts_refuse_non_dry_run_configuration() -> None:
@@ -98,3 +106,4 @@ def test_scripts_refuse_non_dry_run_configuration() -> None:
     assert 'exchange.get("key") or exchange.get("secret")' in gmaq
     assert 'config.get("dry_run") is not True' in soak
     assert 'exchange.get("key") or exchange.get("secret")' in soak
+    assert "secrets.token_urlsafe" in gmaq

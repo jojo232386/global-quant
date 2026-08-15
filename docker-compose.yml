@@ -16,6 +16,11 @@ services:
     depends_on:
       runtime-init:
         condition: service_completed_successfully
+    environment:
+      FREQTRADE__API_SERVER__USERNAME: "${GMAQ_API_USERNAME:-}"
+      FREQTRADE__API_SERVER__PASSWORD: "${GMAQ_API_PASSWORD:-}"
+      FREQTRADE__API_SERVER__JWT_SECRET_KEY: "${GMAQ_JWT_SECRET_KEY:-}"
+      FREQTRADE__API_SERVER__WS_TOKEN: "${GMAQ_WS_TOKEN:-}"
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "runtime_data:/freqtrade/runtime"
