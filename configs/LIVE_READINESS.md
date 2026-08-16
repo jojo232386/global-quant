@@ -26,18 +26,42 @@ Minimum external requirements for a future, separately authorized canary:
 10. A completed 48–72h dry-run reliability result with zero open positions after
     the final stop and no duplicate trade/order identities after restart.
 
+## Tooling now present (evidence still pending)
+
+The repository now owns dry-run-scope tooling for every check it can perform
+without credentials:
+
+- Control plane and armed states, order state machine, unique client-order
+  identity, reconciliation, audit manifest, health, alerts, and an
+  independent kill switch: `configs/CONTROL_PLANE.md`,
+  `scripts/gmaq-control`.
+- Same-day read-only exchange preflight (contract, precision/filters,
+  minimum notional, implied leverage headroom, funding, spread, depth;
+  account-mode and fee items fail-closed as UNVERIFIED_REQUIRES_AUTH):
+  `scripts/gmaq-exchange-preflight`.
+- Market-order fill and stress cost model: `configs/EXECUTION_COST_MODEL.md`,
+  `scripts/gmaq-liquidity`.
+- 48–72h promoted-layout soak protocol and evidence package:
+  `configs/RELIABILITY_SOAK_PROTOCOL.md`, `scripts/reliability-soak`.
+
+Tooling presence does not remove any blocker; only completed, recorded
+evidence does.
+
 ## Current blockers
 
 - Dedicated account/subaccount ownership and sole-operator status are unverified.
 - One-way and Single-Asset account modes are unverified.
-- Current symbol filters, minimum notional, fee/funding, quantitative-rule
-  headroom, regional eligibility, and API permission behavior are unverified.
+- Fee rates and maintenance margin on the actual account are unverified
+  (placeholders flagged in every tool output).
+- Quantitative-rule headroom, regional eligibility, and API permission
+  behavior are unverified.
 - Live stake/loss/notional numbers are not approved.
 - Live secret storage, rotation, IP restriction, monitoring, and alert routing
   are not configured.
-- The 48–72h reliability run has not yet been completed on the promoted layout.
+- The 48–72h reliability run has not yet been completed on the promoted
+  layout per `configs/RELIABILITY_SOAK_PROTOCOL.md`.
 - Real fill/slippage, funding, liquidation, and live restart behavior remain
-  untested and cannot be inferred from dry-run.
+  untested and cannot be inferred from dry-run or from public snapshots.
 
 Any one of these remains a `LIVE_READINESS_BLOCKER`; none should be repaired by
 placing a real order during readiness review.
