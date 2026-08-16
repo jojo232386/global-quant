@@ -35,3 +35,4 @@ user_data/audit/*.json
 
 # Runtime smoke evidence packages are local.
 user_data/audit/runtime-smoke-*/
+.env.readonly.tmp

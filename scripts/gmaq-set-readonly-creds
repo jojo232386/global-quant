@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Interactively update .env.readonly credentials.
+
+Prompts for the API key and secret (input is NOT echoed for the secret),
+writes the file atomically with 0600 permissions, and prints only the first
+6 characters of each value for visual confirmation. Never logs full values.
+"""
+
+import getpass
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT / ".env.readonly"
+
+
+def main() -> int:
+    key = input("API Key: ").strip()
+    if not key:
+        print("STOP: empty API Key", file=sys.stderr)
+        return 1
+    secret = getpass.getpass("Secret Key (input hidden): ").strip()
+    if not secret:
+        print("STOP: empty Secret Key", file=sys.stderr)
+        return 1
+
+    payload = f"GMAQ_READ_KEY={key}\nGMAQ_READ_SECRET={secret}\n"
+    tmp = ENV_FILE.with_suffix(".readonly.tmp")
+    tmp.write_text(payload)
+    tmp.chmod(0o600)
+    tmp.replace(ENV_FILE)
+
+    print("written:", ENV_FILE)
+    print(f"key starts with   : {key[:6]}")
+    print(f"secret starts with: {secret[:6]}")
+    print("verify these prefixes against the Binance API management page")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
