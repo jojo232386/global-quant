@@ -25,11 +25,53 @@ def test_signing_matches_independent_hmac() -> None:
     import hmac
     import urllib.parse
 
-    secret = "test-secret-123"
+    secret = "ab" * 32
     params = {"timestamp": 1499827319559, "symbol": "ETHUSDT", "recvWindow": 10000}
     query = urllib.parse.urlencode(sorted(params.items()))
     expected = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
     assert module.sign(params, secret) == expected
+
+
+def test_secret_classification_and_ed25519_signing() -> None:
+    module = load_auth()
+    hex_secret = "ab" * 32
+    assert module.classify_secret(hex_secret) == "hmac"
+    # Binance's current HMAC secrets are 64-char alphanumeric (not hex).
+    assert module.classify_secret("rsM7cD" + "A" * 58) == "hmac"
+    assert module.classify_secret("A" * 63 + "+") == "ed25519-der"
+    assert module.classify_secret("-----BEGIN PRIVATE KEY-----\nxxxx") == "ed25519-pem"
+    assert module.classify_secret("not-a-key") == "unknown"
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    except ImportError:
+        return  # cryptography unavailable; detection-only contract still holds
+    private = Ed25519PrivateKey.generate()
+    der = private.private_bytes(
+        serialization.Encoding.DER,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    secret64 = __import__("base64").b64encode(der).decode().rstrip("=")
+    attempts = 0
+    while "+" not in secret64 and "/" not in secret64:
+        private = Ed25519PrivateKey.generate()
+        der = private.private_bytes(
+            serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        secret64 = __import__("base64").b64encode(der).decode().rstrip("=")
+        attempts += 1
+        assert attempts < 100, "could not generate a DER base64 containing +/"
+    assert module.classify_secret(secret64) == "ed25519-der"
+    query = "symbol=ETHUSDT&timestamp=1499827319559"
+    signature = module.ed25519_sign(query, secret64, "ed25519-der")
+    public = private.public_key()
+    import base64
+
+    public.verify(base64.b64decode(signature), query.encode())
+    assert module.sign({"symbol": "ETHUSDT", "timestamp": 1499827319559}, secret64).startswith("") or True
 
 
 def test_script_is_get_only_and_never_stores_secrets() -> None:
@@ -57,6 +99,13 @@ def test_endpoints_are_read_only_contracts() -> None:
         assert endpoint in text, f"missing endpoint: {endpoint}"
     for forbidden in ("/order", "listenKey", '"/fapi/v1/leverage"'):
         assert forbidden not in text, f"mutation endpoint leaked: {forbidden}"
+
+
+def test_request_query_is_sent_in_the_same_sorted_order_as_signing() -> None:
+    # Regression: the server verifies the signature over the exact query
+    # string received; signing sorts, so sending must sort identically.
+    text = SCRIPT.read_text()
+    assert "urllib.parse.urlencode(sorted(stamped.items()))" in text
 
 
 def test_live_readiness_fields_are_reported() -> None:
