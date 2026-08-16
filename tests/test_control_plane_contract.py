@@ -52,6 +52,7 @@ def test_control_script_exposes_all_commands() -> None:
 def test_exit_is_controlled_close_with_zero_position_proof() -> None:
     text = SCRIPT.read_text()
     assert '"/api/v1/forceexit"' in text
+    assert '"tradeid"' in text
     assert '"ZERO_POSITIONS"' in text
     assert "is_open" in text
     assert 'verdict="TIMEOUT"' in text

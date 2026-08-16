@@ -177,7 +177,7 @@ def exchange_time_offset_s() -> float | None:
 def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, object]:
     headers = {}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers["Authorization"] = f"Basic {token}"
     request = urllib.request.Request(f"{API_BASE}{path}", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
@@ -193,21 +193,17 @@ def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, ob
 
 
 def api_login(env: dict) -> str | None:
+    """HTTP Basic credential header. This deployment's Freqtrade accepts
+    Basic auth for REST endpoints (verified 2026-08-16); the JWT token
+    endpoint returned 401, so we use the working path. Credentials stay in
+    the header and are never printed."""
     username = env.get("GMAQ_API_USERNAME", "")
     password = env.get("GMAQ_API_PASSWORD", "")
     if not username or not password:
         return None
-    payload = json.dumps({"username": username, "password": password}).encode()
-    request = urllib.request.Request(
-        f"{API_BASE}/api/v1/token/login",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
-            return json.loads(response.read().decode()).get("access_token")
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
-        return None
+    import base64
+
+    return base64.b64encode(f"{username}:{password}".encode()).decode()
 
 
 def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, object]:
@@ -215,7 +211,7 @@ def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, o
     request = urllib.request.Request(
         f"{API_BASE}{path}",
         data=body,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
@@ -228,7 +224,11 @@ def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, o
 
 def bot_ping(token: str) -> bool:
     code, body = api_request("/api/v1/ping", {}, token)
-    return code == 200 and body == "pong"
+    if code != 200:
+        return False
+    if isinstance(body, dict):
+        return body.get("status") == "pong"
+    return body == "pong"
 
 
 def bot_last_process_age_s(token: str) -> float | None:
@@ -249,10 +249,14 @@ def bot_open_orders(token: str) -> list | None:
 
 
 def bot_trades(token: str) -> list | None:
-    code, body = api_request("/api/v1/trades", {}, token)
-    if code != 200 or not isinstance(body, list):
+    code, body = api_request("/api/v1/trades?limit=500", {}, token)
+    if code != 200:
         return None
-    return body
+    if isinstance(body, dict):
+        return body.get("trades", [])
+    if isinstance(body, list):
+        return body
+    return None
 
 
 def compose_command() -> list[str] | None:
@@ -436,14 +440,24 @@ def kill() -> dict:
 
 
 def exit_all() -> dict:
-    """Controlled close: force-exit all open trades and verify zero positions."""
+    """Controlled close: force-exit every open trade by trade id and verify
+    zero open orders and zero open trades afterwards."""
     env = read_env()
     token = api_login(env)
     if token is None:
         return fail("unable to reach bot API")
-    code, _ = api_post("/api/v1/forceexit", token, {})
-    if code not in (200, 201):
-        return fail(f"forceexit rejected with HTTP {code}")
+    trades = bot_trades(token)
+    if trades is None:
+        return fail("unable to read open trades", verdict="UNKNOWN")
+    open_trades = [item for item in trades if item.get("is_open")]
+    rejected = []
+    for item in open_trades:
+        trade_id = item.get("trade_id")
+        code, _ = api_post("/api/v1/forceexit", token, {"tradeid": trade_id})
+        if code not in (200, 201):
+            rejected.append(trade_id)
+    if rejected:
+        return fail(f"forceexit rejected for trade ids: {rejected}")
     deadline = time.time() + 120
     last = {"open_orders": None, "open_trades": None}
     while time.time() < deadline:
@@ -451,10 +465,10 @@ def exit_all() -> dict:
         trades = bot_trades(token)
         if orders is None or trades is None:
             return fail("unable to verify positions after forceexit", verdict="UNKNOWN")
-        open_trades = [item for item in trades if item.get("is_open")]
-        last = {"open_orders": len(orders), "open_trades": len(open_trades)}
-        if not orders and not open_trades:
-            append_audit("exit", "gmaq-control", refs={"verdict": "ZERO_POSITIONS"})
+        open_now = [item for item in trades if item.get("is_open")]
+        last = {"open_orders": len(orders), "open_trades": len(open_now)}
+        if not orders and not open_now:
+            append_audit("exit", "gmaq-control", refs={"verdict": "ZERO_POSITIONS", "forceexited": len(open_trades)})
             write_state("DISARMED")
             return ok("ZERO_POSITIONS", **last)
         time.sleep(5)
