@@ -1,8 +1,8 @@
 # Hypothesis Preregistration: ETHUSDT 15m momentum
 
 > Locked before any data fetch or backtest for this study. Amendments after
-> results are observed invalidate the study. This study does not authorize
-> live trading.
+> results are observed invalidate the study.
+> This study does not authorize live trading.
 
 ## 1. Study id and title (required)
 
