@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Fetch 15m klines and funding history for every symbol in universe.json.
+
+Credential-free. Writes per-symbol JSONL + a multi-manifest with sha256
+pins. This script never reads or prints API credentials.
+"""
+
+import argparse
+import calendar
+import hashlib
+import importlib.util
+import json
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from importlib.machinery import SourceFileLoader
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+FAPI = "https://fapi.binance.com"
+FUNDING_URL = f"{FAPI}/fapi/v1/fundingRate"
+TIMEOUT_S = 10
+
+
+def load_klines_fetcher():
+    loader = SourceFileLoader("gmaq_fetch_klines", str(ROOT / "scripts" / "gmaq-fetch-klines"))
+    spec = importlib.util.spec_from_loader("gmaq_fetch_klines", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def fetch_funding(symbol: str, limit: int = 1000) -> list:
+    params = urllib.parse.urlencode({"symbol": symbol, "limit": limit})
+    request = urllib.request.Request(f"{FUNDING_URL}?{params}", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+            return json.loads(response.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+        return []
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-fetch-multi", description="Fetch klines and funding for the universe")
+    parser.add_argument("--universe", default=str(ROOT / "user_data" / "data" / "multi" / "universe.json"))
+    parser.add_argument("--start", required=True, help="YYYY-MM-DD UTC")
+    parser.add_argument("--end", required=True, help="YYYY-MM-DD UTC")
+    parser.add_argument("--out-dir", default=str(ROOT / "user_data" / "data" / "multi"))
+    args = parser.parse_args(argv)
+
+    universe = json.loads(pathlib.Path(args.universe).read_text())
+    symbols = universe["symbols"]
+    fetcher = load_klines_fetcher()
+    start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
+    end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
+
+    out_dir = pathlib.Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "universe_sha256": universe.get("sha256"),
+        "start": args.start,
+        "end": args.end,
+        "symbols": {},
+    }
+
+    for symbol in symbols:
+        try:
+            rows = fetcher.fetch_range(symbol, start_ms, end_ms)
+        except RuntimeError:
+            print(f"SKIP {symbol}: klines fetch failed", file=sys.stderr)
+            continue
+        lines = fetcher.serialize(rows)
+        klines_path = out_dir / f"{symbol}-15m.jsonl"
+        klines_path.write_text("".join(line + "\n" for line in lines))
+
+        funding = fetch_funding(symbol)
+        funding_path = out_dir / f"{symbol}-funding.jsonl"
+        funding_text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in funding)
+        funding_path.write_text(funding_text)
+
+        manifest["symbols"][symbol] = {
+            "bars": len(lines),
+            "klines_sha256": sha256_text("".join(line + "\n" for line in lines)),
+            "funding_records": len(funding),
+            "funding_sha256": sha256_text(funding_text),
+        }
+        print(f"OK {symbol}: {len(lines)} bars, {len(funding)} funding records")
+        time.sleep(0.4)
+
+    manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    manifest["sha256"] = sha256_text(manifest_text)
+    (out_dir / "multi-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({"symbols_ok": list(manifest["symbols"].keys()), "sha256": manifest["sha256"]}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

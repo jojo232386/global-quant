@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Run preregistered cross-sectional studies through the gate.
+
+Loads user_data/data/multi/*.jsonl (klines + funding) and executes daily
+00:00 UTC rebalanced long-only rules. Metrics and verdict reuse
+scripts/gmaq-research-backtest. Credential-free; offline after data fetch.
+This script does not authorize live trading.
+"""
+
+import argparse
+import importlib.util
+import json
+import pathlib
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+MULTI_DIR = ROOT / "user_data" / "data" / "multi"
+SPLIT_UTC_MS = 1781568000000  # 2026-06-16T00:00:00Z
+DAY_MS = 86_400_000
+BAR_MS = 900_000
+
+PARAMS = {
+    "notional": 100.0,
+    "initial_equity": 1000.0,
+    "cost_bps_per_side": 15.0,
+    "stress_cost_bps_per_side": 30.0,
+    "stress_funding_buffer_bps": 1.0,
+    "legs": 3,
+    "universe_top": 15,
+}
+
+RULE_STUDY = {
+    "funding_crosssection": "study-2026-08-16-multi-funding-crosssection",
+    "xts_momentum": "study-2026-08-16-multi-xts-momentum",
+}
+
+
+def load_shared():
+    loader = SourceFileLoader("gmaq_research_backtest", str(ROOT / "scripts" / "gmaq-research-backtest"))
+    spec = importlib.util.spec_from_loader("gmaq_research_backtest", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_symbol(symbol: str) -> dict:
+    lines = (MULTI_DIR / f"{symbol}-15m.jsonl").read_text().splitlines()
+    ts = []
+    open_price = {}
+    close = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        bar = json.loads(line)
+        t = bar["open_time_utc_ms"]
+        ts.append(t)
+        open_price[t] = float(bar["open"])
+        close[t] = float(bar["close"])
+    funding = []
+    funding_path = MULTI_DIR / f"{symbol}-funding.jsonl"
+    if funding_path.exists():
+        for line in funding_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            funding.append((int(item["fundingTime"]), float(item["fundingRate"])))
+    funding.sort()
+    return {"ts": ts, "open": open_price, "close": close, "funding": funding}
+
+
+def funding_mean_until(symbol_data: dict, until_ms: int, max_records: int = 3) -> float | None:
+    records = [rate for ts, rate in symbol_data["funding"] if ts <= until_ms][-max_records:]
+    if not records:
+        return None
+    return sum(records) / len(records)
+
+
+def return_24h_until(symbol_data: dict, until_ms: int) -> float | None:
+    close_map = symbol_data["close"]
+    c0 = close_map.get(until_ms)
+    c1 = close_map.get(until_ms - DAY_MS)
+    if c0 is None or c1 is None or c1 <= 0:
+        return None
+    return c0 / c1 - 1
+
+
+def select_legs(scores: dict[str, float | None], legs: int, reverse: bool) -> list[str]:
+    valid = [(symbol, score) for symbol, score in scores.items() if score is not None]
+    valid.sort(key=lambda item: item[1], reverse=reverse)
+    return [symbol for symbol, _ in valid[:legs]]
+
+
+def run_cross_section(symbols: dict[str, dict], rule: str, cost_per_side: float, funding_buffer: float, params: dict) -> list[dict]:
+    if rule == "funding_crosssection":
+        signal_fn = funding_mean_until
+        reverse = False  # ascending: lowest funding first
+    elif rule == "xts_momentum":
+        signal_fn = return_24h_until
+        reverse = True  # descending: highest return first
+    else:
+        raise ValueError(rule)
+
+    max_ts = min(max(data["ts"]) for data in symbols.values())
+    first_day = 1769990400000 + DAY_MS  # 2026-02-02T00:00Z
+    trades = []
+    day_ts = first_day
+    while day_ts + DAY_MS <= max_ts:
+        signal_ts = day_ts - BAR_MS
+        scores = {
+            symbol: signal_fn(data, signal_ts)
+            for symbol, data in symbols.items()
+            if data["close"].get(signal_ts) is not None
+        }
+        legs = select_legs(scores, params["legs"], reverse)
+        for symbol in legs:
+            data = symbols[symbol]
+            entry = data["open"].get(day_ts)
+            exit_price = data["open"].get(day_ts + DAY_MS)
+            if entry is None or exit_price is None or entry <= 0:
+                continue
+            gross = exit_price / entry
+            net = gross * (1 - cost_per_side) / (1 + cost_per_side) - 1 - funding_buffer
+            trades.append(
+                {
+                    "entry_ts_ms": day_ts,
+                    "exit_ts_ms": day_ts + DAY_MS,
+                    "symbol": symbol,
+                    "entry": round(entry, 8),
+                    "exit": round(exit_price, 8),
+                    "net_return": net,
+                    "notional": params["notional"],
+                }
+            )
+        day_ts += DAY_MS
+    return trades
+
+
+def basket_benchmark(symbols: dict[str, dict], window_start_ms: int, window_end_ms: int, cost_per_side: float) -> dict:
+    grosses = []
+    for symbol, data in symbols.items():
+        entry = None
+        exit_price = None
+        for t in sorted(data["open"]):
+            if t < window_start_ms:
+                entry = data["open"][t]
+            if t <= window_end_ms:
+                exit_price = data["open"][t]
+        if entry and exit_price and entry > 0:
+            grosses.append(exit_price / entry - 1)
+    if not grosses:
+        return {"gross_return": None, "net_return": None, "symbols": 0}
+    gross = sum(grosses) / len(grosses)
+    net = (1 + gross) * (1 - cost_per_side) / (1 + cost_per_side) - 1
+    return {"gross_return": round(gross, 6), "net_return": round(net, 6), "symbols": len(grosses)}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-research-crosssection", description="Run a preregistered cross-sectional study")
+    parser.add_argument("--rule", default="funding_crosssection", choices=sorted(RULE_STUDY.keys()))
+    args = parser.parse_args(argv)
+
+    shared = load_shared()
+    manifest = json.loads((MULTI_DIR / "multi-manifest.json").read_text())
+    symbols = {symbol: load_symbol(symbol) for symbol in manifest["symbols"].keys()}
+    symbols = {s: d for s, d in symbols.items() if d["ts"]}
+
+    c = PARAMS["cost_bps_per_side"] / 10_000
+    stress_c = PARAMS["stress_cost_bps_per_side"] / 10_000
+    stress_buffer = PARAMS["stress_funding_buffer_bps"] / 10_000
+
+    baseline = run_cross_section(symbols, args.rule, c, 0.0, PARAMS)
+    stress = run_cross_section(symbols, args.rule, stress_c, stress_buffer, PARAMS)
+
+    train_base = [t for t in baseline if t["entry_ts_ms"] < SPLIT_UTC_MS]
+    oos_base = [t for t in baseline if t["entry_ts_ms"] >= SPLIT_UTC_MS]
+    oos_stress = [t for t in stress if t["entry_ts_ms"] >= SPLIT_UTC_MS]
+    train_stress = [t for t in stress if t["entry_ts_ms"] < SPLIT_UTC_MS]
+
+    train_metrics = shared.metrics(train_base, PARAMS["initial_equity"])
+    oos_metrics = shared.metrics(oos_base, PARAMS["initial_equity"])
+    oos_stress_metrics = shared.metrics(oos_stress, PARAMS["initial_equity"])
+
+    oos_start = min((t["entry_ts_ms"] for t in oos_base), default=SPLIT_UTC_MS)
+    oos_end = max((t["exit_ts_ms"] for t in oos_base), default=SPLIT_UTC_MS + 60 * DAY_MS)
+    benchmark = basket_benchmark(symbols, oos_start, oos_end, c)
+
+    verdict_name, conditions = shared.verdict(oos_metrics, oos_stress_metrics, train_metrics)
+    rebalances = len({t["entry_ts_ms"] for t in oos_base})
+
+    result = {
+        "study_id": RULE_STUDY[args.rule],
+        "rule": args.rule,
+        "params": PARAMS,
+        "split_utc_ms": SPLIT_UTC_MS,
+        "universe": manifest["symbols"],
+        "universe_sha256": manifest.get("sha256"),
+        "legs": PARAMS["legs"],
+        "oos_rebalance_events": rebalances,
+        "train": {**train_metrics, "stress": shared.metrics(train_stress, PARAMS["initial_equity"])},
+        "out_of_sample": {**oos_metrics, "stress": oos_stress_metrics},
+        "benchmark": benchmark,
+        "verdict": verdict_name,
+        "verdict_conditions": conditions,
+        "note": "This study does not authorize live trading. Taker fee is PLACEHOLDER_UNVERIFIED. Universe is today's top-15 (survivorship bias upward).",
+    }
+    study_dir = ROOT / "research" / "backtests" / RULE_STUDY[args.rule]
+    study_dir.mkdir(parents=True, exist_ok=True)
+    (study_dir / "results.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
