@@ -11,7 +11,7 @@ services:
 
   freqtrade:
     image: freqtradeorg/freqtrade:stable@sha256:50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486
-    container_name: gmaq-freqtrade
+    container_name: gmaq-freqtrade-continuation
     restart: unless-stopped
     depends_on:
       runtime-init:
@@ -26,7 +26,8 @@ services:
       - "runtime_data:/freqtrade/runtime"
       - "runtime_backups:/freqtrade/backups"
     ports:
-      - "127.0.0.1:8080:8080"
+      # Host 8081: the original global-quant runtime owns 127.0.0.1:8080.
+      - "127.0.0.1:8081:8080"
     command:
       - trade
       - --config

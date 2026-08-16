@@ -5,6 +5,9 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CONFIG="$ROOT_DIR/user_data/config.json"
 HOURS=${1:-72}
 
+API_BASE="${GMAQ_API_BASE:-http://127.0.0.1:8080}"
+CONTAINER="${GMAQ_CONTAINER_NAME:-gmaq-freqtrade}"
+
 if ! [[ "$HOURS" =~ ^(48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72)$ ]]; then
   echo "Usage: $0 HOURS  # HOURS must be 48..72" >&2
   exit 2
@@ -32,7 +35,7 @@ PY
 
 api_get() {
   curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
-    "http://127.0.0.1:8080/api/v1/$1"
+    "$API_BASE/api/v1/$1"
 }
 
 api_post() {
@@ -40,12 +43,12 @@ api_post() {
   local payload=${2:-'{}'}
   curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
     -H 'Content-Type: application/json' -X POST -d "$payload" \
-    "http://127.0.0.1:8080/api/v1/$endpoint"
+    "$API_BASE/api/v1/$endpoint"
 }
 
 wait_ping() {
   local attempts=0
-  until curl --fail --silent http://127.0.0.1:8080/api/v1/ping >/dev/null; do
+  until curl --fail --silent "$API_BASE/api/v1/ping" >/dev/null; do
     attempts=$((attempts + 1))
     if (( attempts >= 90 )); then
       echo "STOP: FreqUI/API did not reconnect" >&2
@@ -119,17 +122,17 @@ wait_state running
 wait_ping
 assert_no_duplicate_open_trades
 
-NETWORK=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' gmaq-freqtrade)
-docker network disconnect -f "$NETWORK" gmaq-freqtrade
+NETWORK=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' $CONTAINER)
+docker network disconnect -f "$NETWORK" $CONTAINER
 sleep 15
-docker network connect "$NETWORK" gmaq-freqtrade
+docker network connect "$NETWORK" $CONTAINER
 wait_ping
 assert_no_duplicate_open_trades
 
 "${COMPOSE[@]}" stop --timeout 30 freqtrade
-IMAGE=$(docker inspect -f '{{.Config.Image}}' gmaq-freqtrade)
-RUNTIME_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/runtime"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
-BACKUP_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/backups"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
+IMAGE=$(docker inspect -f '{{.Config.Image}}' $CONTAINER)
+RUNTIME_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/runtime"}}{{.Name}}{{end}}{{end}}' $CONTAINER)
+BACKUP_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/backups"}}{{.Name}}{{end}}{{end}}' $CONTAINER)
 docker run --rm --entrypoint python -v "$RUNTIME_VOLUME:/runtime" -v "$BACKUP_VOLUME:/backups" "$IMAGE" -c '
 import pathlib, shutil, sqlite3, time
 source = pathlib.Path("/runtime/tradesv3.dryrun.sqlite")

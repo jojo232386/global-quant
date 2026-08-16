@@ -43,6 +43,7 @@ else:
         "GMAQ_API_PASSWORD": secrets.token_urlsafe(24),
         "GMAQ_JWT_SECRET_KEY": secrets.token_urlsafe(32),
         "GMAQ_WS_TOKEN": secrets.token_urlsafe(32),
+        "GMAQ_API_BASE": "http://127.0.0.1:8081",
     }
     payload = "".join(f"{key}={value}\n" for key, value in values.items())
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -75,7 +76,7 @@ case "$action" in
     ensure_local_api_credentials
     guard_dry_run
     "${COMPOSE[@]}" up -d
-    echo "FreqUI: http://127.0.0.1:8080"
+    echo "FreqUI: http://127.0.0.1:8081"
     echo "Local credentials: $ENV_FILE"
     ;;
   down)

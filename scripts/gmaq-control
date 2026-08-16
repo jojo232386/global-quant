@@ -31,7 +31,7 @@ AUDIT_DIR = ROOT / "user_data" / "audit"
 AUDIT_PATH = AUDIT_DIR / "manifest.jsonl"
 STATE_PATH = AUDIT_DIR / "state.json"
 
-API_BASE = "http://127.0.0.1:8080"
+API_BASE = os.environ.get("GMAQ_API_BASE", "http://127.0.0.1:8080")
 BINANCE_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
 CLOCK_OFFSET_LIMIT_S = 2.0
 NETWORK_TIMEOUT_S = 5
@@ -474,6 +474,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("exit", help="controlled close: force-exit all and verify zero positions")
     sub.add_parser("kill", help="independent kill switch")
     args = parser.parse_args(argv)
+
+    global API_BASE
+    local_env = read_env()
+    if local_env.get("GMAQ_API_BASE"):
+        API_BASE = local_env["GMAQ_API_BASE"]
 
     if args.command == "preflight":
         result = preflight()

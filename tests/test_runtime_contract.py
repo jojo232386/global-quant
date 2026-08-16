@@ -55,7 +55,10 @@ def test_active_runtime_is_credential_free_freqtrade() -> None:
     assert "ws_token" not in config["api_server"]
     assert IMAGE_DIGEST in compose
     assert "LiveExecutionCanaryStrategy" in compose
-    assert "127.0.0.1:8080:8080" in compose
+    assert "gmaq-freqtrade-continuation" in compose
+    # The continuation stack uses host port 8081; the original global-quant
+    # runtime owns 127.0.0.1:8080.
+    assert "127.0.0.1:8081:8080" in compose
     assert "sqlite:////freqtrade/runtime/tradesv3.dryrun.sqlite" in compose
     assert "runtime_data:/freqtrade/runtime" in compose
     assert "runtime_backups:/freqtrade/backups" in compose
