@@ -68,6 +68,19 @@ Useful commands:
 ./scripts/gmaq-control kill        # independent kill switch
 ```
 
+## Exchange preflight (read-only, credential-free)
+
+```sh
+./scripts/gmaq-exchange-preflight
+```
+
+Queries Binance USD-M public market data only and writes a same-day manifest
+to `user_data/audit/exchange-preflight.json`: contract status, precision and
+filters, minimum notional, implied leverage headroom, funding, spread, and
+depth. Account-mode, permission, and fee items are reported as
+`UNVERIFIED_REQUIRES_AUTH` and keep live readiness BLOCKED until a separately
+authorized read-only session verifies them.
+
 ## Validate
 
 ```sh
