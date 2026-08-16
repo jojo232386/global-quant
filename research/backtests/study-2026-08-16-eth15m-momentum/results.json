@@ -8,7 +8,12 @@
     "initial_equity": 1000.0,
     "cost_bps_per_side": 15.0,
     "stress_cost_bps_per_side": 30.0,
-    "stress_funding_buffer_bps": 1.0
+    "stress_funding_buffer_bps": 1.0,
+    "breakout_lookback": 24,
+    "session_start_hour": 0,
+    "session_end_hour": 8,
+    "vol_window": 24,
+    "vol_median_window": 96
   },
   "split_utc_ms": 1781568000000,
   "bars": 18817,
