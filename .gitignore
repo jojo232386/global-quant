@@ -32,3 +32,6 @@ user_data/audit/*.json
 *.pem
 *.key
 *live*.json
+
+# Runtime smoke evidence packages are local.
+user_data/audit/runtime-smoke-*/
