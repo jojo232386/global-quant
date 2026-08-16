@@ -25,6 +25,7 @@ AUDIT_DIR = ROOT / "user_data" / "audit"
 OUTPUT_PATH = AUDIT_DIR / "account-preflight.json"
 
 FAPI = "https://fapi.binance.com"
+PAPI = "https://papi.binance.com"
 SAPI = "https://api.binance.com"
 TIMEOUT_S = 10
 
@@ -110,8 +111,8 @@ def signed_get(base_url: str, path: str, params: dict, key: str, secret: str) ->
         return 0, None
 
 
-def check(name: str, passed: bool, detail: str) -> dict:
-    return {"name": name, "passed": passed, "detail": detail}
+def check(name: str, passed: bool, detail: str, kind: str = "read") -> dict:
+    return {"name": name, "passed": passed, "detail": detail, "kind": kind}
 
 
 def describe(code: int, body: object) -> str:
@@ -128,51 +129,104 @@ def run_preflight() -> dict:
 
     checks.append(check("credentials present", bool(key) and bool(secret), "read from .env.readonly"))
     if not key or not secret:
-        manifest = {
-            "verdict": "FAIL",
-            "checks": checks,
-            "note": "missing credentials; nothing was queried",
-        }
+        manifest = {"verdict": "FAIL", "checks": checks, "note": "missing credentials; nothing was queried"}
         OUTPUT_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
         return manifest
 
+    # --- account discovery: classic USD-M futures first, then Portfolio Margin ---
     code, account = signed_get(FAPI, "/fapi/v2/account", {}, key, secret)
-    account_ok = code == 200 and isinstance(account, dict)
-    checks.append(check("futures account reachable", account_ok, describe(code, account)))
-    if account_ok:
+    account_type = None
+    if code == 200 and isinstance(account, dict):
+        account_type = "usd_m_futures"
+    else:
+        code_p, account_p = signed_get(PAPI, "/papi/v1/account", {}, key, secret)
+        if code_p == 200 and isinstance(account_p, dict):
+            account_type = "portfolio_margin"
+            account = account_p
+        else:
+            account = None
+    facts["accountType"] = account_type
+    checks.append(
+        check(
+            "account reachable",
+            account_type is not None,
+            f"{account_type or 'neither fapi nor papi'} (fapi={code}, papi={code_p if account_type == 'portfolio_margin' else 'n/a'})",
+        )
+    )
+    if account is not None:
+        facts["accountStatus"] = account.get("accountStatus")
+        facts["feeTier"] = account.get("feeTier")
+        facts["equity"] = "REDACTED"
+
+    if account_type == "usd_m_futures":
         facts["canTrade"] = account.get("canTrade")
         facts["canWithdraw"] = account.get("canWithdraw")
-        facts["feeTier"] = account.get("feeTier")
-        facts["multiAssetsMargin"] = account.get("multiAssetsMargin")
-        facts["totalWalletBalance"] = "REDACTED"
         checks.append(check("canTrade", account.get("canTrade") is True, f"canTrade={account.get('canTrade')}"))
         checks.append(
             check(
                 "withdrawals disabled for live canary",
                 account.get("canWithdraw") is False,
                 f"canWithdraw={account.get('canWithdraw')} (live canary requires a dedicated account with withdrawals disabled)",
+                kind="live_requirement",
             )
         )
+        code, dual = signed_get(FAPI, "/fapi/v1/positionSide/dual", {}, key, secret)
+        if code == 200 and isinstance(dual, dict):
+            facts["dualSidePosition"] = dual.get("dualSidePosition")
+            checks.append(
+                check(
+                    "one-way position mode",
+                    dual.get("dualSidePosition") is False,
+                    f"dualSidePosition={dual.get('dualSidePosition')}",
+                    kind="live_requirement",
+                )
+            )
+        else:
+            checks.append(check("position mode readable", False, f"HTTP {code}"))
+        code, multi = signed_get(FAPI, "/fapi/v1/multiAssetsMargin", {}, key, secret)
+        if code == 200 and isinstance(multi, dict):
+            facts["multiAssetsMarginMode"] = multi.get("multiAssetsMargin")
+            checks.append(
+                check(
+                    "single-asset mode",
+                    multi.get("multiAssetsMargin") is False,
+                    f"multiAssetsMargin={multi.get('multiAssetsMargin')}",
+                    kind="live_requirement",
+                )
+            )
+        else:
+            checks.append(check("asset mode readable", False, f"HTTP {code}"))
+        code, commission = signed_get(FAPI, "/fapi/v1/commissionRate", {"symbol": "ETHUSDT"}, key, secret)
+        code_b, bracket = signed_get(FAPI, "/fapi/v1/leverageBracket", {"symbol": "ETHUSDT"}, key, secret)
+    else:
+        # Portfolio Margin: unified margin; fees/MMR/mode via papi um endpoints.
+        facts["marginMode"] = "unified_margin_pm"
+        checks.append(
+            check(
+                "margin mode",
+                True,
+                "Portfolio Margin account: unified cross margin (isolated-margin config not applicable)",
+                kind="live_requirement",
+            )
+        )
+        code, dual = signed_get(PAPI, "/papi/v1/um/positionSide/dual", {}, key, secret)
+        if code == 200 and isinstance(dual, dict):
+            facts["dualSidePosition"] = dual.get("dualSidePosition")
+            checks.append(
+                check(
+                    "one-way position mode",
+                    dual.get("dualSidePosition") is False,
+                    f"dualSidePosition={dual.get('dualSidePosition')} (hedge mode requires a switch for the canary layout)",
+                    kind="live_requirement",
+                )
+            )
+        else:
+            checks.append(check("position mode readable", False, f"HTTP {code}"))
+        code, commission = signed_get(PAPI, "/papi/v1/um/commissionRate", {"symbol": "ETHUSDT"}, key, secret)
+        code_b, bracket = signed_get(PAPI, "/papi/v1/um/leverageBracket", {"symbol": "ETHUSDT"}, key, secret)
 
-    code, dual = signed_get(FAPI, "/fapi/v1/positionSide/dual", {}, key, secret)
-    dual_ok = code == 200 and isinstance(dual, dict)
-    checks.append(check("position mode readable", dual_ok, describe(code, dual)))
-    if dual_ok:
-        one_way = dual.get("dualSidePosition") is False
-        facts["dualSidePosition"] = dual.get("dualSidePosition")
-        checks.append(check("one-way position mode", one_way, f"dualSidePosition={dual.get('dualSidePosition')}"))
-
-    code, multi = signed_get(FAPI, "/fapi/v1/multiAssetsMargin", {}, key, secret)
-    multi_ok = code == 200 and isinstance(multi, dict)
-    checks.append(check("asset mode readable", multi_ok, describe(code, multi)))
-    if multi_ok:
-        single_asset = multi.get("multiAssetsMargin") is False
-        facts["multiAssetsMarginMode"] = multi.get("multiAssetsMargin")
-        checks.append(check("single-asset mode", single_asset, f"multiAssetsMargin={multi.get('multiAssetsMargin')}"))
-
-    code, commission = signed_get(FAPI, "/fapi/v1/commissionRate", {"symbol": "ETHUSDT"}, key, secret)
     commission_ok = code == 200 and isinstance(commission, dict) and "makerCommissionRate" in commission
-    checks.append(check("fee rates on account", commission_ok, describe(code, commission)))
+    checks.append(check("fee rates on account", commission_ok, f"HTTP {code}"))
     if commission_ok:
         facts["commission"] = {
             "symbol": commission.get("symbol"),
@@ -188,9 +242,8 @@ def run_preflight() -> dict:
             )
         )
 
-    code, bracket = signed_get(FAPI, "/fapi/v1/leverageBracket", {"symbol": "ETHUSDT"}, key, secret)
-    bracket_ok = code == 200 and isinstance(bracket, list) and bracket
-    checks.append(check("leverage brackets readable", bracket_ok, describe(code, bracket)))
+    bracket_ok = code_b == 200 and isinstance(bracket, list) and bracket
+    checks.append(check("leverage brackets readable", bracket_ok, f"HTTP {code_b}"))
     if bracket_ok:
         first = bracket[0].get("brackets", [{}])[0]
         facts["leverageBracketTier1"] = {
@@ -217,23 +270,33 @@ def run_preflight() -> dict:
             "enableFutures": restrictions.get("enableFutures"),
         }
         checks.append(check("API restrictions readable", True, "spot endpoint returned restrictions"))
+        checks.append(
+            check(
+                "withdrawals disabled for live canary",
+                restrictions.get("enableWithdrawals") is False,
+                f"enableWithdrawals={restrictions.get('enableWithdrawals')}",
+                kind="live_requirement",
+            )
+        )
     else:
         facts["apiRestrictions"] = None
         checks.append(check("API restrictions readable", False, f"HTTP {code} (non-fatal for research)"))
 
-    public_failures = [item["name"] for item in checks if not item["passed"]]
+    read_failures = [item["name"] for item in checks if not item["passed"] and item.get("kind", "read") == "read"]
     manifest = {
         "scope": "authorized read-only session; GET requests only",
         "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "verdict": "PASS_READONLY" if not public_failures else "PARTIAL",
+        "verdict": "PASS_READONLY" if not read_failures else "PARTIAL",
         "checks": checks,
         "facts": facts,
         "secrets": "none stored",
         "live_readiness_note": (
-            "Fee rates, tier-1 MMR, position mode, and asset mode are now verified on the account "
-            "when the corresponding checks pass. Live still requires: dedicated account/solo "
-            "operator, withdrawals disabled, approved limits, secret management, alert routing, "
-            "and the 48-72h soak evidence."
+            "Fee rates and tier-1 MMR are now verified on the account. "
+            "Portfolio Margin accounts trade on unified margin; the canary "
+            "isolated-margin layout must be adapted before any live proposal. "
+            "Live still requires: dedicated account/solo operator, withdrawals "
+            "disabled, approved limits, secret management, alert routing, and "
+            "the 48-72h soak evidence."
         ),
     }
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)

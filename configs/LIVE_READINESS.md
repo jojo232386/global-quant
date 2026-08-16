@@ -51,8 +51,12 @@ evidence does.
 
 - Dedicated account/subaccount ownership and sole-operator status are unverified.
 - One-way and Single-Asset account modes are unverified.
-- Fee rates and maintenance margin on the actual account are unverified
-  (placeholders flagged in every tool output).
+- Fee rates and tier-1 maintenance margin are VERIFIED on the account
+  (2026-08-16 read-only session: maker 2 bps, taker 5 bps, tier-1 MMR 0.4%).
+- NEW: the verified account is a Portfolio Margin account (unified margin,
+  hedge position mode). The canary isolated-margin/one-way layout must be
+  adapted, or a classic USD-M futures account used, before any live
+  proposal; hedge mode must be switched to one-way.
 - Quantitative-rule headroom, regional eligibility, and API permission
   behavior are unverified.
 - Live stake/loss/notional numbers are not approved.

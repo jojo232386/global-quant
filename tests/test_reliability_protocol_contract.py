@@ -41,7 +41,8 @@ def test_live_readiness_stays_planning_only_and_lists_blockers() -> None:
     for blocker in (
         "sole-operator status are unverified",
         "account modes are unverified",
-        "Fee rates and maintenance margin",
+        "VERIFIED on the account",
+        "Portfolio Margin account",
         "not approved",
         "reliability run has not yet been completed",
         "cannot be inferred from dry-run",

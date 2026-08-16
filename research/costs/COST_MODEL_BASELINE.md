@@ -40,11 +40,11 @@ A formal backtest must model, or explicitly exclude with justification:
 | Gold futures | fee + spread | 5 bps + 5 bps | PLACEHOLDER_UNVERIFIED |
 | Gold futures | roll | 20 bps per roll | PLACEHOLDER_UNVERIFIED |
 | Gold ETF | expense + tracking | 40 bps annualized + 10 bps tracking | PLACEHOLDER_UNVERIFIED |
-| Crypto (Binance USD-M) | taker fee | 5 bps | PLACEHOLDER_UNVERIFIED |
+| Crypto (Binance USD-M) | taker fee | 5 bps | VERIFIED_ON_ACCOUNT 2026-08-16 (PM account, maker 2 bps / taker 5 bps) |
 | Crypto (Binance USD-M) | funding | 1 bps per 8h mean; 5x under stress | PLACEHOLDER_UNVERIFIED |
 | Crypto (Binance USD-M) | spread | 2–5 bps, measured per study | PLACEHOLDER_UNVERIFIED |
 | Crypto (Binance USD-M) | slippage | 10 bps conservative | PLACEHOLDER_UNVERIFIED |
-| Crypto (Binance USD-M) | liquidation / ADL | liquidation price buffer per leverage; ADL flagged as tail risk | PLACEHOLDER_UNVERIFIED |
+| Crypto (Binance USD-M) | liquidation / ADL | tier-1 MMR 0.4% verified 2026-08-16; ADL flagged as tail risk | VERIFIED_ON_ACCOUNT (MMR only) |
 
 ## Application rules
 

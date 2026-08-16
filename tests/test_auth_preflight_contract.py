@@ -94,6 +94,10 @@ def test_endpoints_are_read_only_contracts() -> None:
         "/fapi/v1/multiAssetsMargin",
         "/fapi/v1/commissionRate",
         "/fapi/v1/leverageBracket",
+        "/papi/v1/account",
+        "/papi/v1/um/positionSide/dual",
+        "/papi/v1/um/commissionRate",
+        "/papi/v1/um/leverageBracket",
         "/sapi/v1/account/apiRestrictions",
     ):
         assert endpoint in text, f"missing endpoint: {endpoint}"
