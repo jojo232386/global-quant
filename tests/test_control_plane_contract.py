@@ -39,13 +39,27 @@ def test_control_plane_spec_covers_required_surface() -> None:
 
 def test_control_script_exposes_all_commands() -> None:
     text = SCRIPT.read_text()
-    for command in ("preflight", "health", "reconcile", "audit", "kill"):
+    for command in ("preflight", "health", "reconcile", "audit", "exit", "kill"):
         assert f'"{command}"' in text or f"'{command}'" in text, f"missing command: {command}"
     assert 'add_parser("preflight"' in text
     assert 'add_parser("health"' in text
     assert 'add_parser("reconcile"' in text
+    assert 'add_parser("exit"' in text
     assert 'add_parser("kill"' in text
     assert "__name__" in text
+
+
+def test_exit_is_controlled_close_with_zero_position_proof() -> None:
+    text = SCRIPT.read_text()
+    assert '"/api/v1/forceexit"' in text
+    assert '"ZERO_POSITIONS"' in text
+    assert "is_open" in text
+    assert 'verdict="TIMEOUT"' in text
+    assert "positions not closed within 120s" in text
+    # Exit is not the kill switch: it goes through the bot API by design.
+    exit_source = text[text.index("def exit_all") : text.index("def main")]
+    assert "api_login" in exit_source
+    assert "docker" not in exit_source
 
 
 def test_client_order_id_format_and_uniqueness() -> None:

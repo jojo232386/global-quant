@@ -94,7 +94,16 @@ must be refused by the control plane.
 - The bot's own Freqtrade protections (StoplossGuard, MaxDrawdown,
   CooldownPeriod) remain an inner layer; they do not replace the kill switch.
 
-## 9. Dry-run constraints
+## 9. Controlled close
+
+- `scripts/gmaq-control exit` force-exits all open trades through the bot API
+  and then polls until open orders and open trades are both zero, recording
+  the proof in the audit journal. A timeout is a hard failure (`TIMEOUT`),
+  never a silent pass.
+- `exit` is the orderly counterpart of `kill`: it requires a healthy bot,
+  while `kill` must work without one.
+
+## 10. Dry-run constraints
 
 - The committed configuration stays dry-run. The control plane validates
   that: `dry_run` is true, key and secret are empty, protections are present,

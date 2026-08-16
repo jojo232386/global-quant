@@ -210,6 +210,22 @@ def api_login(env: dict) -> str | None:
         return None
 
 
+def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, object]:
+    body = json.dumps(payload or {}).encode()
+    request = urllib.request.Request(
+        f"{API_BASE}{path}",
+        data=body,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+            return response.status, json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        return error.code, None
+    except (urllib.error.URLError, json.JSONDecodeError):
+        return 0, None
+
+
 def bot_ping(token: str) -> bool:
     code, body = api_request("/api/v1/ping", {}, token)
     return code == 200 and body == "pong"
@@ -419,6 +435,33 @@ def kill() -> dict:
     return ok("KILLED", detail="runtime container stopped; state=KILLED")
 
 
+def exit_all() -> dict:
+    """Controlled close: force-exit all open trades and verify zero positions."""
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        return fail("unable to reach bot API")
+    code, _ = api_post("/api/v1/forceexit", token, {})
+    if code not in (200, 201):
+        return fail(f"forceexit rejected with HTTP {code}")
+    deadline = time.time() + 120
+    last = {"open_orders": None, "open_trades": None}
+    while time.time() < deadline:
+        orders = bot_open_orders(token)
+        trades = bot_trades(token)
+        if orders is None or trades is None:
+            return fail("unable to verify positions after forceexit", verdict="UNKNOWN")
+        open_trades = [item for item in trades if item.get("is_open")]
+        last = {"open_orders": len(orders), "open_trades": len(open_trades)}
+        if not orders and not open_trades:
+            append_audit("exit", "gmaq-control", refs={"verdict": "ZERO_POSITIONS"})
+            write_state("DISARMED")
+            return ok("ZERO_POSITIONS", **last)
+        time.sleep(5)
+    append_audit("exit", "gmaq-control", refs={"verdict": "TIMEOUT"})
+    return fail("positions not closed within 120s", verdict="TIMEOUT", **last)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gmaq-control", description="GMAQ control plane (dry-run scope)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -428,6 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser = sub.add_parser("audit", help="audit journal management")
     audit_parser.add_argument("action", choices=["verify", "append"])
     audit_parser.add_argument("--event", default=None)
+    sub.add_parser("exit", help="controlled close: force-exit all and verify zero positions")
     sub.add_parser("kill", help="independent kill switch")
     args = parser.parse_args(argv)
 
@@ -439,6 +483,8 @@ def main(argv: list[str] | None = None) -> int:
         result = reconcile()
     elif args.command == "audit":
         result = audit(args.action, args.event)
+    elif args.command == "exit":
+        result = exit_all()
     elif args.command == "kill":
         result = kill()
     else:
