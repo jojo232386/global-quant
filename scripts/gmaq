@@ -44,6 +44,9 @@ else:
         "GMAQ_JWT_SECRET_KEY": secrets.token_urlsafe(32),
         "GMAQ_WS_TOKEN": secrets.token_urlsafe(32),
         "GMAQ_API_BASE": "http://127.0.0.1:8081",
+        "GMAQ_ALERT_WEBHOOK_URL": "",
+        "GMAQ_TELEGRAM_BOT_TOKEN": "",
+        "GMAQ_TELEGRAM_CHAT_ID": "",
     }
     payload = "".join(f"{key}={value}\n" for key, value in values.items())
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

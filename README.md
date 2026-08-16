@@ -65,8 +65,13 @@ Useful commands:
 ./scripts/gmaq-control health      # heartbeat, clock offset, counts
 ./scripts/gmaq-control reconcile   # bot view vs. audit journal
 ./scripts/gmaq-control audit verify
+./scripts/gmaq-control alert-test  # verify operator alert channels
 ./scripts/gmaq-control kill        # independent kill switch
 ```
+
+Operator alerts (webhook / Telegram) are configured with `GMAQ_ALERT_WEBHOOK_URL`,
+`GMAQ_TELEGRAM_BOT_TOKEN`, and `GMAQ_TELEGRAM_CHAT_ID` in the local `.env`;
+fail verdicts dispatch automatically and every delivery is audit-logged.
 
 ## Exchange preflight (read-only, credential-free)
 

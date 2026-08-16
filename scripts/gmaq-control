@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -36,6 +37,8 @@ BINANCE_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
 CLOCK_OFFSET_LIMIT_S = 2.0
 NETWORK_TIMEOUT_S = 5
 TIMEFRAME_SECONDS = 15 * 60
+TELEGRAM_API = "https://api.telegram.org"
+ALERT_FAIL_VERDICTS = {"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH", "TIMEOUT"}
 
 ALLOWED_TRANSITIONS = {
     "DISARMED": {"PREFLIGHTING"},
@@ -111,6 +114,64 @@ def read_env() -> dict:
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
     return values
+
+
+def alert_channels(env: dict) -> list[str]:
+    channels = []
+    if env.get("GMAQ_ALERT_WEBHOOK_URL"):
+        channels.append("webhook")
+    if env.get("GMAQ_TELEGRAM_BOT_TOKEN") and env.get("GMAQ_TELEGRAM_CHAT_ID"):
+        channels.append("telegram")
+    return channels
+
+
+def deliver_alert(env: dict, event: str, payload: dict) -> dict:
+    """Deliver an operator alert. The payload never contains credentials."""
+    channels = alert_channels(env)
+    delivered = []
+    if "webhook" in channels:
+        try:
+            request = urllib.request.Request(
+                env["GMAQ_ALERT_WEBHOOK_URL"],
+                data=json.dumps({"event": event, **payload}, ensure_ascii=False).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S):
+                delivered.append("webhook")
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            pass
+    if "telegram" in channels:
+        token = env["GMAQ_TELEGRAM_BOT_TOKEN"]
+        chat = env["GMAQ_TELEGRAM_CHAT_ID"]
+        message = f"GMAQ alert: {event} {json.dumps(payload, ensure_ascii=False)}"
+        url = (
+            f"{TELEGRAM_API}/bot{token}/sendMessage?"
+            + urllib.parse.urlencode({"chat_id": chat, "text": message})
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=NETWORK_TIMEOUT_S):
+                delivered.append("telegram")
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            pass
+    return {"channels_configured": channels, "delivered": delivered, "sent": bool(delivered)}
+
+
+def dispatch_alert(event: str, verdict: str, **payload) -> dict:
+    """Send an alert through configured channels and record it in the audit
+    journal. Failing to deliver is itself recorded, never silent."""
+    env = read_env()
+    record = deliver_alert(env, event, {"verdict": verdict, **payload})
+    append_audit(
+        "alert",
+        "gmaq-control",
+        refs={
+            "event": event,
+            "verdict": verdict,
+            "channels": record["channels_configured"],
+            "delivered": record["delivered"],
+        },
+    )
+    return record
 
 
 def read_audit_chain() -> list[dict]:
@@ -315,6 +376,8 @@ def preflight() -> dict:
     result = ok(verdict, checks=checks)
     append_audit("preflight", "gmaq-control", refs={"verdict": verdict, "failed": failures})
     write_state("PREFLIGHT_PASS" if verdict == "PASS" else "DISARMED")
+    if verdict == "FAIL":
+        dispatch_alert("preflight", verdict, failed=failures)
     return result
 
 
@@ -363,6 +426,8 @@ def health() -> dict:
         verdict = "UNKNOWN"
     result = ok(verdict, checks=checks)
     append_audit("health", "gmaq-control", refs={"verdict": verdict})
+    if verdict in ALERT_FAIL_VERDICTS:
+        dispatch_alert("health", verdict, checks=[c["name"] for c in checks if not c["passed"]])
     return result
 
 
@@ -406,6 +471,8 @@ def reconcile() -> dict:
         matches_journal=matches_journal,
     )
     append_audit("reconcile", "gmaq-control", refs={"verdict": verdict, "counts": {"open_orders": len(order_ids), "trades": len(trade_ids)}})
+    if verdict == "MISMATCH":
+        dispatch_alert("reconcile", verdict, open_orders=len(order_ids), trades=len(trade_ids))
     return result
 
 
@@ -413,6 +480,8 @@ def audit(action: str, event: str | None) -> dict:
     if action == "verify":
         chain = read_audit_chain()
         valid, reason = audit_chain_valid(chain)
+        if not valid:
+            dispatch_alert("audit", "BROKEN", detail=reason)
         return ok("VERIFIED" if valid else "BROKEN", records=len(chain), detail=reason)
     if action == "append":
         return append_audit(event or "manual", "gmaq-control")
@@ -436,6 +505,7 @@ def kill() -> dict:
         return fail("docker compose stop failed", detail=proc.stderr.strip()[-200:])
     write_state("KILLED")
     append_audit("kill", "gmaq-control", refs={"method": "docker-compose-stop"})
+    dispatch_alert("kill", "KILLED", method="docker-compose-stop")
     return ok("KILLED", detail="runtime container stopped; state=KILLED")
 
 
@@ -473,6 +543,7 @@ def exit_all() -> dict:
             return ok("ZERO_POSITIONS", **last)
         time.sleep(5)
     append_audit("exit", "gmaq-control", refs={"verdict": "TIMEOUT"})
+    dispatch_alert("exit", "TIMEOUT", **last)
     return fail("positions not closed within 120s", verdict="TIMEOUT", **last)
 
 
@@ -486,6 +557,7 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument("action", choices=["verify", "append"])
     audit_parser.add_argument("--event", default=None)
     sub.add_parser("exit", help="controlled close: force-exit all and verify zero positions")
+    sub.add_parser("alert-test", help="send a test alert through configured channels")
     sub.add_parser("kill", help="independent kill switch")
     args = parser.parse_args(argv)
 
@@ -504,6 +576,16 @@ def main(argv: list[str] | None = None) -> int:
         result = audit(args.action, args.event)
     elif args.command == "exit":
         result = exit_all()
+    elif args.command == "alert-test":
+        env = read_env()
+        record = deliver_alert(env, "alert-test", {"verdict": "TEST"})
+        configured = alert_channels(env)
+        if not configured:
+            result = ok("NO_CHANNELS", detail="no alert channels configured", **record)
+        elif record["sent"]:
+            result = ok("SENT", **record)
+        else:
+            result = fail("configured alert channels failed to deliver", verdict="FAIL", **record)
     elif args.command == "kill":
         result = kill()
     else:

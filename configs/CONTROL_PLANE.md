@@ -82,7 +82,14 @@ must be refused by the control plane.
 
 - Every state change, `UNHEALTHY` verdict, and `UNKNOWN_OUTCOME` writes a
   local state file and an audit line. No failure is silent.
-- Future live deployments require an operator-routed channel (webhook/email).
+- Operator-routed channels are configurable now: generic webhook
+  (`GMAQ_ALERT_WEBHOOK_URL`) and/or Telegram (`GMAQ_TELEGRAM_BOT_TOKEN` +
+  `GMAQ_TELEGRAM_CHAT_ID`). Fail verdicts in `preflight`, `health`,
+  `reconcile`, `exit`, `audit`, and `kill` dispatch automatically.
+- `scripts/gmaq-control alert-test` verifies the channels end-to-end; it
+  fails closed when channels are configured but cannot deliver.
+- Every dispatch is recorded in the audit journal with the channels and
+  delivery outcome; a failed delivery is recorded, never silent.
 - Alert payloads contain no credentials and no secrets.
 
 ## 8. Independent kill switch

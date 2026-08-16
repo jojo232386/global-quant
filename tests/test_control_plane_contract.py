@@ -143,6 +143,30 @@ def test_committed_strategy_has_inner_protections() -> None:
     assert missing == []
 
 
+def test_alerts_route_fail_verdicts_and_never_leak_credentials() -> None:
+    text = SCRIPT.read_text()
+    for marker in (
+        "GMAQ_ALERT_WEBHOOK_URL",
+        "GMAQ_TELEGRAM_BOT_TOKEN",
+        "GMAQ_TELEGRAM_CHAT_ID",
+        "https://api.telegram.org",
+        '"alert-test"',
+    ):
+        assert marker in text, f"missing alert marker: {marker}"
+    # Alert payloads are built from the event and verdict only.
+    alert_source = text[text.index("def deliver_alert") : text.index("def dispatch_alert")]
+    assert "GMAQ_API_PASSWORD" not in alert_source
+    assert "GMAQ_API_USERNAME" not in alert_source
+    # Every fail verdict in the registry triggers a dispatch somewhere.
+    assert 'if verdict in ALERT_FAIL_VERDICTS' in text
+    # Audit records alert delivery; a failed delivery is recorded, not silent.
+    dispatch_source = text[text.index("def dispatch_alert") : text.index("def read_audit_chain")]
+    assert '"alert"' in dispatch_source
+    # alert-test fails closed when channels are configured but dead.
+    assert "configured alert channels failed to deliver" in text
+    assert "NO_CHANNELS" in text
+
+
 def test_preflight_is_fail_closed_on_unknown_inputs() -> None:
     text = SCRIPT.read_text()
     assert "CLOCK_OFFSET_LIMIT_S" in text
