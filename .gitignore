@@ -20,7 +20,7 @@ user_data/plot/
 
 # Control-plane runtime state is local and append-only.
 user_data/audit/*.jsonl
-user_data/audit/state.json
+user_data/audit/*.json
 !user_data/audit/.gitkeep
 
 # WorkBuddy workspace-local data (daily logs, memory) is never committed.
