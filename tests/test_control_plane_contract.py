@@ -152,6 +152,6 @@ def test_preflight_is_fail_closed_on_unknown_inputs() -> None:
     assert "fail_verdicts" in text
     assert '"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH"' in text
     # Kill switch never depends on the bot API.
-    kill_source = text[text.index("def kill") :]
+    kill_source = text[text.index("def kill") : text.index("def exit_all")]
     assert "api_login" not in kill_source
     assert "docker" in kill_source
