@@ -159,9 +159,33 @@ done
 
 api_post pause >/dev/null
 wait_state paused
-if [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -gt 0 ]]; then
-  api_post forceexit '{"tradeid":"all","ordertype":"market"}' >/dev/null
-fi
+python3 - "$API_BASE" "$API_USER" "$API_PASSWORD" <<'PY'
+import base64
+import json
+import sys
+import urllib.request
+
+base, user, pwd = sys.argv[1], sys.argv[2], sys.argv[3]
+header = "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()
+
+def get(path):
+    request = urllib.request.Request(base + path, headers={"Authorization": header})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode())
+
+trades = get("/api/v1/trades?limit=500").get("trades", [])
+open_ids = [item["trade_id"] for item in trades if item.get("is_open")]
+for trade_id in open_ids:
+    body = json.dumps({"tradeid": trade_id}).encode()
+    request = urllib.request.Request(
+        base + "/api/v1/forceexit",
+        data=body,
+        headers={"Authorization": header, "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        print(f"FORCEEXIT tradeid={trade_id} HTTP {response.status}")
+print(f"FORCEEXIT_TOTAL={len(open_ids)}")
+PY
 for _ in $(seq 1 60); do
   [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -eq 0 ]] && break
   sleep 2
