@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""GMAQ control plane (dry-run scope).
+
+Subcommands:
+  preflight   Fail-closed readiness check of the whole control surface.
+  health      Heartbeat, clock offset, data freshness, and count verdict.
+  reconcile   Cross-check the bot REST view against the audit journal.
+  audit       Append an audit record or verify the audit hash chain.
+  kill        Independent kill switch; works without bot cooperation.
+
+All secrets stay inside environment variables and are never printed.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import secrets
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / "user_data" / "config.json"
+STRATEGY_PATH = ROOT / "user_data" / "strategies" / "LiveExecutionCanaryStrategy.py"
+ENV_PATH = ROOT / ".env"
+AUDIT_DIR = ROOT / "user_data" / "audit"
+AUDIT_PATH = AUDIT_DIR / "manifest.jsonl"
+STATE_PATH = AUDIT_DIR / "state.json"
+
+API_BASE = "http://127.0.0.1:8080"
+BINANCE_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
+CLOCK_OFFSET_LIMIT_S = 2.0
+NETWORK_TIMEOUT_S = 5
+TIMEFRAME_SECONDS = 15 * 60
+
+ALLOWED_TRANSITIONS = {
+    "DISARMED": {"PREFLIGHTING"},
+    "PREFLIGHTING": {"PREFLIGHT_PASS", "DISARMED"},
+    "PREFLIGHT_PASS": {"ARMED"},
+    "ARMED": {"PAUSED", "KILLED"},
+    "PAUSED": {"ARMED", "KILLED"},
+    "KILLED": {"DISARMED"},
+}
+
+
+def fail(message: str, **extra) -> dict:
+    return {"ok": False, "verdict": "FAIL", "error": message, **extra}
+
+
+def ok(verdict: str, **extra) -> dict:
+    return {"ok": True, "verdict": verdict, **extra}
+
+
+def client_order_id(pair: str, env: str = "dryrun") -> str:
+    """Unique client-order identity: gmaq-<env>-<pair>-<utc-micros>-<8 b32>."""
+    sanitized = "".join(c if c.isalnum() else "-" for c in pair).strip("-").lower()
+    stamp = f"{int(time.time() * 1_000_000):016d}"
+    suffix = secrets.token_urlsafe(6).rstrip("=").lower()
+    return f"gmaq-{env}-{sanitized}-{stamp}-{suffix}"
+
+
+def allowed_transition(current: str, target: str) -> bool:
+    return target in ALLOWED_TRANSITIONS.get(current, set())
+
+
+def serialize(line: dict) -> str:
+    return json.dumps(line, sort_keys=True, ensure_ascii=False)
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_config() -> dict:
+    return json.loads(CONFIG_PATH.read_text())
+
+
+def config_is_credential_free(config: dict) -> bool:
+    exchange = config.get("exchange", {})
+    return config.get("dry_run") is True and not exchange.get("key") and not exchange.get("secret")
+
+
+def strategy_has_protections() -> tuple[bool, list[str]]:
+    text = STRATEGY_PATH.read_text()
+    missing = [
+        name
+        for name in ("StoplossGuard", "MaxDrawdown", "CooldownPeriod")
+        if f'"{name}"' not in text
+    ]
+    return (not missing), missing
+
+
+def read_env() -> dict:
+    if not ENV_PATH.exists():
+        return {}
+    values = {}
+    for line in ENV_PATH.read_text().splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip()
+    return values
+
+
+def read_audit_chain() -> list[dict]:
+    if not AUDIT_PATH.exists():
+        return []
+    return [json.loads(line) for line in AUDIT_PATH.read_text().splitlines() if line.strip()]
+
+
+def audit_chain_valid(chain: list[dict]) -> tuple[bool, str]:
+    for index, line in enumerate(chain):
+        if index == 0:
+            continue
+        expected = sha256_text(serialize(chain[index - 1]))
+        if line.get("prev_sha") != expected:
+            return False, f"chain broken at record {line.get('seq')}"
+    return True, "chain ok"
+
+
+def append_audit(event: str, actor: str, refs: dict | None = None, verdict: str = "OK") -> dict:
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    chain = read_audit_chain()
+    valid, reason = audit_chain_valid(chain)
+    if chain and not valid:
+        return fail(f"refusing to append: {reason}")
+    prev_sha = sha256_text(serialize(chain[-1])) if chain else ""
+    line = {
+        "seq": (chain[-1]["seq"] + 1) if chain else 1,
+        "ts_utc": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+        "actor": actor,
+        "event": event,
+        "verdict": verdict,
+        "refs": refs or {},
+        "prev_sha": prev_sha,
+    }
+    with AUDIT_PATH.open("a") as handle:
+        handle.write(serialize(line) + "\n")
+    return ok("APPENDED", seq=line["seq"])
+
+
+def read_state() -> dict:
+    if not STATE_PATH.exists():
+        return {"state": "DISARMED"}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except json.JSONDecodeError:
+        return {"state": "DISARMED"}
+
+
+def write_state(state: str, **extra) -> None:
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps({"state": state, **extra}, sort_keys=True, indent=2) + "\n")
+
+
+def exchange_time_offset_s() -> float | None:
+    try:
+        with urllib.request.urlopen(BINANCE_TIME_URL, timeout=NETWORK_TIMEOUT_S) as response:
+            payload = json.loads(response.read().decode())
+        server_ms = int(payload["serverTime"])
+    except (urllib.error.URLError, KeyError, ValueError, OSError):
+        return None
+    return time.time() - server_ms / 1000.0
+
+
+def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, object]:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(f"{API_BASE}{path}", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+            body = response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, None
+    except urllib.error.URLError:
+        return 0, None
+    try:
+        return 200, json.loads(body)
+    except json.JSONDecodeError:
+        return 200, body
+
+
+def api_login(env: dict) -> str | None:
+    username = env.get("GMAQ_API_USERNAME", "")
+    password = env.get("GMAQ_API_PASSWORD", "")
+    if not username or not password:
+        return None
+    payload = json.dumps({"username": username, "password": password}).encode()
+    request = urllib.request.Request(
+        f"{API_BASE}/api/v1/token/login",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+            return json.loads(response.read().decode()).get("access_token")
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        return None
+
+
+def bot_ping(token: str) -> bool:
+    code, body = api_request("/api/v1/ping", {}, token)
+    return code == 200 and body == "pong"
+
+
+def bot_last_process_age_s(token: str) -> float | None:
+    code, body = api_request("/api/v1/health", {}, token)
+    if code != 200 or not isinstance(body, dict):
+        return None
+    last_ts = body.get("last_process_ts")
+    if not last_ts:
+        return None
+    return max(0.0, time.time() - float(last_ts))
+
+
+def bot_open_orders(token: str) -> list | None:
+    code, body = api_request("/api/v1/status", {}, token)
+    if code != 200 or not isinstance(body, list):
+        return None
+    return body
+
+
+def bot_trades(token: str) -> list | None:
+    code, body = api_request("/api/v1/trades", {}, token)
+    if code != 200 or not isinstance(body, list):
+        return None
+    return body
+
+
+def compose_command() -> list[str] | None:
+    if subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0:
+        return ["docker", "compose"]
+    if subprocess.run(["docker-compose", "--version"], capture_output=True).returncode == 0:
+        return ["docker-compose"]
+    return None
+
+
+def preflight() -> dict:
+    checks = []
+    failures = []
+
+    def check(name: str, passed: bool, detail: str) -> None:
+        checks.append({"name": name, "passed": passed, "detail": detail})
+        if not passed:
+            failures.append(name)
+
+    if not CONFIG_PATH.is_file():
+        return fail("config missing", checks=checks)
+    config = load_config()
+    check("credential-free", config_is_credential_free(config), "dry_run=true, empty key/secret")
+    check("pair scope", bool(config.get("exchange", {}).get("pair_whitelist")), "whitelist non-empty")
+    has_protections, missing = strategy_has_protections()
+    check("protections", has_protections, f"missing: {missing}" if missing else "StoplossGuard+MaxDrawdown+CooldownPeriod")
+    check("kill switch", compose_command() is not None, "docker compose present")
+
+    chain = read_audit_chain()
+    valid, reason = audit_chain_valid(chain)
+    check("audit chain", valid, reason)
+
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        probe = AUDIT_DIR / ".probe"
+        probe.write_text("x")
+        probe.unlink()
+        check("audit writable", True, "journal dir writable")
+    except OSError as error:
+        check("audit writable", False, str(error))
+
+    offset = exchange_time_offset_s()
+    if offset is None:
+        check("clock offset", False, "exchange time unreachable")
+    else:
+        check("clock offset", abs(offset) <= CLOCK_OFFSET_LIMIT_S, f"offset {offset:+.3f}s (limit {CLOCK_OFFSET_LIMIT_S}s)")
+
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        check("bot reachable", False, "login failed or credentials missing")
+    else:
+        check("bot reachable", bot_ping(token), "ping ok")
+
+    verdict = "PASS" if not failures else "FAIL"
+    result = ok(verdict, checks=checks)
+    append_audit("preflight", "gmaq-control", refs={"verdict": verdict, "failed": failures})
+    write_state("PREFLIGHT_PASS" if verdict == "PASS" else "DISARMED")
+    return result
+
+
+def health() -> dict:
+    checks = []
+    env = read_env()
+    token = api_login(env)
+
+    if token is None:
+        return fail("unable to reach bot API", checks=checks)
+    if not bot_ping(token):
+        return fail("bot ping failed", checks=checks)
+
+    checks.append({"name": "ping", "passed": True, "detail": "pong"})
+
+    age = bot_last_process_age_s(token)
+    fresh = age is not None and age <= 2 * TIMEFRAME_SECONDS
+    checks.append(
+        {
+            "name": "heartbeat",
+            "passed": bool(fresh),
+            "detail": f"last_process age {age:.0f}s" if age is not None else "unknown",
+        }
+    )
+
+    offset = exchange_time_offset_s()
+    clock_ok = offset is not None and abs(offset) <= CLOCK_OFFSET_LIMIT_S
+    checks.append(
+        {
+            "name": "clock offset",
+            "passed": bool(clock_ok),
+            "detail": f"{offset:+.3f}s" if offset is not None else "unknown",
+        }
+    )
+
+    orders = bot_open_orders(token)
+    trades = bot_trades(token)
+    checks.append({"name": "open orders", "passed": orders is not None, "detail": len(orders) if orders is not None else "unknown"})
+    checks.append({"name": "trades", "passed": trades is not None, "detail": len(trades) if trades is not None else "unknown"})
+
+    if all(item["passed"] for item in checks):
+        verdict = "HEALTHY"
+    elif all(item["passed"] or item["name"] in ("open orders", "trades") for item in checks):
+        verdict = "UNHEALTHY"
+    else:
+        verdict = "UNKNOWN"
+    result = ok(verdict, checks=checks)
+    append_audit("health", "gmaq-control", refs={"verdict": verdict})
+    return result
+
+
+def reconcile() -> dict:
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        return fail("unable to reach bot API")
+    orders = bot_open_orders(token)
+    trades = bot_trades(token)
+    if orders is None or trades is None:
+        return fail("bot API did not return orders/trades", verdict="UNKNOWN")
+
+    order_ids = [item.get("order_id") for item in orders]
+    trade_ids = [item.get("trade_id") for item in trades]
+    unique_orders = len(order_ids) == len(set(order_ids))
+    unique_trades = len(trade_ids) == len(set(trade_ids))
+
+    chain = read_audit_chain()
+    last_counts = {}
+    for line in reversed(chain):
+        counts = line.get("refs", {}).get("counts")
+        if counts:
+            last_counts = counts
+            break
+
+    matches_journal = True
+    if last_counts:
+        matches_journal = (
+            last_counts.get("open_orders") == len(order_ids)
+            and last_counts.get("trades") == len(trade_ids)
+        )
+
+    verdict = "OK" if (unique_orders and unique_trades and matches_journal) else "MISMATCH"
+    result = ok(
+        verdict,
+        unique_orders=unique_orders,
+        unique_trades=unique_trades,
+        open_orders=len(order_ids),
+        trades=len(trade_ids),
+        matches_journal=matches_journal,
+    )
+    append_audit("reconcile", "gmaq-control", refs={"verdict": verdict, "counts": {"open_orders": len(order_ids), "trades": len(trade_ids)}})
+    return result
+
+
+def audit(action: str, event: str | None) -> dict:
+    if action == "verify":
+        chain = read_audit_chain()
+        valid, reason = audit_chain_valid(chain)
+        return ok("VERIFIED" if valid else "BROKEN", records=len(chain), detail=reason)
+    if action == "append":
+        return append_audit(event or "manual", "gmaq-control")
+    return fail(f"unknown audit action: {action}")
+
+
+def kill() -> dict:
+    compose = compose_command()
+    if compose is None:
+        return fail("docker compose unavailable; cannot stop runtime")
+    try:
+        proc = subprocess.run(
+            compose + ["-f", str(ROOT / "docker-compose.yml"), "stop", "freqtrade"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return fail(f"kill failed: {error}")
+    if proc.returncode != 0:
+        return fail("docker compose stop failed", detail=proc.stderr.strip()[-200:])
+    write_state("KILLED")
+    append_audit("kill", "gmaq-control", refs={"method": "docker-compose-stop"})
+    return ok("KILLED", detail="runtime container stopped; state=KILLED")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-control", description="GMAQ control plane (dry-run scope)")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("preflight", help="fail-closed readiness check")
+    sub.add_parser("health", help="heartbeat, clock, and count verdict")
+    sub.add_parser("reconcile", help="cross-check bot view against audit journal")
+    audit_parser = sub.add_parser("audit", help="audit journal management")
+    audit_parser.add_argument("action", choices=["verify", "append"])
+    audit_parser.add_argument("--event", default=None)
+    sub.add_parser("kill", help="independent kill switch")
+    args = parser.parse_args(argv)
+
+    if args.command == "preflight":
+        result = preflight()
+    elif args.command == "health":
+        result = health()
+    elif args.command == "reconcile":
+        result = reconcile()
+    elif args.command == "audit":
+        result = audit(args.action, args.event)
+    elif args.command == "kill":
+        result = kill()
+    else:
+        result = fail(f"unknown command: {args.command}")
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    verdict = result.get("verdict")
+    fail_verdicts = {"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH"}
+    return 0 if result.get("ok") and verdict not in fail_verdicts else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

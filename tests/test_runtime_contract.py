@@ -75,7 +75,20 @@ def test_canary_is_explicitly_not_alpha_and_is_fixed_at_one_x() -> None:
     assert strategy_type.timeframe == "15m"
     assert strategy_type.stoploss == -0.01
     assert instance.protections == [
-        {"method": "CooldownPeriod", "stop_duration_candles": 24}
+        {"method": "CooldownPeriod", "stop_duration_candles": 24},
+        {
+            "method": "StoplossGuard",
+            "lookback_period_candles": 48,
+            "trade_limit": 2,
+            "stop_duration_candles": 12,
+            "only_per_pair": False,
+        },
+        {
+            "method": "MaxDrawdown",
+            "lookback_period_candles": 48,
+            "trade_limit": 5,
+            "max_allowed_drawdown": 0.05,
+        },
     ]
     assert instance.leverage("ETH/USDT:USDT", None, 1.0, 5.0, 20.0, None, "long") == 1.0
 

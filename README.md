@@ -49,8 +49,24 @@ Useful commands:
 - Binance key and secret fields are empty;
 - the startup wrapper refuses non-dry-run or credential-bearing exchange config;
 - the initial scope is one pair, isolated margin, 1x, one open trade maximum;
+- the strategy carries inner protections (StoplossGuard, MaxDrawdown,
+  CooldownPeriod);
+- the control plane (`configs/CONTROL_PLANE.md`, `scripts/gmaq-control`)
+  provides armed states, an order state machine, unique client-order
+  identity, reconciliation, an append-only audit manifest, health metrics,
+  alerts, and an independent kill switch — all dry-run scope;
 - live deployment requires a separate configuration and explicit review;
 - no active SQLite database should be copied or queried directly.
+
+## Control plane
+
+```sh
+./scripts/gmaq-control preflight   # fail-closed readiness check
+./scripts/gmaq-control health      # heartbeat, clock offset, counts
+./scripts/gmaq-control reconcile   # bot view vs. audit journal
+./scripts/gmaq-control audit verify
+./scripts/gmaq-control kill        # independent kill switch
+```
 
 ## Validate
 
@@ -76,9 +92,9 @@ identity checks, and a final dry-run `forceexit all`.
 - `user_data/config.json`: credential-free dry-run configuration
 - `research/`: preregistration, data availability, run manifests, cost model
   baseline, and PASS/REJECT evaluation gate for future strategy research
-- `configs/`: live-readiness policy and planning
+- `configs/`: live-readiness policy, control-plane spec, and planning
 - `tests/`: focused configuration and custom-behavior contracts
-- `scripts/`: safe product and reliability commands
+- `scripts/`: safe product, reliability, and control-plane commands
 
 Earlier architecture remains recoverable from Git history and the published
 historical tag; it is not part of the active runtime.

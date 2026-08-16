@@ -23,11 +23,26 @@ class LiveExecutionCanaryStrategy(IStrategy):
 
     @property
     def protections(self):
+        # Inner safety layer. The independent kill switch in
+        # scripts/gmaq-control and configs/CONTROL_PLANE.md is the outer layer.
         return [
             {
                 "method": "CooldownPeriod",
                 "stop_duration_candles": 24,
-            }
+            },
+            {
+                "method": "StoplossGuard",
+                "lookback_period_candles": 48,
+                "trade_limit": 2,
+                "stop_duration_candles": 12,
+                "only_per_pair": False,
+            },
+            {
+                "method": "MaxDrawdown",
+                "lookback_period_candles": 48,
+                "trade_limit": 5,
+                "max_allowed_drawdown": 0.05,
+            },
         ]
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
