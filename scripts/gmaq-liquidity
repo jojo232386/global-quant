@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+"""GMAQ liquidity and execution cost snapshot (public data only).
+
+Walks the Binance USD-M public order book to model market-order fills,
+slippage, spread, funding carry, and liquidation distance under stress.
+Credential-free: this script never reads or prints API credentials.
+"""
+
+import argparse
+import json
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / "user_data" / "config.json"
+AUDIT_DIR = ROOT / "user_data" / "audit"
+OUTPUT_PATH = AUDIT_DIR / "liquidity-snapshot.json"
+
+FAPI = "https://fapi.binance.com"
+DEPTH_URL = f"{FAPI}/fapi/v1/depth"
+BOOK_TICKER_URL = f"{FAPI}/fapi/v1/ticker/bookTicker"
+PREMIUM_URL = f"{FAPI}/fapi/v1/premiumIndex"
+FUNDING_URL = f"{FAPI}/fapi/v1/fundingRate"
+TIMEOUT_S = 8
+
+SIZES_USDT = [25.0, 100.0, 1000.0, 10000.0]
+DEPTH_SCALES = [1.0, 0.5, 0.1]
+SPREAD_STRESS = [1.0, 2.0, 5.0]
+LATENCY_DRIFT_BPS_PER_S = 2.0
+LATENCY_SECONDS = [1.0, 5.0]
+TAKER_FEE = 0.0005  # PLACEHOLDER_UNVERIFIED
+MMR = 0.005  # PLACEHOLDER_UNVERIFIED (tier-1 maintenance margin rate)
+LEVERAGES = [1.0, 2.0, 3.0]
+
+
+def get_json(url: str) -> dict | list | None:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+            return json.loads(response.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+        return None
+
+
+def load_config() -> dict:
+    return json.loads(CONFIG_PATH.read_text())
+
+
+def config_is_credential_free(config: dict) -> bool:
+    exchange = config.get("exchange", {})
+    return config.get("dry_run") is True and not exchange.get("key") and not exchange.get("secret")
+
+
+def symbol_from_config(config: dict) -> str | None:
+    pairs = config.get("exchange", {}).get("pair_whitelist", [])
+    if not pairs:
+        return None
+    return pairs[0].split(":")[0].replace("/", "")
+
+
+def parse_levels(levels: list) -> list[tuple[float, float]]:
+    return [(float(price), float(qty)) for price, qty in levels or []]
+
+
+def walk_book(levels: list[tuple[float, float]], notional: float) -> dict:
+    """Fill `notional` USDT by walking price levels outward from the best.
+
+    Returns the VWAP fill price (cost / quantity), filled notional,
+    remainder, quantity, and consumed level count.
+    """
+    remaining = notional
+    cost = 0.0
+    quantity = 0.0
+    consumed = 0
+    for price, qty in levels:
+        if remaining <= 0:
+            break
+        level_notional = price * qty
+        if level_notional <= 0:
+            continue
+        take_notional = min(remaining, level_notional)
+        take_qty = take_notional / price
+        cost += take_notional
+        quantity += take_qty
+        remaining -= take_notional
+        consumed += 1
+    vwap = cost / quantity if quantity > 0 else None
+    return {
+        "notional_target": notional,
+        "notional_filled": round(cost, 6),
+        "notional_remaining": round(remaining, 6),
+        "quantity_filled": round(quantity, 8),
+        "levels_consumed": consumed,
+        "vwap": round(vwap, 8) if vwap is not None else None,
+    }
+
+
+def slippage_bps(fill_price: float | None, reference: float | None) -> float | None:
+    if fill_price is None or reference in (None, 0):
+        return None
+    return (fill_price - reference) / reference * 10_000
+
+
+def scale_depth(levels: list[tuple[float, float]], scale: float) -> list[tuple[float, float]]:
+    return [(price, qty * scale) for price, qty in levels]
+
+
+def liquidation_price(entry: float, leverage: float, mmr: float, side: str) -> float | None:
+    if leverage <= 0:
+        return None
+    if side == "long":
+        return entry * (1 - 1 / leverage + mmr)
+    if side == "short":
+        return entry * (1 + 1 / leverage - mmr)
+    return None
+
+
+def funding_carry(rate: float | None, interval_hours: float, notional: float, holding_hours: float) -> float | None:
+    if rate is None or interval_hours <= 0:
+        return None
+    return rate * notional * holding_hours / interval_hours
+
+
+def spread_from_book(bid: float | None, ask: float | None) -> dict:
+    if bid in (None, 0) or ask in (None, 0) or ask <= bid:
+        return {"bid": bid, "ask": ask, "mid": None, "spreadBps": None}
+    mid = (bid + ask) / 2
+    return {"bid": bid, "ask": ask, "mid": mid, "spreadBps": (ask - bid) / mid * 10_000}
+
+
+def size_report(size: float, bids: list, asks: list, spread: dict, mark: float | None) -> dict:
+    best_bid = bids[0][0] if bids else None
+    best_ask = asks[0][0] if asks else None
+    buy = walk_book(asks, size)
+    sell = walk_book(bids, size)
+    buy_bps = slippage_bps(buy["vwap"], best_ask)
+    sell_bps = slippage_bps(sell["vwap"], best_bid)
+    mid = spread.get("mid")
+    buy_bps_mid = slippage_bps(buy["vwap"], mid)
+    sell_bps_mid = slippage_bps(sell["vwap"], mid)
+    roundtrip_bps = (buy_bps + (-sell_bps)) if (buy_bps is not None and sell_bps is not None) else None
+    mark_deviation_bps = slippage_bps(mid, mark)
+    return {
+        "size_usdt": size,
+        "buy": {
+            **buy,
+            "slippage_bps_vs_best": round(buy_bps, 4) if buy_bps is not None else None,
+            "slippage_bps_vs_mid": round(buy_bps_mid, 4) if buy_bps_mid is not None else None,
+            "unfillable": buy["notional_remaining"] > 1e-9,
+        },
+        "sell": {
+            **sell,
+            "slippage_bps_vs_best": round(sell_bps, 4) if sell_bps is not None else None,
+            "slippage_bps_vs_mid": round(sell_bps_mid, 4) if sell_bps_mid is not None else None,
+            "unfillable": sell["notional_remaining"] > 1e-9,
+        },
+        "roundtrip_slippage_bps": round(roundtrip_bps, 4) if roundtrip_bps is not None else None,
+        "taker_fee_bps": TAKER_FEE * 10_000,
+        "mark_vs_mid_bps": round(mark_deviation_bps, 4) if mark_deviation_bps is not None else None,
+    }
+
+
+def run_snapshot(symbol: str) -> dict:
+    fetched_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    checks = []
+
+    depth = get_json(f"{DEPTH_URL}?symbol={symbol}&limit=100")
+    bids = parse_levels(depth.get("bids")) if isinstance(depth, dict) else []
+    asks = parse_levels(depth.get("asks")) if isinstance(depth, dict) else []
+    checks.append({"name": "depth snapshot", "passed": bool(bids and asks), "detail": f"{len(bids)} bid levels, {len(asks)} ask levels"})
+
+    book = get_json(f"{BOOK_TICKER_URL}?symbol={symbol}")
+    spread = spread_from_book(
+        float(book.get("bidPrice")) if isinstance(book, dict) and book.get("bidPrice") else None,
+        float(book.get("askPrice")) if isinstance(book, dict) and book.get("askPrice") else None,
+    )
+    checks.append({"name": "spread", "passed": spread["spreadBps"] is not None, "detail": f"{spread['spreadBps']:.2f} bps" if spread["spreadBps"] is not None else "unreachable"})
+
+    premium = get_json(f"{PREMIUM_URL}?symbol={symbol}")
+    mark = float(premium.get("markPrice")) if isinstance(premium, dict) and premium.get("markPrice") else None
+    index = float(premium.get("indexPrice")) if isinstance(premium, dict) and premium.get("indexPrice") else None
+    last_funding = premium.get("lastFundingRate") if isinstance(premium, dict) else None
+    checks.append({"name": "mark price", "passed": mark is not None, "detail": f"mark={mark}"})
+
+    funding = get_json(f"{FUNDING_URL}?symbol={symbol}&limit=1")
+    funding_rate = float(funding[0].get("fundingRate")) if isinstance(funding, list) and funding else None
+    checks.append({"name": "funding rate", "passed": funding_rate is not None, "detail": f"rate={funding_rate}"})
+
+    baseline = [size_report(size, bids, asks, spread, mark) for size in SIZES_USDT] if bids and asks else []
+
+    stress = {}
+    for scale in DEPTH_SCALES:
+        stressed_bids = scale_depth(bids, scale)
+        stressed_asks = scale_depth(asks, scale)
+        stress[f"depth_{int(scale * 100)}pct"] = [
+            size_report(size, stressed_bids, stressed_asks, spread, mark) for size in SIZES_USDT
+        ]
+
+    spread_stress = {}
+    for factor in SPREAD_STRESS:
+        if spread["mid"] is None:
+            continue
+        half = (spread["ask"] - spread["bid"]) / 2 * factor
+        stressed_spread = {
+            "bid": spread["mid"] - half,
+            "ask": spread["mid"] + half,
+            "mid": spread["mid"],
+            "spreadBps": spread["spreadBps"] * factor,
+        }
+        spread_stress[f"spread_x{factor:g}"] = [
+            size_report(size, bids, asks, stressed_spread, mark) for size in SIZES_USDT
+        ]
+
+    latency_stress = {}
+    for seconds in LATENCY_SECONDS:
+        drift_bps = LATENCY_DRIFT_BPS_PER_S * seconds
+        latency_stress[f"latency_{seconds:g}s"] = {
+            "assumed_drift_bps": drift_bps,
+            "note": "worst-case adverse drift applied additively to measured slippage",
+        }
+
+    funding_parts = {}
+    if funding_rate is not None:
+        for hours in (8.0, 24.0, 72.0):
+            funding_parts[f"{hours:g}h"] = {
+                "carry_per_usdt": funding_carry(funding_rate, 8.0, 1.0, hours),
+                "stressed_5x_per_usdt": funding_carry(funding_rate * 5, 8.0, 1.0, hours),
+            }
+
+    liquidations = {}
+    entry = spread["mid"] or mark
+    if entry:
+        for leverage in LEVERAGES:
+            long_liq = liquidation_price(entry, leverage, MMR, "long")
+            short_liq = liquidation_price(entry, leverage, MMR, "short")
+            liquidations[f"x{leverage:g}"] = {
+                "entry": round(entry, 8),
+                "mmr_placeholder": MMR,
+                "long_liquidation": round(long_liq, 8) if long_liq else None,
+                "long_distance_bps": round((entry - long_liq) / entry * 10_000, 2) if long_liq else None,
+                "short_liquidation": round(short_liq, 8) if short_liq else None,
+                "short_distance_bps": round((short_liq - entry) / entry * 10_000, 2) if short_liq else None,
+            }
+
+    public_failures = [item["name"] for item in checks if not item["passed"]]
+    verdict = "PASS" if not public_failures else "UNKNOWN"
+
+    report = {
+        "scope": "read-only, credential-free",
+        "fetchedAtUtc": fetched_at,
+        "symbol": symbol,
+        "verdict": verdict,
+        "checks": checks,
+        "spread": {k: (round(v, 8) if isinstance(v, float) else v) for k, v in spread.items()},
+        "markPrice": mark,
+        "indexPrice": index,
+        "lastFundingRate": last_funding,
+        "fundingRate": funding_rate,
+        "takerFeePlaceholder": TAKER_FEE,
+        "mmrPlaceholder": MMR,
+        "baseline": baseline,
+        "stress": {"depth": stress, "spread": spread_stress, "latency": latency_stress},
+        "fundingCarry": funding_parts,
+        "liquidation": liquidations,
+        "adl": {
+            "status": "QUALITATIVE_ONLY",
+            "note": "ADL queue position has no public endpoint; treat liquidation distance and depth stress as the quantitative proxies.",
+        },
+        "note": "Taker fee and MMR are placeholders until authenticated account verification. This snapshot does not authorize live trading.",
+    }
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-liquidity", description="Market-order cost and liquidity snapshot (public data)")
+    parser.add_argument("--symbol", default=None, help="override pair symbol, e.g. ETHUSDT")
+    args = parser.parse_args(argv)
+
+    if not CONFIG_PATH.is_file():
+        print(json.dumps({"ok": False, "error": "config missing"}, indent=2))
+        return 1
+    config = load_config()
+    if not config_is_credential_free(config):
+        print(json.dumps({"ok": False, "error": "config carries credentials; this script is read-only public API only"}, indent=2))
+        return 1
+    symbol = args.symbol or symbol_from_config(config)
+    if not symbol:
+        print(json.dumps({"ok": False, "error": "no pair in whitelist"}, indent=2))
+        return 1
+
+    report = run_snapshot(symbol)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["verdict"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

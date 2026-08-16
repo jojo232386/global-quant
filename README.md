@@ -81,6 +81,18 @@ depth. Account-mode, permission, and fee items are reported as
 `UNVERIFIED_REQUIRES_AUTH` and keep live readiness BLOCKED until a separately
 authorized read-only session verifies them.
 
+## Execution cost and liquidity
+
+```sh
+./scripts/gmaq-liquidity
+```
+
+Walks the public order book to model market-order fills (VWAP, slippage,
+partial fills), spread, funding carry, and liquidation distance under depth,
+spread, latency, and funding stress. See `configs/EXECUTION_COST_MODEL.md`.
+Taker fee and maintenance margin are placeholders until authenticated
+account verification; the snapshot does not authorize live trading.
+
 ## Validate
 
 ```sh
