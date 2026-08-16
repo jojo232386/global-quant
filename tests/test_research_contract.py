@@ -1,0 +1,122 @@
+import pathlib
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+RESEARCH = ROOT / "research"
+
+ARTIFACTS = {
+    "preregistration": RESEARCH / "preregistration" / "HYPOTHESIS_TEMPLATE.md",
+    "data": RESEARCH / "data" / "DATA_AVAILABILITY_CHECKLIST.md",
+    "manifest": RESEARCH / "manifest" / "RUN_MANIFEST_TEMPLATE.md",
+    "costs": RESEARCH / "costs" / "COST_MODEL_BASELINE.md",
+    "gate": RESEARCH / "gate" / "EVALUATION_GATE.md",
+}
+
+
+def test_research_readme_indexes_all_artifacts() -> None:
+    readme = (RESEARCH / "README.md").read_text()
+    for name in ("preregistration", "data", "manifest", "costs", "gate"):
+        assert name in readme
+    assert "does not authorize live trading" in readme
+    assert "A run without a preregistration and a manifest is not evidence" in readme
+
+
+def test_all_research_artifacts_exist() -> None:
+    for path in ARTIFACTS.values():
+        assert path.is_file(), f"missing research artifact: {path}"
+
+
+def test_preregistration_template_has_required_sections() -> None:
+    text = ARTIFACTS["preregistration"].read_text()
+    for section in (
+        "Hypothesis",
+        "Applicable environment",
+        "Predeclared failure conditions",
+        "Data plan",
+        "Timing and availability",
+        "Minimal strategy",
+        "Cost and risk model",
+        "Evaluation",
+        "Robustness plan",
+        "Predeclared PASS/REJECT rule",
+        "Change log",
+    ):
+        assert f"## {section}" in text or section in text, f"missing section: {section}"
+    assert "Amendments after results are observed invalidate" in text
+    assert "does not authorize live trading" in text
+
+
+def test_data_checklist_covers_timing_and_availability() -> None:
+    text = ARTIFACTS["data"].read_text()
+    for section in ("## A. Provenance", "## B. Quality checks", "## C. Timing and availability"):
+        assert section in text
+    assert "UNKNOWN" in text
+    assert "future function" in ARTIFACTS["preregistration"].read_text().lower()
+    assert "tradable" in text
+
+
+def test_run_manifest_requires_pins_and_verdict() -> None:
+    text = ARTIFACTS["manifest"].read_text()
+    for marker in (
+        "preregistration reference and sha256",
+        "repository sha256",
+        "random seeds",
+        "checksum of inputs",
+        "cost model applied",
+        "PASS / REJECT / INCONCLUSIVE",
+        "A run without a manifest is not evidence",
+    ):
+        assert marker in text, f"missing marker: {marker}"
+
+
+def test_cost_model_is_explicitly_unverified_by_default() -> None:
+    text = ARTIFACTS["costs"].read_text()
+    assert "PLACEHOLDER_UNVERIFIED" in text
+    for cost in (
+        "fees",
+        "funding",
+        "borrow",
+        "spread",
+        "slippage",
+        "impact",
+        "latency",
+        "partial fills",
+        "liquidation and ADL",
+        "roll costs",
+    ):
+        assert cost in text, f"missing cost category: {cost}"
+    assert "x2" in text
+    assert "does not authorize live trading" in text
+
+
+def test_evaluation_gate_requires_metrics_robustness_and_separation() -> None:
+    text = ARTIFACTS["gate"].read_text()
+    for metric in (
+        "total return",
+        "annualized return",
+        "annualized volatility",
+        "maximum drawdown",
+        "Sharpe",
+        "Calmar",
+        "win rate",
+        "profit factor",
+        "turnover",
+        "holding period",
+        "benchmark comparison",
+    ):
+        assert metric in text, f"missing metric: {metric}"
+    for rule in (
+        "lookahead",
+        "out-of-sample failure",
+        "data-mining risk",
+        "does not authorize",
+    ):
+        assert rule in text, f"missing rule: {rule}"
+    assert "train / test separation" in text
+    assert "walk-forward" in text
+
+
+def test_research_never_authorizes_live_trading() -> None:
+    for name, path in ARTIFACTS.items():
+        text = path.read_text()
+        assert "does not authorize live trading" in text, name

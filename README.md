@@ -74,7 +74,8 @@ identity checks, and a final dry-run `forceexit all`.
 
 - `user_data/strategies/`: GMAQ strategy logic
 - `user_data/config.json`: credential-free dry-run configuration
-- `research/`: strategy research scope and future research artifacts
+- `research/`: preregistration, data availability, run manifests, cost model
+  baseline, and PASS/REJECT evaluation gate for future strategy research
 - `configs/`: live-readiness policy and planning
 - `tests/`: focused configuration and custom-behavior contracts
 - `scripts/`: safe product and reliability commands
