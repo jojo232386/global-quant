@@ -95,8 +95,24 @@ authorized read-only session verifies them.
 Walks the public order book to model market-order fills (VWAP, slippage,
 partial fills), spread, funding carry, and liquidation distance under depth,
 spread, latency, and funding stress. See `configs/EXECUTION_COST_MODEL.md`.
-Taker fee and maintenance margin are placeholders until authenticated
-account verification; the snapshot does not authorize live trading.
+Taker fee (5 bps) and tier-1 MMR (0.4%) were verified on the account on
+2026-08-16 via `scripts/gmaq-auth-preflight` (authorized read-only session);
+the snapshot itself does not authorize live trading.
+
+## Research commands
+
+```sh
+./scripts/gmaq-fetch-klines --start 2026-02-01 --end 2026-08-16 --out user_data/data/x.jsonl
+./scripts/gmaq-research-backtest --rule momentum           # single-asset studies
+./scripts/gmaq-fetch-universe && ./scripts/gmaq-fetch-multi --start ... --end ...
+./scripts/gmaq-research-crosssection --rule funding_crosssection
+./scripts/gmaq-fetch-pit --start ... --end ...             # point-in-time universe
+./scripts/gmaq-research-pit --rule funding_crosssection
+```
+
+Every study lives under `research/backtests/` with a locked
+preregistration, data checklist, run manifest, results, and an honest
+PASS/REJECT verdict. Research results do not authorize live trading.
 
 ## Validate
 
