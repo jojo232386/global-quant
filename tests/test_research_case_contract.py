@@ -125,6 +125,98 @@ def test_max_drawdown_and_benchmark() -> None:
     assert b["gross_return"] == 0.2
 
 
+def test_rule_registry_covers_all_preregistered_studies() -> None:
+    module = load_backtest()
+    assert set(module.RULE_FUNCTIONS.keys()) == {
+        "momentum",
+        "mean_reversion",
+        "breakout",
+        "session",
+        "volfiltered_momentum",
+    }
+    for study in module.RULE_STUDY.values():
+        assert (ROOT / "research" / "backtests" / study).is_dir(), study
+
+
+def _ladder(n=100, step=1.0, start=100.0):
+    return {
+        "ts": [i * 900_000 for i in range(n)],
+        "open": [start + i * step for i in range(n)],
+        "high": [start + 1.0 + i * step for i in range(n)],
+        "low": [start - 1.0 + i * step for i in range(n)],
+        "close": [start + 0.5 + i * step for i in range(n)],
+    }
+
+
+def test_mean_reversion_triggers_on_falling_and_not_rising() -> None:
+    module = load_backtest()
+    falling = _ladder(step=-1.0)
+    assert module.run_mean_reversion(falling, 0.0), "falling ladder must trigger mean reversion"
+    rising = _ladder(step=1.0)
+    assert module.run_mean_reversion(rising, 0.0) == []
+
+
+def test_breakout_triggers_above_prior_high() -> None:
+    module = load_backtest()
+    n = 60
+    bars = {
+        "ts": [i * 900_000 for i in range(n)],
+        "open": [100.0] * n,
+        "high": [101.0] * n,
+        "low": [99.0] * n,
+        "close": [100.0] * n,
+    }
+    bars["close"][30] = 105.0  # above max(high[6..29]) = 101
+    trades = module.run_breakout(bars, 0.0)
+    assert trades and trades[0]["entry_ts_ms"] == bars["ts"][31]
+
+
+def test_session_rule_only_enters_inside_utc_window() -> None:
+    module = load_backtest()
+    module.PARAMS["session_start_hour"] = 0
+    module.PARAMS["session_end_hour"] = 8
+    # Bars aligned to 2026-02-01T00:00Z, 15m apart.
+    n = 200
+    base = 1769904000000
+    bars = {
+        "ts": [base + i * 900_000 for i in range(n)],
+        "open": [100.0 + 0.01 * i for i in range(n)],
+        "high": [101.0 + 0.01 * i for i in range(n)],
+        "low": [99.0 + 0.01 * i for i in range(n)],
+        "close": [100.5 + 0.01 * i for i in range(n)],
+    }
+    trades = module.run_session(bars, 0.0)
+    assert trades
+    for trade in trades:
+        hour = (trade["entry_ts_ms"] // 3_600_000) % 24
+        assert 0 <= hour < 8, hour
+
+
+def test_volatility_filter_helpers() -> None:
+    module = load_backtest()
+    returns = [0.0, 0.01, -0.01, 0.0, 0.02, -0.02, 0.0, 0.0]
+    vols = module.rolling_volatility(returns, 3)
+    assert vols[3] > 0
+    assert module.vol_below_median(vols, 3, 2) is False  # index < window
+    # Construct: early high vol, later low vol -> later values below median.
+    noisy = [0.0] + [0.05, -0.05, 0.04, -0.04, 0.06, -0.06] + [0.0001] * 20
+    vols2 = module.rolling_volatility(noisy, 4)
+    idx = 10
+    assert module.vol_below_median(vols2, idx, 6) is True
+
+
+def test_all_studies_artifacts_complete_and_verdict_consistent() -> None:
+    module = load_backtest()
+    for study in module.RULE_STUDY.values():
+        d = ROOT / "research" / "backtests" / study
+        for name in ("preregistration.md", "data-checklist.md", "results.json", "manifest.md", "verdict.md"):
+            assert (d / name).is_file(), f"{study}/{name} missing"
+        results = json.loads((d / "results.json").read_text())
+        expected, _ = module.verdict(results["out_of_sample"], results["out_of_sample"]["stress"], results["train"])
+        assert results["verdict"] in ("PASS", "REJECT")
+        assert results["verdict"] == expected, study
+
+
 def test_results_verdict_is_consistent_with_rule() -> None:
     module = load_backtest()
     results = json.loads((STUDY / "results.json").read_text())

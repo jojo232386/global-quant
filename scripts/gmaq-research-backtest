@@ -29,6 +29,11 @@ PARAMS = {
     "cost_bps_per_side": 15.0,       # 5 bps taker placeholder + 10 bps conservative slippage
     "stress_cost_bps_per_side": 30.0,  # 2x cost stress
     "stress_funding_buffer_bps": 1.0,  # flat round-trip buffer per data checklist
+    "breakout_lookback": 24,
+    "session_start_hour": 0,
+    "session_end_hour": 8,
+    "vol_window": 24,
+    "vol_median_window": 96,
 }
 
 
@@ -91,6 +96,142 @@ def run_rule(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, para
         in_position_until = exit_bar
         index = exit_bar + 1
     return trades
+
+
+def long_trade(bars: dict, entry_index: int, hold: int, stoploss: float, notional: float, cost_per_side: float, funding_buffer: float) -> dict | None:
+    entry = bars["open"][entry_index]
+    if entry <= 0:
+        return None
+    exit_bar = entry_index + hold
+    stop_price = entry * (1 - stoploss)
+    exit_price = bars["close"][exit_bar]
+    if bars["low"][exit_bar] <= stop_price:
+        exit_price = stop_price
+    gross = exit_price / entry
+    net = gross * (1 - cost_per_side) / (1 + cost_per_side) - 1 - funding_buffer
+    return {
+        "entry_ts_ms": bars["ts"][entry_index],
+        "exit_ts_ms": bars["ts"][exit_bar],
+        "entry": round(entry, 8),
+        "exit": round(exit_price, 8),
+        "net_return": net,
+        "notional": notional,
+    }
+
+
+def advance(bars: dict, i: int, in_position_until: int, lookback: int, hold: int, cost: float, buffer: float, params: dict, allow_entry) -> tuple[int, int, dict | None]:
+    """Shared loop step: skip while in position; ask allow_entry(index);
+    enter at open[i+1] and hold `hold` bars."""
+    n = len(bars["ts"])
+    if i <= in_position_until:
+        return i + 1, in_position_until, None
+    if i + hold + 1 >= n:
+        return n, in_position_until, None
+    if not allow_entry(i):
+        return i + 1, in_position_until, None
+    trade = long_trade(bars, i + 1, hold, params["stoploss_bps"] / 10_000, params["notional"], cost, buffer)
+    if trade is None:
+        return i + 1, in_position_until, None
+    return i + 1 + hold + 1, i + 1 + hold, trade
+
+
+def run_mean_reversion(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS) -> list[dict]:
+    lookback = params["lookback_bars"]
+    trades = []
+    in_position_until = -1
+    i = lookback
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return bars["close"][index] < bars["close"][index - lookback]
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def run_breakout(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS) -> list[dict]:
+    lookback = params["breakout_lookback"]
+    trades = []
+    in_position_until = -1
+    i = lookback
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return bars["close"][index] > max(bars["high"][index - lookback : index], default=0.0)
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def run_session(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS) -> list[dict]:
+    start_hour = params["session_start_hour"]
+    end_hour = params["session_end_hour"]
+    trades = []
+    in_position_until = -1
+    i = 1
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            hour = (bars["ts"][index + 1] // 3_600_000) % 24
+            return start_hour <= hour < end_hour
+        i, in_position_until, trade = advance(bars, i, in_position_until, 1, params["hold_bars"], cost_per_side, funding_buffer, params, allow)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def rolling_volatility(returns: list[float], window: int) -> list[float]:
+    vols = [0.0] * len(returns)
+    for i in range(window, len(returns)):
+        sample = returns[i - window : i]
+        mean = statistics.mean(sample)
+        variance = statistics.mean((r - mean) ** 2 for r in sample)
+        vols[i] = math.sqrt(variance)
+    return vols
+
+
+def vol_below_median(vols: list[float], index: int, window: int) -> bool:
+    if index < window:
+        return False
+    sample = [v for v in vols[index - window : index]]
+    return vols[index] < statistics.median(sample)
+
+
+def run_volfiltered_momentum(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS) -> list[dict]:
+    lookback = params["lookback_bars"]
+    closes = bars["close"]
+    returns = [0.0] + [closes[i] / closes[i - 1] - 1 if closes[i - 1] > 0 else 0.0 for i in range(1, len(closes))]
+    vols = rolling_volatility(returns, params["vol_window"])
+    trades = []
+    in_position_until = -1
+    i = max(lookback, params["vol_median_window"])
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return closes[index] > closes[index - lookback] and vol_below_median(vols, index, params["vol_median_window"])
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+RULE_FUNCTIONS = {
+    "momentum": None,  # run_rule below (kept for backward compatibility)
+    "mean_reversion": run_mean_reversion,
+    "breakout": run_breakout,
+    "session": run_session,
+    "volfiltered_momentum": run_volfiltered_momentum,
+}
+
+RULE_STUDY = {
+    "momentum": "study-2026-08-16-eth15m-momentum",
+    "mean_reversion": "study-2026-08-16-eth15m-mean-reversion",
+    "breakout": "study-2026-08-16-eth15m-breakout",
+    "session": "study-2026-08-16-eth15m-session",
+    "volfiltered_momentum": "study-2026-08-16-eth15m-volfiltered-momentum",
+}
 
 
 def daily_equity(trades: list[dict], initial: float) -> tuple[list[int], list[float]]:
@@ -203,17 +344,21 @@ def verdict(oos_metrics: dict, oos_stress_metrics: dict, train_metrics: dict) ->
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="gmaq-research-backtest", description="Run the preregistered momentum study")
+    parser = argparse.ArgumentParser(prog="gmaq-research-backtest", description="Run a preregistered study through the gate")
     parser.add_argument("--data", default=str(ROOT / "user_data" / "data" / "ethusdt-15m-2026-02-01-2026-08-16.jsonl"))
+    parser.add_argument("--rule", default="momentum", choices=sorted(RULE_FUNCTIONS.keys()))
     args = parser.parse_args(argv)
+
+    rule_fn = run_rule if args.rule == "momentum" else RULE_FUNCTIONS[args.rule]
+    study_dir = ROOT / "research" / "backtests" / RULE_STUDY[args.rule]
 
     bars = to_floats(load_bars(pathlib.Path(args.data)))
     c = PARAMS["cost_bps_per_side"] / 10_000
     stress_c = PARAMS["stress_cost_bps_per_side"] / 10_000
     stress_buffer = PARAMS["stress_funding_buffer_bps"] / 10_000
 
-    baseline_trades = run_rule(bars, c)
-    stress_trades = run_rule(bars, stress_c, funding_buffer=stress_buffer)
+    baseline_trades = rule_fn(bars, c)
+    stress_trades = rule_fn(bars, stress_c, funding_buffer=stress_buffer)
 
     train_base, oos_base = split_trades(baseline_trades, SPLIT_UTC_MS)
     train_stress, oos_stress = split_trades(stress_trades, SPLIT_UTC_MS)
@@ -229,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     verdict_name, conditions = verdict(oos_metrics, oos_stress_metrics, train_metrics)
 
     result = {
-        "study_id": "study-2026-08-16-eth15m-momentum",
+        "study_id": RULE_STUDY[args.rule],
         "params": PARAMS,
         "split_utc_ms": SPLIT_UTC_MS,
         "bars": len(bars["ts"]),
@@ -240,7 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         "verdict_conditions": conditions,
         "note": "This study does not authorize live trading. Taker fee is PLACEHOLDER_UNVERIFIED.",
     }
-    out = STUDY / "results.json"
+    out = study_dir / "results.json"
+    study_dir.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
