@@ -1,4 +1,5 @@
 import importlib.util
+import http.client
 import json
 import pathlib
 from importlib.machinery import SourceFileLoader
@@ -137,6 +138,17 @@ def test_zero_proof_requires_rest_db_match_and_no_unknowns() -> None:
     result["unknown_outcomes"] = []
     result["open_orders"] = 1
     assert control.snapshot_is_zero_proof(result) is False
+
+
+def test_api_disconnect_is_fail_closed_instead_of_crashing(monkeypatch) -> None:
+    control = load_control("gmaq_control_disconnect_test")
+
+    def disconnect(*args, **kwargs):
+        raise http.client.RemoteDisconnected("peer closed without a response")
+
+    monkeypatch.setattr(control.urllib.request, "urlopen", disconnect)
+    assert control.api_request("/api/v1/ping", {}, "opaque") == (0, None)
+    assert control.api_post("/api/v1/stopentry", "opaque") == (0, None)
 
 
 def test_reconcile_mismatch_disarms_and_writes_real_top_level_verdict(tmp_path, monkeypatch) -> None:

@@ -1,6 +1,7 @@
 .DS_Store
 .idea/
 .pytest_cache/
+.playwright-cli/
 .ruff_cache/
 .venv/
 __pycache__/
@@ -8,6 +9,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+output/playwright/
 
 # Freqtrade runtime state is local. The empty directories remain versioned.
 user_data/data/*

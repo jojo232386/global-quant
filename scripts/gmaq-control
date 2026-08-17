@@ -544,7 +544,7 @@ def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, ob
             body = response.read().decode()
     except urllib.error.HTTPError as error:
         return error.code, None
-    except urllib.error.URLError:
+    except (urllib.error.URLError, OSError):
         return 0, None
     try:
         return 200, json.loads(body)
@@ -578,7 +578,7 @@ def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, o
             return response.status, json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
         return error.code, None
-    except (urllib.error.URLError, json.JSONDecodeError):
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return 0, None
 
 
