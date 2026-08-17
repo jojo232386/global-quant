@@ -7,7 +7,8 @@ deployment.
 ## Current stack
 
 - Freqtrade 2026.7 as the single active trading runtime
-- FreqUI as the operational interface
+- GMAQ Control Room as the default read-only operator interface
+- FreqUI as the lower-level runtime interface
 - Binance USD-M Futures
 - Docker and Compose, with Colima supported on macOS
 
@@ -15,7 +16,8 @@ deployment.
 
 - Binance public market data and dry-run trading verified
 - `ETH/USDT:USDT`, isolated margin, 1x leverage
-- FreqUI verified on `http://127.0.0.1:8080`
+- GMAQ Control Room uses `http://127.0.0.1:8090`; the isolated FreqUI uses
+  `http://127.0.0.1:8082`
 - persistence, restart recovery, and stopped-database backup/restore verified
 - live credentials are not configured or stored in this repository
 - live trading is not enabled
@@ -31,8 +33,12 @@ Requirements: Docker with Compose, plus Python 3.12 or newer for local tests.
 ```
 
 The first start creates random local FreqUI/API credentials in the ignored
-`.env` file. The values stay on the local machine. Open
-<http://127.0.0.1:8080> after startup.
+`.env` file. The values stay on the local machine. Start the read-only Control
+Room and open <http://127.0.0.1:8090>:
+
+```sh
+./scripts/gmaq-ui start
+```
 
 Useful commands:
 
@@ -41,7 +47,14 @@ Useful commands:
 ./scripts/gmaq logs
 ./scripts/gmaq restart
 ./scripts/gmaq down
+./scripts/gmaq-ui status
+./scripts/gmaq-ui stop
 ```
+
+The Control Room is localhost-only and exposes observation pages for runtime,
+risk reconciliation, research evidence, and readiness blockers. Every mutating
+HTTP method is rejected. It has no arm, order, exit, pause, or kill action and
+does not replace explicit authorization or the control-plane commands.
 
 ## Safety
 
@@ -145,6 +158,7 @@ identity checks, and a final dry-run `forceexit all`.
 - `configs/`: live-readiness policy, control-plane spec, and planning
 - `tests/`: focused configuration and custom-behavior contracts
 - `scripts/`: safe product, reliability, and control-plane commands
+- `control_room/`: localhost-only read-only operator UI and status API
 
 Earlier architecture remains recoverable from Git history and the published
 historical tag; it is not part of the active runtime.

@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Operate the localhost-only, read-only GMAQ Control Room."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+import webbrowser
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+AUDIT_DIR = ROOT / "user_data" / "audit"
+PID_PATH = AUDIT_DIR / "control-room.pid"
+LOG_PATH = AUDIT_DIR / "control-room.log"
+HOST = "127.0.0.1"
+PORT = 8090
+URL = f"http://{HOST}:{PORT}"
+
+
+def read_pid() -> int | None:
+    try:
+        value = int(PID_PATH.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return value if value > 1 else None
+
+
+def process_command(pid: int) -> str | None:
+    process = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "command="],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    return process.stdout.strip() if process.returncode == 0 else None
+
+
+def owned_process(pid: int) -> bool:
+    command = process_command(pid)
+    return bool(command and "control_room.server" in command and str(ROOT) in command)
+
+
+def owns_listener(pid: int) -> bool:
+    try:
+        process = subprocess.run(
+            ["lsof", "-nP", "-a", "-p", str(pid), f"-iTCP@{HOST}:{PORT}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return process.returncode == 0 and f"{HOST}:{PORT}" in process.stdout
+
+
+def probe(timeout: float = 1.0) -> dict | None:
+    request = urllib.request.Request(
+        f"{URL}/api/snapshot",
+        headers={"Host": f"{HOST}:{PORT}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read())
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) and payload.get("read_only") is True else None
+
+
+def server_reachable(timeout: float = 1.0) -> bool:
+    try:
+        with urllib.request.urlopen(f"{URL}/", timeout=timeout) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def status() -> int:
+    pid = read_pid()
+    snapshot = probe()
+    running = bool(pid and owned_process(pid) and owns_listener(pid))
+    print(
+        json.dumps(
+            {
+                "ok": running,
+                "verdict": "RUNNING_READ_ONLY" if running else "STOPPED",
+                "url": URL,
+                "pid": pid if running else None,
+                "actions_enabled": False,
+                "snapshot_reachable": snapshot is not None,
+                "gate_state": snapshot.get("gate", {}).get("state") if snapshot else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0 if running else 1
+
+
+def start(open_browser: bool = False) -> int:
+    pid = read_pid()
+    if pid and owned_process(pid) and owns_listener(pid):
+        if open_browser:
+            webbrowser.open(URL)
+        return status()
+    if PID_PATH.exists():
+        PID_PATH.unlink()
+
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    log_handle = LOG_PATH.open("ab")
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(ROOT / "control_room" / "server.py"),
+            "--host",
+            HOST,
+            "--port",
+            str(PORT),
+        ],
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    log_handle.close()
+    PID_PATH.write_text(f"{process.pid}\n")
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            PID_PATH.unlink(missing_ok=True)
+            print(json.dumps({"ok": False, "verdict": "START_FAILED", "log": str(LOG_PATH)}))
+            return 1
+        if owned_process(process.pid) and owns_listener(process.pid):
+            break
+        time.sleep(0.25)
+    else:
+        if owned_process(process.pid):
+            os.kill(process.pid, signal.SIGTERM)
+        PID_PATH.unlink(missing_ok=True)
+        print(json.dumps({"ok": False, "verdict": "START_TIMEOUT", "log": str(LOG_PATH)}))
+        return 1
+
+    if open_browser:
+        webbrowser.open(URL)
+    return status()
+
+
+def stop() -> int:
+    pid = read_pid()
+    if pid is None:
+        PID_PATH.unlink(missing_ok=True)
+        print(json.dumps({"ok": True, "verdict": "ALREADY_STOPPED"}))
+        return 0
+    if not owned_process(pid):
+        print(json.dumps({"ok": False, "verdict": "PID_OWNERSHIP_MISMATCH", "pid": pid}))
+        return 1
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and process_command(pid):
+        time.sleep(0.1)
+    PID_PATH.unlink(missing_ok=True)
+    print(json.dumps({"ok": True, "verdict": "STOPPED", "pid": pid}))
+    return 0
+
+
+def serve() -> int:
+    os.chdir(ROOT)
+    sys.path.insert(0, str(ROOT))
+    from control_room.server import serve as serve_control_room
+
+    serve_control_room(HOST, PORT)
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="GMAQ read-only Control Room")
+    parser.add_argument("command", choices=("start", "stop", "status", "open", "serve"))
+    args = parser.parse_args()
+    if args.command == "start":
+        return start()
+    if args.command == "open":
+        return start(open_browser=True)
+    if args.command == "stop":
+        return stop()
+    if args.command == "status":
+        return status()
+    return serve()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -22,6 +22,7 @@ user_data/plot/
 user_data/audit/*.jsonl
 user_data/audit/*.json
 user_data/audit/.manifest.lock
+user_data/audit/control-room.*
 !user_data/audit/.gitkeep
 
 # WorkBuddy workspace-local data (daily logs, memory) is never committed.
