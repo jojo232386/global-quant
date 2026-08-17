@@ -12,8 +12,11 @@ All secrets stay inside environment variables and are never printed.
 """
 
 import argparse
+from dataclasses import asdict, dataclass
+import fcntl
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -27,10 +30,12 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "user_data" / "config.json"
+COMPOSE_PATH = ROOT / "docker-compose.yml"
 STRATEGY_PATH = ROOT / "user_data" / "strategies" / "LiveExecutionCanaryStrategy.py"
 ENV_PATH = ROOT / ".env"
 AUDIT_DIR = ROOT / "user_data" / "audit"
 AUDIT_PATH = AUDIT_DIR / "manifest.jsonl"
+AUDIT_LOCK_PATH = AUDIT_DIR / ".manifest.lock"
 STATE_PATH = AUDIT_DIR / "state.json"
 BINDING_PATH = AUDIT_DIR / "runtime-binding.json"
 
@@ -180,6 +185,11 @@ def dispatch_alert(event: str, verdict: str, **payload) -> dict:
             "channels": record["channels_configured"],
             "delivered": record["delivered"],
         },
+        verdict=(
+            "DELIVERED"
+            if record["sent"]
+            else ("NO_CHANNELS" if not record["channels_configured"] else "DELIVERY_FAILED")
+        ),
     )
     return record
 
@@ -187,14 +197,20 @@ def dispatch_alert(event: str, verdict: str, **payload) -> dict:
 def read_audit_chain() -> list[dict]:
     if not AUDIT_PATH.exists():
         return []
-    return [json.loads(line) for line in AUDIT_PATH.read_text().splitlines() if line.strip()]
+    try:
+        chain = [json.loads(line) for line in AUDIT_PATH.read_text().splitlines() if line.strip()]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("audit journal is corrupt or unreadable") from error
+    if not all(isinstance(record, dict) for record in chain):
+        raise ValueError("audit journal contains a non-object record")
+    return chain
 
 
 def audit_chain_valid(chain: list[dict]) -> tuple[bool, str]:
     for index, line in enumerate(chain):
-        if index == 0:
-            continue
-        expected = sha256_text(serialize(chain[index - 1]))
+        if line.get("seq") != index + 1:
+            return False, f"invalid sequence at record {line.get('seq')}"
+        expected = "" if index == 0 else sha256_text(serialize(chain[index - 1]))
         if line.get("prev_sha") != expected:
             return False, f"chain broken at record {line.get('seq')}"
     return True, "chain ok"
@@ -202,23 +218,36 @@ def audit_chain_valid(chain: list[dict]) -> tuple[bool, str]:
 
 def append_audit(event: str, actor: str, refs: dict | None = None, verdict: str = "OK") -> dict:
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-    chain = read_audit_chain()
-    valid, reason = audit_chain_valid(chain)
-    if chain and not valid:
-        return fail(f"refusing to append: {reason}")
-    prev_sha = sha256_text(serialize(chain[-1])) if chain else ""
-    line = {
-        "seq": (chain[-1]["seq"] + 1) if chain else 1,
-        "ts_utc": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-        "actor": actor,
-        "event": event,
-        "verdict": verdict,
-        "refs": refs or {},
-        "prev_sha": prev_sha,
-    }
-    with AUDIT_PATH.open("a") as handle:
-        handle.write(serialize(line) + "\n")
-    return ok("APPENDED", seq=line["seq"], record_sha=sha256_text(serialize(line)))
+    with AUDIT_LOCK_PATH.open("a+") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                chain = read_audit_chain()
+            except ValueError as error:
+                return fail(f"refusing to append: {error}")
+            valid, reason = audit_chain_valid(chain)
+            if chain and not valid:
+                return fail(f"refusing to append: {reason}")
+            prev_sha = sha256_text(serialize(chain[-1])) if chain else ""
+            line = {
+                "seq": (chain[-1]["seq"] + 1) if chain else 1,
+                "ts_utc": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+                "actor": actor,
+                "event": event,
+                "verdict": verdict,
+                "refs": {**audit_identity_context(), **(refs or {})},
+                "prev_sha": prev_sha,
+            }
+            encoded = (serialize(line) + "\n").encode("utf-8")
+            descriptor = os.open(AUDIT_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(descriptor, encoded)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            return ok("APPENDED", seq=line["seq"], record_sha=sha256_text(serialize(line)))
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def read_state() -> dict:
@@ -233,8 +262,19 @@ def read_state() -> dict:
 def write_json_atomic(path: pathlib.Path, payload: dict) -> None:
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        encoded = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+        os.write(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     os.replace(temporary, path)
+    directory_descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
 
 
 def write_state(state: str, **extra) -> None:
@@ -254,6 +294,34 @@ def read_object_strict(path: pathlib.Path, label: str) -> tuple[dict | None, str
     if not isinstance(value, dict):
         return None, f"{label} is not an object"
     return value, None
+
+
+def audit_identity_context() -> dict:
+    context = {
+        "candidate_sha": None,
+        "tree_sha": None,
+        "config_sha256": None,
+        "image_digest": None,
+        "run_id": None,
+        "environment": None,
+        "gate_state": None,
+    }
+    binding, _ = read_object_strict(BINDING_PATH, "runtime binding")
+    if binding:
+        for key in ("candidate_sha", "config_sha256", "run_id", "environment"):
+            context[key] = binding.get(key)
+    state, _ = read_object_strict(STATE_PATH, "state")
+    if state:
+        context["gate_state"] = state.get("state")
+    context["tree_sha"] = git_text("rev-parse", "HEAD^{tree}")
+    try:
+        compose_text = COMPOSE_PATH.read_text()
+    except (OSError, UnicodeDecodeError):
+        compose_text = ""
+    match = re.search(r"@(?P<digest>sha256:[0-9a-f]{64})", compose_text)
+    if match:
+        context["image_digest"] = match.group("digest")
+    return context
 
 
 def git_text(*args: str) -> str | None:
@@ -533,7 +601,8 @@ def bot_last_process_age_s(token: str) -> float | None:
     return max(0.0, time.time() - float(last_ts))
 
 
-def bot_open_orders(token: str) -> list | None:
+def bot_open_trades(token: str) -> list | None:
+    """Freqtrade /status is the open-trades view, with nested orders."""
     code, body = api_request("/api/v1/status", {}, token)
     if code != 200 or not isinstance(body, list):
         return None
@@ -549,6 +618,325 @@ def bot_trades(token: str) -> list | None:
     if isinstance(body, list):
         return body
     return None
+
+
+@dataclass(frozen=True)
+class TradeSnapshot:
+    trade_id: int
+    pair: str
+    is_open: bool
+    is_short: bool
+    amount: float
+    open_rate: float
+
+
+@dataclass(frozen=True)
+class OrderSnapshot:
+    order_id: str
+    trade_id: int
+    pair: str
+    side: str
+    status: str
+    is_open: bool
+    amount: float
+    filled: float | None
+    remaining: float | None
+    price: float
+
+
+VALID_ORDER_STATUSES = {
+    "open",
+    "new",
+    "partially_filled",
+    "partial",
+    "closed",
+    "filled",
+    "canceled",
+    "cancelled",
+    "expired",
+    "rejected",
+}
+
+
+def finite_float(value: object, field: str, *, allow_none: bool = False) -> float | None:
+    if value is None and allow_none:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field} is not numeric")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} is not numeric") from error
+    if not math.isfinite(number):
+        raise ValueError(f"{field} is not finite")
+    if number < 0:
+        raise ValueError(f"{field} is negative")
+    return number
+
+
+def normalize_rest_snapshot(payload: object) -> tuple[list[TradeSnapshot], list[OrderSnapshot]]:
+    if not isinstance(payload, list):
+        raise ValueError("REST status payload is not a list")
+    trades: list[TradeSnapshot] = []
+    orders: list[OrderSnapshot] = []
+    trade_ids: set[int] = set()
+    order_ids: set[str] = set()
+    for raw_trade in payload:
+        if not isinstance(raw_trade, dict):
+            raise ValueError("REST trade is not an object")
+        trade_id = raw_trade.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool):
+            raise ValueError("REST trade_id is invalid")
+        if trade_id in trade_ids:
+            raise ValueError(f"duplicate REST trade_id {trade_id}")
+        trade_ids.add(trade_id)
+        if raw_trade.get("is_open") is not True:
+            raise ValueError(f"REST status returned non-open trade {trade_id}")
+        pair = raw_trade.get("pair")
+        if not isinstance(pair, str) or not pair:
+            raise ValueError(f"REST trade {trade_id} pair is invalid")
+        trade = TradeSnapshot(
+            trade_id=trade_id,
+            pair=pair,
+            is_open=True,
+            is_short=bool(raw_trade.get("is_short", False)),
+            amount=float(finite_float(raw_trade.get("amount"), "trade.amount")),
+            open_rate=float(finite_float(raw_trade.get("open_rate"), "trade.open_rate")),
+        )
+        trades.append(trade)
+
+        raw_orders = raw_trade.get("orders", [])
+        if not isinstance(raw_orders, list):
+            raise ValueError(f"REST trade {trade_id} orders is not a list")
+        for raw_order in raw_orders:
+            if not isinstance(raw_order, dict):
+                raise ValueError(f"REST trade {trade_id} order is not an object")
+            order_id = raw_order.get("order_id")
+            if not isinstance(order_id, str) or not order_id:
+                raise ValueError(f"REST trade {trade_id} order_id is invalid")
+            if order_id in order_ids:
+                raise ValueError(f"duplicate REST order_id {order_id}")
+            order_ids.add(order_id)
+            status = str(raw_order.get("status", "")).lower()
+            if status not in VALID_ORDER_STATUSES:
+                raise ValueError(f"REST order {order_id} status is unknown: {status}")
+            side = raw_order.get("ft_order_side")
+            if not isinstance(side, str) or not side:
+                raise ValueError(f"REST order {order_id} side is invalid")
+            is_open = raw_order.get("is_open")
+            if not isinstance(is_open, bool):
+                raise ValueError(f"REST order {order_id} is_open is invalid")
+            orders.append(
+                OrderSnapshot(
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    pair=str(raw_order.get("pair") or pair),
+                    side=side,
+                    status=status,
+                    is_open=is_open,
+                    amount=float(finite_float(raw_order.get("amount"), "order.amount")),
+                    filled=finite_float(raw_order.get("filled"), "order.filled", allow_none=True),
+                    remaining=finite_float(raw_order.get("remaining"), "order.remaining", allow_none=True),
+                    price=float(finite_float(raw_order.get("safe_price"), "order.safe_price")),
+                )
+            )
+    return sorted(trades, key=lambda item: item.trade_id), sorted(orders, key=lambda item: item.order_id)
+
+
+def normalize_db_snapshot(payload: object) -> tuple[list[TradeSnapshot], list[OrderSnapshot]]:
+    if not isinstance(payload, dict):
+        raise ValueError("DB snapshot is not an object")
+    raw_trades = payload.get("trades")
+    raw_orders = payload.get("orders")
+    if not isinstance(raw_trades, list) or not isinstance(raw_orders, list):
+        raise ValueError("DB snapshot trades/orders are invalid")
+    trades: list[TradeSnapshot] = []
+    orders: list[OrderSnapshot] = []
+    trade_ids: set[int] = set()
+    order_ids: set[str] = set()
+    for raw_trade in raw_trades:
+        if not isinstance(raw_trade, dict):
+            raise ValueError("DB trade is not an object")
+        trade_id = raw_trade.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool) or trade_id in trade_ids:
+            raise ValueError("DB trade_id is invalid or duplicate")
+        trade_ids.add(trade_id)
+        is_open = raw_trade.get("is_open")
+        if not isinstance(is_open, bool):
+            raise ValueError(f"DB trade {trade_id} is_open is invalid")
+        trades.append(
+            TradeSnapshot(
+                trade_id=trade_id,
+                pair=str(raw_trade.get("pair", "")),
+                is_open=is_open,
+                is_short=bool(raw_trade.get("is_short", False)),
+                amount=float(finite_float(raw_trade.get("amount"), "db.trade.amount")),
+                open_rate=float(finite_float(raw_trade.get("open_rate"), "db.trade.open_rate")),
+            )
+        )
+    for raw_order in raw_orders:
+        if not isinstance(raw_order, dict):
+            raise ValueError("DB order is not an object")
+        order_id = raw_order.get("order_id")
+        if not isinstance(order_id, str) or not order_id or order_id in order_ids:
+            raise ValueError("DB order_id is invalid or duplicate")
+        order_ids.add(order_id)
+        trade_id = raw_order.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool):
+            raise ValueError(f"DB order {order_id} trade_id is invalid")
+        status = str(raw_order.get("status", "")).lower()
+        if status not in VALID_ORDER_STATUSES:
+            raise ValueError(f"DB order {order_id} status is unknown: {status}")
+        is_open = raw_order.get("is_open")
+        if not isinstance(is_open, bool):
+            raise ValueError(f"DB order {order_id} is_open is invalid")
+        side = raw_order.get("side")
+        if not isinstance(side, str) or not side:
+            raise ValueError(f"DB order {order_id} side is invalid")
+        orders.append(
+            OrderSnapshot(
+                order_id=order_id,
+                trade_id=trade_id,
+                pair=str(raw_order.get("pair", "")),
+                side=side,
+                status=status,
+                is_open=is_open,
+                amount=float(finite_float(raw_order.get("amount"), "db.order.amount")),
+                filled=finite_float(raw_order.get("filled"), "db.order.filled", allow_none=True),
+                remaining=finite_float(raw_order.get("remaining"), "db.order.remaining", allow_none=True),
+                price=float(finite_float(raw_order.get("price"), "db.order.price")),
+            )
+        )
+    return sorted(trades, key=lambda item: item.trade_id), sorted(orders, key=lambda item: item.order_id)
+
+
+DB_SNAPSHOT_PROGRAM = r'''import json
+import sqlite3
+
+connection = sqlite3.connect("file:/freqtrade/runtime/tradesv3.dryrun.sqlite?mode=ro", uri=True)
+connection.row_factory = sqlite3.Row
+trades = [
+    dict(row)
+    for row in connection.execute(
+        "select id as trade_id, pair, is_open, is_short, amount, open_rate "
+        "from trades where is_open = 1 order by id"
+    )
+]
+orders = [
+    dict(row)
+    for row in connection.execute(
+        "select o.order_id, o.ft_trade_id as trade_id, o.ft_pair as pair, "
+        "o.ft_order_side as side, o.status, o.ft_is_open as is_open, "
+        "o.amount, o.filled, o.remaining, coalesce(o.average, o.price, o.ft_price) as price "
+        "from orders o left join trades t on t.id = o.ft_trade_id "
+        "where t.is_open = 1 or o.ft_is_open = 1 order by o.order_id"
+    )
+]
+connection.close()
+for item in trades + orders:
+    item["is_open"] = bool(item["is_open"])
+print(json.dumps({"trades": trades, "orders": orders}, sort_keys=True))
+'''
+
+
+def bot_db_snapshot(env: dict) -> dict | None:
+    container = env.get("GMAQ_CONTAINER_NAME", "")
+    if not container:
+        return None
+    try:
+        process = subprocess.run(
+            ["docker", "exec", container, "python", "-c", DB_SNAPSHOT_PROGRAM],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    try:
+        payload = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def snapshots_equal(left: object, right: object) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, float):
+        return math.isclose(left, right, rel_tol=1e-10, abs_tol=1e-12)
+    if hasattr(left, "__dataclass_fields__"):
+        return all(
+            snapshots_equal(getattr(left, field), getattr(right, field))
+            for field in left.__dataclass_fields__
+        )
+    return left == right
+
+
+def compare_snapshots(rest_payload: object, db_payload: object) -> dict:
+    try:
+        rest_trades, rest_orders = normalize_rest_snapshot(rest_payload)
+        db_trades, db_orders = normalize_db_snapshot(db_payload)
+    except ValueError as error:
+        return {
+            "verdict": "UNKNOWN",
+            "unknown_outcomes": [str(error)],
+            "open_trades": None,
+            "open_orders": None,
+            "partial_orders": None,
+            "matches_database": False,
+        }
+
+    mismatches = []
+    rest_trade_map = {item.trade_id: item for item in rest_trades}
+    db_trade_map = {item.trade_id: item for item in db_trades}
+    for trade_id in sorted(rest_trade_map.keys() | db_trade_map.keys()):
+        if trade_id not in rest_trade_map or trade_id not in db_trade_map:
+            mismatches.append(f"trade_identity:{trade_id}")
+        elif not snapshots_equal(rest_trade_map[trade_id], db_trade_map[trade_id]):
+            mismatches.append(f"trade_fields:{trade_id}")
+
+    rest_order_map = {item.order_id: item for item in rest_orders}
+    db_order_map = {item.order_id: item for item in db_orders}
+    for order_id in sorted(rest_order_map.keys() | db_order_map.keys()):
+        if order_id not in rest_order_map or order_id not in db_order_map:
+            mismatches.append(f"order_identity:{order_id}")
+        elif not snapshots_equal(rest_order_map[order_id], db_order_map[order_id]):
+            mismatches.append(f"order_fields:{order_id}")
+
+    open_orders = sum(item.is_open for item in rest_orders)
+    partial_orders = sum(
+        item.is_open and item.filled is not None and item.filled > 0 and (item.remaining or 0) > 0
+        for item in rest_orders
+    )
+    canonical = {
+        "rest_trades": [asdict(item) for item in rest_trades],
+        "rest_orders": [asdict(item) for item in rest_orders],
+        "db_trades": [asdict(item) for item in db_trades],
+        "db_orders": [asdict(item) for item in db_orders],
+    }
+    return {
+        "verdict": "MATCH" if not mismatches else "MISMATCH",
+        "unknown_outcomes": [],
+        "mismatches": mismatches,
+        "open_trades": len(rest_trades),
+        "open_orders": open_orders,
+        "partial_orders": partial_orders,
+        "matches_database": not mismatches,
+        "snapshot_sha256": sha256_text(serialize(canonical)),
+    }
+
+
+def snapshot_is_zero_proof(snapshot: dict) -> bool:
+    return (
+        snapshot.get("verdict") == "MATCH"
+        and snapshot.get("matches_database") is True
+        and snapshot.get("open_trades") == 0
+        and snapshot.get("open_orders") == 0
+        and snapshot.get("partial_orders") == 0
+        and snapshot.get("unknown_outcomes") == []
+    )
 
 
 def compose_command() -> list[str] | None:
@@ -594,8 +982,11 @@ def preflight() -> dict:
     check("protections", has_protections, f"missing: {missing}" if missing else "StoplossGuard+MaxDrawdown+CooldownPeriod")
     check("kill switch", compose_command() is not None, "docker compose present")
 
-    chain = read_audit_chain()
-    valid, reason = audit_chain_valid(chain)
+    try:
+        chain = read_audit_chain()
+        valid, reason = audit_chain_valid(chain)
+    except ValueError as error:
+        valid, reason = False, str(error)
     check("audit chain", valid, reason)
 
     try:
@@ -674,19 +1065,40 @@ def health() -> dict:
         }
     )
 
-    orders = bot_open_orders(token)
-    trades = bot_trades(token)
-    checks.append({"name": "open orders", "passed": orders is not None, "detail": len(orders) if orders is not None else "unknown"})
-    checks.append({"name": "trades", "passed": trades is not None, "detail": len(trades) if trades is not None else "unknown"})
+    open_trades = bot_open_trades(token)
+    nested_order_count = None
+    if open_trades is not None:
+        try:
+            _, nested_orders = normalize_rest_snapshot(open_trades)
+            nested_order_count = sum(item.is_open for item in nested_orders)
+        except ValueError:
+            open_trades = None
+    checks.append(
+        {
+            "name": "open trades",
+            "passed": open_trades is not None,
+            "detail": len(open_trades) if open_trades is not None else "unknown",
+        }
+    )
+    checks.append(
+        {
+            "name": "nested open orders",
+            "passed": nested_order_count is not None,
+            "detail": nested_order_count if nested_order_count is not None else "unknown",
+        }
+    )
 
     if all(item["passed"] for item in checks):
         verdict = "HEALTHY"
-    elif all(item["passed"] or item["name"] in ("open orders", "trades") for item in checks):
+    elif all(
+        item["passed"] or item["name"] in ("open trades", "nested open orders")
+        for item in checks
+    ):
         verdict = "UNHEALTHY"
     else:
         verdict = "UNKNOWN"
     result = ok(verdict, checks=checks)
-    append_audit("health", "gmaq-control", refs={"verdict": verdict})
+    append_audit("health", "gmaq-control", refs={"failed": [c["name"] for c in checks if not c["passed"]]}, verdict=verdict)
     if verdict in ALERT_FAIL_VERDICTS:
         dispatch_alert("health", verdict, checks=[c["name"] for c in checks if not c["passed"]])
     return result
@@ -696,50 +1108,68 @@ def reconcile() -> dict:
     env = read_env()
     token = api_login(env)
     if token is None:
-        return fail("unable to reach bot API")
-    orders = bot_open_orders(token)
-    trades = bot_trades(token)
-    if orders is None or trades is None:
-        return fail("bot API did not return orders/trades", verdict="UNKNOWN")
+        result = {
+            "ok": False,
+            "verdict": "UNKNOWN",
+            "error": "unable to authenticate to bot API",
+            "unknown_outcomes": ["bot_api_auth_unavailable"],
+        }
+        append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": result["unknown_outcomes"]}, verdict="UNKNOWN")
+        disarm("reconcile_unknown")
+        return result
+    rest_payload = bot_open_trades(token)
+    db_payload = bot_db_snapshot(env)
+    if rest_payload is None or db_payload is None:
+        unknown = []
+        if rest_payload is None:
+            unknown.append("rest_status_unavailable")
+        if db_payload is None:
+            unknown.append("database_snapshot_unavailable")
+        result = {
+            "ok": False,
+            "verdict": "UNKNOWN",
+            "unknown_outcomes": unknown,
+            "error": "unable to obtain complete REST/database snapshot",
+        }
+        append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": unknown}, verdict="UNKNOWN")
+        disarm("reconcile_unknown")
+        dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=unknown)
+        return result
 
-    order_ids = [item.get("order_id") for item in orders]
-    trade_ids = [item.get("trade_id") for item in trades]
-    unique_orders = len(order_ids) == len(set(order_ids))
-    unique_trades = len(trade_ids) == len(set(trade_ids))
-
-    chain = read_audit_chain()
-    last_counts = {}
-    for line in reversed(chain):
-        counts = line.get("refs", {}).get("counts")
-        if counts:
-            last_counts = counts
-            break
-
-    matches_journal = True
-    if last_counts:
-        matches_journal = (
-            last_counts.get("open_orders") == len(order_ids)
-            and last_counts.get("trades") == len(trade_ids)
-        )
-
-    verdict = "OK" if (unique_orders and unique_trades and matches_journal) else "MISMATCH"
-    result = ok(
-        verdict,
-        unique_orders=unique_orders,
-        unique_trades=unique_trades,
-        open_orders=len(order_ids),
-        trades=len(trade_ids),
-        matches_journal=matches_journal,
+    comparison = compare_snapshots(rest_payload, db_payload)
+    verdict = comparison["verdict"]
+    result = {"ok": verdict == "MATCH", **comparison}
+    append_audit(
+        "reconcile",
+        "gmaq-control",
+        refs={
+            "open_trades": comparison.get("open_trades"),
+            "open_orders": comparison.get("open_orders"),
+            "partial_orders": comparison.get("partial_orders"),
+            "unknown_outcomes": comparison.get("unknown_outcomes", []),
+            "mismatches": comparison.get("mismatches", []),
+            "snapshot_sha256": comparison.get("snapshot_sha256"),
+        },
+        verdict=verdict,
     )
-    append_audit("reconcile", "gmaq-control", refs={"verdict": verdict, "counts": {"open_orders": len(order_ids), "trades": len(trade_ids)}})
-    if verdict == "MISMATCH":
-        dispatch_alert("reconcile", verdict, open_orders=len(order_ids), trades=len(trade_ids))
+    if verdict in ("MISMATCH", "UNKNOWN"):
+        disarm(f"reconcile_{verdict.lower()}")
+        dispatch_alert(
+            "reconcile",
+            verdict,
+            unknown_outcomes=comparison.get("unknown_outcomes", []),
+            mismatches=comparison.get("mismatches", []),
+        )
     return result
 
 
 def audit(action: str, event: str | None) -> dict:
     if action == "verify":
-        chain = read_audit_chain()
+        try:
+            chain = read_audit_chain()
+        except ValueError as error:
+            dispatch_alert("audit", "BROKEN", detail=str(error))
+            return ok("BROKEN", records=None, detail=str(error))
         valid, reason = audit_chain_valid(chain)
         if not valid:
             dispatch_alert("audit", "BROKEN", detail=reason)
@@ -784,40 +1214,87 @@ def kill() -> dict:
 
 def exit_all() -> dict:
     """Controlled close: force-exit every open trade by trade id and verify
-    zero open orders and zero open trades afterwards."""
+    a REST/database zero proof afterwards. Unknown outcomes are quarantined
+    and are never retried automatically."""
+    disarm("controlled_exit_requested")
     env = read_env()
     token = api_login(env)
     if token is None:
-        return fail("unable to reach bot API")
-    trades = bot_trades(token)
-    if trades is None:
-        return fail("unable to read open trades", verdict="UNKNOWN")
-    open_trades = [item for item in trades if item.get("is_open")]
-    rejected = []
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["bot_api_auth_unavailable"]}, verdict="UNKNOWN")
+        return fail("unable to reach bot API", verdict="UNKNOWN", unknown_outcomes=["bot_api_auth_unavailable"])
+    open_payload = bot_open_trades(token)
+    if open_payload is None:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["rest_status_unavailable"]}, verdict="UNKNOWN")
+        return fail("unable to read open trades", verdict="UNKNOWN", unknown_outcomes=["rest_status_unavailable"])
+    try:
+        open_trades, _ = normalize_rest_snapshot(open_payload)
+    except ValueError as error:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": [str(error)]}, verdict="UNKNOWN")
+        return fail("invalid open trade snapshot", verdict="UNKNOWN", unknown_outcomes=[str(error)])
+
+    unknown_outcomes = []
     for item in open_trades:
-        trade_id = item.get("trade_id")
+        trade_id = item.trade_id
         code, _ = api_post("/api/v1/forceexit", token, {"tradeid": trade_id})
         if code not in (200, 201):
-            rejected.append(trade_id)
-    if rejected:
-        return fail(f"forceexit rejected for trade ids: {rejected}")
+            unknown_outcomes.append(f"forceexit_unacknowledged:{trade_id}:http_{code}")
+    if unknown_outcomes:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+        dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
+        return fail(
+            "one or more force-exit outcomes are unknown; no automatic retry",
+            verdict="UNKNOWN",
+            unknown_outcomes=unknown_outcomes,
+        )
+
     deadline = time.time() + 120
-    last = {"open_orders": None, "open_trades": None}
+    last = {
+        "open_orders": None,
+        "open_trades": None,
+        "partial_orders": None,
+        "unknown_outcomes": ["zero_proof_not_obtained"],
+    }
     while time.time() < deadline:
-        orders = bot_open_orders(token)
-        trades = bot_trades(token)
-        if orders is None or trades is None:
-            return fail("unable to verify positions after forceexit", verdict="UNKNOWN")
-        open_now = [item for item in trades if item.get("is_open")]
-        last = {"open_orders": len(orders), "open_trades": len(open_now)}
-        if not orders and not open_now:
-            append_audit("exit", "gmaq-control", refs={"verdict": "ZERO_POSITIONS", "forceexited": len(open_trades)})
-            write_state("DISARMED")
-            return ok("ZERO_POSITIONS", **last)
+        rest_payload = bot_open_trades(token)
+        db_payload = bot_db_snapshot(env)
+        if rest_payload is None or db_payload is None:
+            unknown_outcomes = []
+            if rest_payload is None:
+                unknown_outcomes.append("rest_status_unavailable_after_exit")
+            if db_payload is None:
+                unknown_outcomes.append("database_snapshot_unavailable_after_exit")
+            append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+            dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
+            return fail(
+                "unable to verify outcome after force-exit; no automatic retry",
+                verdict="UNKNOWN",
+                unknown_outcomes=unknown_outcomes,
+            )
+        last = compare_snapshots(rest_payload, db_payload)
+        if last.get("verdict") in ("UNKNOWN", "MISMATCH"):
+            append_audit("exit", "gmaq-control", refs=last, verdict=last["verdict"])
+            details = {key: value for key, value in last.items() if key != "verdict"}
+            dispatch_alert("exit", last["verdict"], **details)
+            return fail(
+                "post-exit reconciliation did not match; no automatic retry",
+                verdict=last["verdict"],
+                **details,
+            )
+        if snapshot_is_zero_proof(last):
+            append_audit(
+                "exit",
+                "gmaq-control",
+                refs={**last, "forceexited": len(open_trades)},
+                verdict="ZERO_POSITIONS_AND_ORDERS",
+            )
+            disarm("controlled_exit_complete")
+            details = {key: value for key, value in last.items() if key != "verdict"}
+            return ok("ZERO_POSITIONS_AND_ORDERS", **details)
         time.sleep(5)
-    append_audit("exit", "gmaq-control", refs={"verdict": "TIMEOUT"})
-    dispatch_alert("exit", "TIMEOUT", **last)
-    return fail("positions not closed within 120s", verdict="TIMEOUT", **last)
+    append_audit("exit", "gmaq-control", refs=last, verdict="TIMEOUT")
+    details = {key: value for key, value in last.items() if key != "verdict"}
+    dispatch_alert("exit", "TIMEOUT", **details)
+    return fail("zero proof not obtained within 120s", verdict="TIMEOUT", **details)
 
 
 def main(argv: list[str] | None = None) -> int:

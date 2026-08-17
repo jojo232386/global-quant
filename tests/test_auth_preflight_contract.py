@@ -86,6 +86,15 @@ def test_script_is_get_only_and_never_stores_secrets() -> None:
     assert text.count('"GMAQ_READ_SECRET"') == 1
 
 
+def test_credential_helper_hides_both_inputs_and_prints_no_prefix() -> None:
+    helper = (ROOT / "scripts" / "gmaq-set-readonly-creds").read_text()
+    assert 'getpass.getpass("API Key (input hidden): ")' in helper
+    assert 'getpass.getpass("Secret Key (input hidden): ")' in helper
+    assert "key[:" not in helper
+    assert "secret[:" not in helper
+    assert "starts with" not in helper
+
+
 def test_endpoints_are_read_only_contracts() -> None:
     text = SCRIPT.read_text()
     for endpoint in (

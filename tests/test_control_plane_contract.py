@@ -70,14 +70,25 @@ def test_exit_is_controlled_close_with_zero_position_proof() -> None:
     text = SCRIPT.read_text()
     assert '"/api/v1/forceexit"' in text
     assert '"tradeid"' in text
-    assert '"ZERO_POSITIONS"' in text
-    assert "is_open" in text
+    assert '"ZERO_POSITIONS_AND_ORDERS"' in text
+    assert "snapshot_is_zero_proof" in text
+    assert "bot_open_trades" in text
+    assert "bot_db_snapshot" in text
     assert 'verdict="TIMEOUT"' in text
-    assert "positions not closed within 120s" in text
+    assert "zero proof not obtained within 120s" in text
     # Exit is not the kill switch: it goes through the bot API by design.
     exit_source = text[text.index("def exit_all") : text.index("def main")]
     assert "api_login" in exit_source
     assert "docker" not in exit_source
+
+
+def test_status_is_open_trades_and_orders_are_nested() -> None:
+    text = SCRIPT.read_text()
+    status_source = text[text.index("def bot_open_trades") : text.index("def bot_trades")]
+    assert '"/api/v1/status"' in status_source
+    assert "open-trades view" in status_source
+    assert "def bot_open_orders" not in text
+    assert 'raw_trade.get("orders", [])' in text
 
 
 def test_client_order_id_format_and_uniqueness() -> None:

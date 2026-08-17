@@ -55,6 +55,11 @@ must be refused by the control plane.
   submission, and never reused. The identity carries no secrets.
 - Dry-run still exercises the format and uniqueness checks so the promoted
   layout behaves identically.
+- Current pinned Freqtrade does not expose a Binance client-order-id callback
+  or order-create parameter. Therefore this identifier is not claimed as
+  exchange-bound in this candidate. Freqtrade/SQLite `order_id` is the
+  dry-run reconciliation identity. A live candidate remains blocked until a
+  reviewed adapter can prove exchange-bound client identity end to end.
 
 ## 4. Reconciliation
 
@@ -62,17 +67,24 @@ must be refused by the control plane.
   and cross-checked after every mutation and on a schedule. Any mismatch
   between intent, broker REST, broker WS, and bot internal state enters
   quarantine with an alert; there is no self-healing.
-- Dry-run: `scripts/gmaq-control reconcile` cross-checks the bot's REST view
-  against the audit journal and verifies identity uniqueness. The WS path is
-  exercised by the runtime and verified in the 48–72h reliability soak.
+- Dry-run: `/status` is treated as open trades, never as open orders. Each
+  trade's nested orders are normalized and compared with the SQLite `trades`
+  and `orders` rows by trade/order identity, side, amount, filled, remaining,
+  price, open flag, and status. Duplicate identity, unknown status, partial
+  outcome, API/DB failure, or field mismatch disarms entry and returns
+  `UNKNOWN`/`MISMATCH`; there is no automatic retry.
 
 ## 5. Audit manifest
 
 - Append-only JSONL at `user_data/audit/manifest.jsonl` (runtime state, not
   committed).
-- Each record: sequence, UTC timestamp, actor, event, references, and
+- Each record: sequence, UTC timestamp, actor, real top-level verdict,
+  candidate/tree/config/image/run/gate identity, event references, and
   `sha256` of the previous serialized record, forming a hash chain. The chain
   is verified on every control-plane action; a broken chain is a hard stop.
+- Appends use an exclusive file lock, `O_APPEND`, and `fsync`; state/binding
+  replacement is atomic and fsynced. Concurrent append, truncation, and
+  broken-chain behavior is covered by behavioral tests.
 
 ## 6. Health metrics
 
@@ -108,10 +120,11 @@ must be refused by the control plane.
 
 ## 9. Controlled close
 
-- `scripts/gmaq-control exit` force-exits all open trades through the bot API
-  and then polls until open orders and open trades are both zero, recording
-  the proof in the audit journal. A timeout is a hard failure (`TIMEOUT`),
-  never a silent pass.
+- `scripts/gmaq-control exit` first disarms new entries, sends at most one
+  force-exit request per normalized open trade, and then requires a matching
+  REST/SQLite proof of zero open trades, zero open/partial orders, and zero
+  unknown outcomes. An unacknowledged request is quarantined and is never
+  retried automatically. Timeout remains a hard failure.
 - `exit` is the orderly counterpart of `kill`: it requires a healthy bot,
   while `kill` must work without one.
 
