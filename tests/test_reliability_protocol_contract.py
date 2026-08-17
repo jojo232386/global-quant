@@ -1,9 +1,13 @@
+import importlib.util
 import pathlib
+from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROTOCOL = ROOT / "configs" / "RELIABILITY_SOAK_PROTOCOL.md"
 LIVE_READINESS = ROOT / "configs" / "LIVE_READINESS.md"
+RUNNER = ROOT / "scripts" / "reliability-soak"
+MANIFEST = ROOT / "scripts" / "gmaq-runtime-manifest"
 
 
 def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
@@ -23,6 +27,8 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
     assert "scripts/gmaq-exchange-preflight" in text
     assert "scripts/gmaq-liquidity" in text
     assert "scripts/reliability-soak" in text
+    assert "scripts/gmaq-runtime-manifest" in text
+    assert "SMOKE_ONLY_PASS" in text
 
 
 def test_protocol_exit_requires_hash_chain_and_full_exercise_coverage() -> None:
@@ -31,6 +37,44 @@ def test_protocol_exit_requires_hash_chain_and_full_exercise_coverage() -> None:
     assert "a missed exercise fails the run" in flat
     assert "restarts the soak clock" in flat
     assert "user_data/audit/soak-" in flat
+
+
+def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
+    text = RUNNER.read_text()
+    assert "--smoke" in text
+    assert "--authorization-id" in text
+    assert "48|49|50" in text and "71|72" in text
+    assert "GMAQ_API_BASE:-http://127.0.0.1:8080" not in text
+    assert "GMAQ_CONTAINER_NAME:-gmaq-freqtrade" not in text
+    assert "gmaq-runtime-manifest --expected-state DISARMED" in text
+    assert "gmaq-control reconcile" in text
+    assert "gmaq-control exit" in text
+    assert "runtime-binding.json" in text
+    assert "trap cleanup EXIT INT TERM" in text
+    smoke = text[text.index("if [[ $MODE == smoke ]]"):text.index("# A promoted soak")]
+    assert "gmaq-control arm" not in smoke
+    assert "SMOKE_ONLY_PASS" in smoke
+
+
+def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None:
+    loader = SourceFileLoader("gmaq_runtime_manifest_test", str(MANIFEST))
+    spec = importlib.util.spec_from_loader("gmaq_runtime_manifest_test", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    assert module.SAFE_ENV_KEYS == {
+        "GMAQ_API_BASE",
+        "GMAQ_CONTAINER_NAME",
+        "GMAQ_HOST_PORT",
+    }
+    text = MANIFEST.read_text()
+    assert "GMAQ_API_PASSWORD" not in text
+    assert "GMAQ_API_USERNAME" not in text
+    assert '"contains_secrets": False' in text
+    assert "container identity does not match runtime binding" in text
+    assert 'EXPECTED_CONTAINER = "gmaq-freqtrade-p0-remediation"' in text
+    assert "EXPECTED_HOST_PORT = 8082" in text
+    assert "published container port does not match isolated API endpoint" in text
 
 
 def test_live_readiness_stays_planning_only_and_lists_blockers() -> None:

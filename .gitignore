@@ -36,4 +36,5 @@ user_data/audit/.manifest.lock
 
 # Runtime smoke evidence packages are local.
 user_data/audit/runtime-smoke-*/
+user_data/audit/soak-*/
 .env.readonly.tmp

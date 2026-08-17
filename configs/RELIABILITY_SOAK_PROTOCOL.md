@@ -16,20 +16,26 @@ Completion of the soak removes exactly one blocker from
 - One pair (`ETH/USDT:USDT`), isolated margin, 1x, one open trade maximum,
   25 USDT dry-run stake.
 - Control plane in the loop: `scripts/gmaq-control`, audit journal enabled.
-- Execution wrapper: `scripts/reliability-soak <48-72>` drives the scheduled
-  exercises; this protocol defines what counts as evidence.
+- Execution wrapper: `scripts/reliability-soak <48-72> --authorization-id ID`
+  drives the scheduled exercises. The explicit id authorizes this dry-run only.
+- Non-mutating validation: `scripts/reliability-soak --smoke` proves the exact
+  runtime binding, health, audit chain and zero-state reconciliation while the
+  entry gate remains `DISARMED`. It never counts as 48–72h evidence.
 - Duration: 48–72 hours continuous. A run shorter than 48h is not evidence.
 
 ## Entry gates (before starting the clock)
 
-1. `./scripts/gmaq-control preflight` verdict PASS.
-2. `./scripts/gmaq-control audit verify` chain ok.
-3. `./scripts/gmaq-exchange-preflight` verdict PASS_PUBLIC, same day.
-4. `./scripts/gmaq-liquidity` verdict PASS, same day.
-5. Kill switch rehearsed once from a running state: `./scripts/gmaq-control
+1. Exact sanitized runtime manifest from `scripts/gmaq-runtime-manifest`, with
+   candidate/config/container/image/run identity verdict `EXACT_MATCH`.
+2. `./scripts/gmaq-control preflight` verdict PASS.
+3. `./scripts/gmaq-control audit verify` chain ok.
+4. `./scripts/gmaq-exchange-preflight` verdict PASS_PUBLIC, same day.
+5. `./scripts/gmaq-liquidity` verdict PASS, same day.
+6. Kill switch rehearsed once from a running state: `./scripts/gmaq-control
    kill` stops the runtime, then recovery to DISARMED per
    `configs/CONTROL_PLANE.md`.
-6. Entry record appended to the audit journal.
+7. Entry record appended to the audit journal. The soak clock starts only after
+   kill recovery creates and verifies a fresh exact binding.
 
 ## Scheduled exercises
 
@@ -48,7 +54,7 @@ Each exercise appends an audit record and is listed in the evidence table.
 
 ## Exit criteria (all mandatory)
 
-- Final `forceexit all` in dry-run followed by a reconcile with **zero open
+- Final controlled exit in dry-run followed by a reconcile with **zero open
   positions and zero open orders**.
 - No duplicate trade/order identities across the whole run.
 - Audit hash chain intact from entry to exit.
@@ -60,8 +66,11 @@ Each exercise appends an audit record and is listed in the evidence table.
 
 Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 
-- `manifest.json`: run id, start/end UTC, repo SHA, image digest, entry
-  gate verdicts, exercise table with per-exercise verdicts.
+- `manifest.json`: run id, repo/tree/config/compose SHA, image digest, exact
+  container and volume bindings, and a statement that it contains no secrets.
+- `events.jsonl`: entry gates and exercise table with per-exercise verdicts.
+- Supporting entry-gate records include start/end UTC and the explicit dry-run
+  authorization id only in the append-only audit journal.
 - `audit-journal.jsonl`: the exact journal segment for the run window.
 - `health-samples.jsonl`: E1 verdict records.
 - `reconcile-records.jsonl`: E2 verdict records.
@@ -74,6 +83,7 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 ## Acceptance
 
 - A PASS removes the "reliability run not completed" blocker only.
+- `SMOKE_ONLY_PASS` does not remove that blocker and does not authorize entries.
 - Live remains BLOCKED by every item listed in `configs/LIVE_READINESS.md`
   that is still unverified, especially the authenticated account checks.
 - This protocol does not authorize live trading.

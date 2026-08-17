@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Build and verify a sanitized manifest for the bound dry-run runtime."""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+import urllib.parse
+from typing import Sequence
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ENV_PATH = ROOT / ".env"
+CONFIG_PATH = ROOT / "user_data" / "config.json"
+BINDING_PATH = ROOT / "user_data" / "audit" / "runtime-binding.json"
+STATE_PATH = ROOT / "user_data" / "audit" / "state.json"
+COMPOSE_PATH = ROOT / "docker-compose.yml"
+
+SAFE_ENV_KEYS = {
+    "GMAQ_API_BASE",
+    "GMAQ_CONTAINER_NAME",
+    "GMAQ_HOST_PORT",
+}
+RUNTIME_ENV_KEYS = (
+    "GMAQ_GATE_ENVIRONMENT",
+    "GMAQ_CANDIDATE_SHA",
+    "GMAQ_CONFIG_SHA256",
+    "GMAQ_RUN_ID",
+)
+EXPECTED_CONTAINER = "gmaq-freqtrade-p0-remediation"
+EXPECTED_HOST_PORT = 8082
+
+
+class ManifestError(RuntimeError):
+    pass
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def safe_env(path: pathlib.Path = ENV_PATH) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        raise ManifestError("local runtime environment is missing")
+    for line in path.read_text().splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in SAFE_ENV_KEYS:
+            values[key] = value
+    missing = SAFE_ENV_KEYS - values.keys()
+    if missing:
+        raise ManifestError(f"safe runtime fields missing: {sorted(missing)}")
+    return values
+
+
+def run_text(command: Sequence[str], *, timeout: int = 15) -> str:
+    try:
+        process = subprocess.run(
+            list(command), capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ManifestError(f"runtime inspection failed: {command[0]}") from error
+    if process.returncode != 0:
+        raise ManifestError(f"runtime inspection returned non-zero: {' '.join(command[:2])}")
+    return process.stdout.strip()
+
+
+def read_object(path: pathlib.Path, label: str) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ManifestError(f"{label} missing or corrupt") from error
+    if not isinstance(value, dict):
+        raise ManifestError(f"{label} is not an object")
+    return value
+
+
+def container_runtime_env(container: str) -> dict[str, str]:
+    values = {}
+    for key in RUNTIME_ENV_KEYS:
+        values[key] = run_text(["docker", "exec", container, "printenv", key])
+    return values
+
+
+def inspect_field(container: str, template: str) -> str:
+    return run_text(["docker", "inspect", "--format", template, container])
+
+
+def build_manifest(expected_state: str | None = None) -> dict:
+    env = safe_env()
+    container = env["GMAQ_CONTAINER_NAME"]
+    try:
+        host_port = int(env["GMAQ_HOST_PORT"])
+    except ValueError as error:
+        raise ManifestError("host port is invalid") from error
+    api_url = urllib.parse.urlparse(env["GMAQ_API_BASE"])
+    if (
+        container != EXPECTED_CONTAINER
+        or host_port != EXPECTED_HOST_PORT
+        or api_url.hostname != "127.0.0.1"
+        or api_url.port != host_port
+    ):
+        raise ManifestError("runtime is not bound to the isolated remediation endpoint")
+    binding = read_object(BINDING_PATH, "runtime binding")
+    state = read_object(STATE_PATH, "gate state")
+    head = run_text(["git", "-C", str(ROOT), "rev-parse", "HEAD"])
+    tree = run_text(["git", "-C", str(ROOT), "rev-parse", "HEAD^{tree}"])
+    tracked = run_text(
+        ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"]
+    )
+    if tracked:
+        raise ManifestError("tracked worktree is dirty")
+
+    config_sha = sha256_file(CONFIG_PATH)
+    runtime_env = container_runtime_env(container)
+    expected_runtime_env = {
+        "GMAQ_GATE_ENVIRONMENT": binding.get("environment"),
+        "GMAQ_CANDIDATE_SHA": binding.get("candidate_sha"),
+        "GMAQ_CONFIG_SHA256": binding.get("config_sha256"),
+        "GMAQ_RUN_ID": binding.get("run_id"),
+    }
+    if runtime_env != expected_runtime_env:
+        raise ManifestError("container identity does not match runtime binding")
+    if head != binding.get("candidate_sha") or config_sha != binding.get("config_sha256"):
+        raise ManifestError("checkout/config does not match runtime binding")
+    if state.get("run_id") != binding.get("run_id"):
+        raise ManifestError("gate state does not match runtime run id")
+    if expected_state and state.get("state") != expected_state:
+        raise ManifestError(
+            f"gate state is {state.get('state')}, expected {expected_state}"
+        )
+
+    image_ref = inspect_field(container, "{{.Config.Image}}")
+    image_id = inspect_field(container, "{{.Image}}")
+    container_id = inspect_field(container, "{{.Id}}")
+    published_port = run_text(["docker", "port", container, "8080/tcp"])
+    if published_port != f"127.0.0.1:{host_port}":
+        raise ManifestError("published container port does not match isolated API endpoint")
+    compose_project = inspect_field(
+        container, '{{index .Config.Labels "com.docker.compose.project"}}'
+    )
+    runtime_volume = inspect_field(
+        container,
+        '{{range .Mounts}}{{if eq .Destination "/freqtrade/runtime"}}{{.Name}}{{end}}{{end}}',
+    )
+    backup_volume = inspect_field(
+        container,
+        '{{range .Mounts}}{{if eq .Destination "/freqtrade/backups"}}{{.Name}}{{end}}{{end}}',
+    )
+    if not runtime_volume or not backup_volume:
+        raise ManifestError("runtime/backup volume binding is incomplete")
+
+    return {
+        "schema_version": 1,
+        "captured_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "environment": "dry_run",
+        "candidate_sha": head,
+        "tree_sha": tree,
+        "config_sha256": config_sha,
+        "compose_sha256": sha256_file(COMPOSE_PATH),
+        "run_id": binding["run_id"],
+        "gate_state": state["state"],
+        "container": {
+            "name": container,
+            "id": container_id,
+            "image_ref": image_ref,
+            "image_id": image_id,
+            "compose_project": compose_project,
+            "api_base": env["GMAQ_API_BASE"],
+            "host_port": host_port,
+            "published_port": published_port,
+            "runtime_volume": runtime_volume,
+            "backup_volume": backup_volume,
+        },
+        "identity_verdict": "EXACT_MATCH",
+        "contains_secrets": False,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-state")
+    parser.add_argument("--output", type=pathlib.Path)
+    args = parser.parse_args(argv)
+    try:
+        manifest = build_manifest(args.expected_state)
+    except ManifestError as error:
+        print(json.dumps({"ok": False, "verdict": "FAIL", "error": str(error)}))
+        return 1
+    payload = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(payload)
+    print(payload, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
