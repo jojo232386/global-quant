@@ -43,7 +43,9 @@ else:
         "GMAQ_API_PASSWORD": secrets.token_urlsafe(24),
         "GMAQ_JWT_SECRET_KEY": secrets.token_urlsafe(32),
         "GMAQ_WS_TOKEN": secrets.token_urlsafe(32),
-        "GMAQ_API_BASE": "http://127.0.0.1:8081",
+        "GMAQ_API_BASE": "http://127.0.0.1:8082",
+        "GMAQ_CONTAINER_NAME": "gmaq-freqtrade-p0-remediation",
+        "GMAQ_HOST_PORT": "8082",
         "GMAQ_ALERT_WEBHOOK_URL": "",
         "GMAQ_TELEGRAM_BOT_TOKEN": "",
         "GMAQ_TELEGRAM_CHAT_ID": "",
@@ -72,26 +74,54 @@ if config.get("trading_mode") != "futures" or config.get("margin_mode") != "isol
 PY
 }
 
+prepare_runtime_binding() {
+  local candidate_sha config_sha run_id
+  candidate_sha=$(git -C "$ROOT_DIR" rev-parse HEAD)
+  config_sha=$(shasum -a 256 "$CONFIG" | awk '{print $1}')
+  run_id=$(python3 - <<'PY'
+import secrets
+import time
+
+print(f"dryrun-{int(time.time())}-{secrets.token_hex(6)}")
+PY
+)
+  "$ROOT_DIR/scripts/gmaq-control" bind-runtime \
+    --run-id "$run_id" \
+    --candidate-sha "$candidate_sha" \
+    --config-sha256 "$config_sha" \
+    --environment dry_run
+  export GMAQ_GATE_ENVIRONMENT=dry_run
+  export GMAQ_CANDIDATE_SHA="$candidate_sha"
+  export GMAQ_CONFIG_SHA256="$config_sha"
+  export GMAQ_RUN_ID="$run_id"
+}
+
 cd "$ROOT_DIR"
 action=${1:-status}
 case "$action" in
   up)
     ensure_local_api_credentials
     guard_dry_run
+    prepare_runtime_binding
     "${COMPOSE[@]}" up -d
-    echo "FreqUI: http://127.0.0.1:8081"
+    echo "FreqUI: http://127.0.0.1:8082"
+    echo "Entry gate: DISARMED"
     echo "Local credentials: $ENV_FILE"
     ;;
   down)
+    "$ROOT_DIR/scripts/gmaq-control" disarm --reason runtime_down >/dev/null || true
     "${COMPOSE[@]}" down --timeout 30
     ;;
   stop)
+    "$ROOT_DIR/scripts/gmaq-control" disarm --reason runtime_stop >/dev/null || true
     "${COMPOSE[@]}" stop --timeout 30
     ;;
   restart)
     ensure_local_api_credentials
     guard_dry_run
-    "${COMPOSE[@]}" restart --timeout 30 freqtrade
+    prepare_runtime_binding
+    "${COMPOSE[@]}" up -d --force-recreate freqtrade
+    echo "Entry gate: DISARMED"
     ;;
   logs)
     "${COMPOSE[@]}" logs --tail 200 -f

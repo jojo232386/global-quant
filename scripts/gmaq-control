@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import secrets
 import subprocess
 import sys
@@ -31,6 +32,7 @@ ENV_PATH = ROOT / ".env"
 AUDIT_DIR = ROOT / "user_data" / "audit"
 AUDIT_PATH = AUDIT_DIR / "manifest.jsonl"
 STATE_PATH = AUDIT_DIR / "state.json"
+BINDING_PATH = AUDIT_DIR / "runtime-binding.json"
 
 API_BASE = os.environ.get("GMAQ_API_BASE", "http://127.0.0.1:8080")
 BINANCE_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
@@ -39,6 +41,14 @@ NETWORK_TIMEOUT_S = 5
 TIMEFRAME_SECONDS = 15 * 60
 TELEGRAM_API = "https://api.telegram.org"
 ALERT_FAIL_VERDICTS = {"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH", "TIMEOUT"}
+GATE_SCHEMA_VERSION = 1
+DRY_RUN_ENVIRONMENT = "dry_run"
+DRY_RUN_SCOPE = "DEMO_DRY_RUN_ENTRY"
+PREFLIGHT_TTL_S = 15 * 60
+MAX_ARM_TTL_S = 60 * 60
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:-]{8,96}$")
 
 ALLOWED_TRANSITIONS = {
     "DISARMED": {"PREFLIGHTING"},
@@ -208,7 +218,7 @@ def append_audit(event: str, actor: str, refs: dict | None = None, verdict: str 
     }
     with AUDIT_PATH.open("a") as handle:
         handle.write(serialize(line) + "\n")
-    return ok("APPENDED", seq=line["seq"])
+    return ok("APPENDED", seq=line["seq"], record_sha=sha256_text(serialize(line)))
 
 
 def read_state() -> dict:
@@ -220,9 +230,230 @@ def read_state() -> dict:
         return {"state": "DISARMED"}
 
 
-def write_state(state: str, **extra) -> None:
+def write_json_atomic(path: pathlib.Path, payload: dict) -> None:
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps({"state": state, **extra}, sort_keys=True, indent=2) + "\n")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+    os.replace(temporary, path)
+
+
+def write_state(state: str, **extra) -> None:
+    write_json_atomic(
+        STATE_PATH,
+        {"schema_version": GATE_SCHEMA_VERSION, "state": state, **extra},
+    )
+
+
+def read_object_strict(path: pathlib.Path, label: str) -> tuple[dict | None, str | None]:
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None, f"{label} missing"
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, f"{label} corrupt"
+    if not isinstance(value, dict):
+        return None, f"{label} is not an object"
+    return value, None
+
+
+def git_text(*args: str) -> str | None:
+    try:
+        process = subprocess.run(
+            ["git", "-C", str(ROOT), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    return process.stdout.strip()
+
+
+def binding_fields(binding: dict) -> dict:
+    return {
+        "environment": binding["environment"],
+        "candidate_sha": binding["candidate_sha"],
+        "config_sha256": binding["config_sha256"],
+        "run_id": binding["run_id"],
+    }
+
+
+def validated_runtime_binding() -> tuple[dict | None, str | None]:
+    binding, error = read_object_strict(BINDING_PATH, "runtime binding")
+    if error:
+        return None, error
+    assert binding is not None
+    if binding.get("schema_version") != GATE_SCHEMA_VERSION:
+        return None, "runtime binding schema mismatch"
+    if binding.get("environment") != DRY_RUN_ENVIRONMENT:
+        return None, "runtime binding is not dry_run"
+    candidate_sha = binding.get("candidate_sha", "")
+    config_sha = binding.get("config_sha256", "")
+    run_id = binding.get("run_id", "")
+    if not GIT_SHA_RE.fullmatch(candidate_sha):
+        return None, "runtime candidate SHA invalid"
+    if not SHA256_RE.fullmatch(config_sha):
+        return None, "runtime config SHA invalid"
+    if not IDENTIFIER_RE.fullmatch(run_id):
+        return None, "runtime run id invalid"
+    current_head = git_text("rev-parse", "HEAD")
+    if current_head is None:
+        return None, "unable to read checkout candidate SHA"
+    if current_head != candidate_sha:
+        return None, "runtime candidate SHA does not match checkout"
+    if sha256_file(CONFIG_PATH) != config_sha:
+        return None, "runtime config SHA does not match config"
+    return binding, None
+
+
+def bind_runtime(
+    run_id: str,
+    candidate_sha: str,
+    config_sha256: str,
+    environment: str,
+) -> dict:
+    if environment != DRY_RUN_ENVIRONMENT:
+        return fail("this control plane binds dry_run runtimes only")
+    if not IDENTIFIER_RE.fullmatch(run_id):
+        return fail("invalid run id")
+    if not GIT_SHA_RE.fullmatch(candidate_sha):
+        return fail("invalid candidate SHA")
+    if not SHA256_RE.fullmatch(config_sha256):
+        return fail("invalid config SHA")
+    current_head = git_text("rev-parse", "HEAD")
+    if current_head is None:
+        return fail("unable to read checkout candidate SHA")
+    if current_head != candidate_sha:
+        return fail("candidate SHA does not match checkout")
+    tracked_status = git_text("status", "--porcelain", "--untracked-files=no")
+    if tracked_status is None:
+        return fail("unable to verify tracked worktree status")
+    if tracked_status:
+        return fail("tracked worktree is dirty")
+    if sha256_file(CONFIG_PATH) != config_sha256:
+        return fail("config SHA does not match config")
+    config = load_config()
+    if not config_is_credential_free(config):
+        return fail("runtime binding requires credential-free dry_run config")
+
+    now = int(time.time())
+    binding = {
+        "schema_version": GATE_SCHEMA_VERSION,
+        "environment": environment,
+        "candidate_sha": candidate_sha,
+        "config_sha256": config_sha256,
+        "run_id": run_id,
+        "bound_at_epoch": now,
+    }
+    write_json_atomic(BINDING_PATH, binding)
+    write_state("DISARMED", **binding_fields(binding), reason="runtime_bound")
+    audit_result = append_audit(
+        "runtime-bind",
+        "gmaq-control",
+        refs=binding_fields(binding),
+        verdict="DISARMED",
+    )
+    if not audit_result.get("ok"):
+        write_state("DISARMED", **binding_fields(binding), reason="audit_append_failed")
+        return fail("runtime bound but audit append failed; entry remains disabled")
+    return ok("BOUND_DISARMED", **binding_fields(binding))
+
+
+def disarm(reason: str = "operator_disarm") -> dict:
+    binding, error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    write_state("DISARMED", **fields, reason=reason)
+    result = append_audit("disarm", "gmaq-control", refs={"reason": reason, **fields}, verdict="DISARMED")
+    if not result.get("ok"):
+        return fail("entry disabled but audit append failed", binding_error=error)
+    return ok("DISARMED", reason=reason, binding_error=error)
+
+
+def arm(authorization_id: str, ttl_seconds: int) -> dict:
+    if not IDENTIFIER_RE.fullmatch(authorization_id):
+        return fail("authorization id must be 8-96 safe characters")
+    if ttl_seconds < 30 or ttl_seconds > MAX_ARM_TTL_S:
+        return fail(f"ttl must be between 30 and {MAX_ARM_TTL_S} seconds")
+    binding, error = validated_runtime_binding()
+    if error:
+        return fail(error)
+    assert binding is not None
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "PREFLIGHT_PASS":
+        return fail("arm requires current state PREFLIGHT_PASS")
+    fields = binding_fields(binding)
+    if any(state.get(key) != value for key, value in fields.items()):
+        return fail("preflight state binding mismatch")
+    if state.get("preflight_verdict") != "PASS":
+        return fail("preflight verdict is not PASS")
+    now = int(time.time())
+    if int(state.get("preflight_expires_at_epoch", 0)) <= now:
+        return fail("preflight expired; run preflight again")
+
+    expires_at = now + ttl_seconds
+    refs = {
+        **fields,
+        "authorization_id": authorization_id,
+        "authorization_scope": DRY_RUN_SCOPE,
+        "issued_at_epoch": now,
+        "expires_at_epoch": expires_at,
+    }
+    audit_result = append_audit("arm", "gmaq-control", refs=refs, verdict="ARMED")
+    if not audit_result.get("ok"):
+        write_state("DISARMED", **fields, reason="arm_audit_failed")
+        return fail("authorization audit append failed; entry remains disabled")
+    write_state(
+        "ARMED",
+        **fields,
+        preflight_verdict="PASS",
+        authorization_id=authorization_id,
+        authorization_scope=DRY_RUN_SCOPE,
+        issued_at_epoch=now,
+        expires_at_epoch=expires_at,
+        authorization_audit_seq=audit_result["seq"],
+        authorization_audit_sha=audit_result["record_sha"],
+    )
+    return ok("ARMED", expires_at_epoch=expires_at, authorization_scope=DRY_RUN_SCOPE)
+
+
+def pause() -> dict:
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "ARMED":
+        return fail("pause requires current state ARMED")
+    binding, error = validated_runtime_binding()
+    if error:
+        return fail(error)
+    assert binding is not None
+    fields = binding_fields(binding)
+    write_state("PAUSED", **fields, reason="operator_pause")
+    append_result = append_audit("pause", "gmaq-control", refs=fields, verdict="PAUSED")
+    if not append_result.get("ok"):
+        return fail("entry paused but audit append failed")
+    return ok("PAUSED")
+
+
+def recover() -> dict:
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "KILLED":
+        return fail("recover requires current state KILLED")
+    binding, error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    write_state("DISARMED", **fields, reason="recover_requires_new_preflight")
+    append_result = append_audit("recover", "gmaq-control", refs=fields, verdict="DISARMED")
+    if not append_result.get("ok"):
+        return fail("recovered to disabled state but audit append failed", binding_error=error)
+    return ok("RECOVERED_DISARMED", binding_error=error)
 
 
 def exchange_time_offset_s() -> float | None:
@@ -337,9 +568,26 @@ def preflight() -> dict:
         if not passed:
             failures.append(name)
 
+    binding, binding_error = validated_runtime_binding()
+    if binding_error:
+        write_state("DISARMED", reason="runtime_binding_invalid")
+        append_audit(
+            "preflight",
+            "gmaq-control",
+            refs={"failed": ["runtime binding"], "detail": binding_error},
+            verdict="FAIL",
+        )
+        return fail(binding_error, checks=checks)
+    assert binding is not None
+    fields = binding_fields(binding)
+    write_state("PREFLIGHTING", **fields)
+
     if not CONFIG_PATH.is_file():
+        write_state("DISARMED", **fields, reason="config_missing")
+        append_audit("preflight", "gmaq-control", refs={"failed": ["config missing"], **fields}, verdict="FAIL")
         return fail("config missing", checks=checks)
     config = load_config()
+    check("runtime binding", True, "candidate/config/run identity bound")
     check("credential-free", config_is_credential_free(config), "dry_run=true, empty key/secret")
     check("pair scope", bool(config.get("exchange", {}).get("pair_whitelist")), "whitelist non-empty")
     has_protections, missing = strategy_has_protections()
@@ -374,8 +622,21 @@ def preflight() -> dict:
 
     verdict = "PASS" if not failures else "FAIL"
     result = ok(verdict, checks=checks)
-    append_audit("preflight", "gmaq-control", refs={"verdict": verdict, "failed": failures})
-    write_state("PREFLIGHT_PASS" if verdict == "PASS" else "DISARMED")
+    append_audit(
+        "preflight",
+        "gmaq-control",
+        refs={"failed": failures, **fields},
+        verdict=verdict,
+    )
+    if verdict == "PASS":
+        write_state(
+            "PREFLIGHT_PASS",
+            **fields,
+            preflight_verdict="PASS",
+            preflight_expires_at_epoch=int(time.time()) + PREFLIGHT_TTL_S,
+        )
+    else:
+        write_state("DISARMED", **fields, reason="preflight_failed")
     if verdict == "FAIL":
         dispatch_alert("preflight", verdict, failed=failures)
     return result
@@ -489,9 +750,20 @@ def audit(action: str, event: str | None) -> dict:
 
 
 def kill() -> dict:
+    binding, binding_error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    # Disable entry first.  Container stop is the second, independent layer.
+    write_state("KILLED", **fields, reason="kill_requested")
+    append_audit(
+        "kill-requested",
+        "gmaq-control",
+        refs={**fields, "binding_error": binding_error},
+        verdict="KILLED",
+    )
     compose = compose_command()
     if compose is None:
-        return fail("docker compose unavailable; cannot stop runtime")
+        dispatch_alert("kill", "FAIL", detail="docker compose unavailable")
+        return fail("entry disabled, but docker compose unavailable; runtime stop unverified")
     try:
         proc = subprocess.run(
             compose + ["-f", str(ROOT / "docker-compose.yml"), "stop", "freqtrade"],
@@ -500,11 +772,12 @@ def kill() -> dict:
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        return fail(f"kill failed: {error}")
+        dispatch_alert("kill", "FAIL", detail="runtime stop failed")
+        return fail(f"entry disabled, but runtime stop failed: {error}")
     if proc.returncode != 0:
-        return fail("docker compose stop failed", detail=proc.stderr.strip()[-200:])
-    write_state("KILLED")
-    append_audit("kill", "gmaq-control", refs={"method": "docker-compose-stop"})
+        dispatch_alert("kill", "FAIL", detail="docker compose stop failed")
+        return fail("entry disabled, but docker compose stop failed", detail=proc.stderr.strip()[-200:])
+    append_audit("kill", "gmaq-control", refs={"method": "docker-compose-stop", **fields}, verdict="KILLED")
     dispatch_alert("kill", "KILLED", method="docker-compose-stop")
     return ok("KILLED", detail="runtime container stopped; state=KILLED")
 
@@ -550,7 +823,20 @@ def exit_all() -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gmaq-control", description="GMAQ control plane (dry-run scope)")
     sub = parser.add_subparsers(dest="command", required=True)
+    bind_parser = sub.add_parser("bind-runtime", help="bind and disarm an exact dry-run runtime")
+    bind_parser.add_argument("--run-id", required=True)
+    bind_parser.add_argument("--candidate-sha", required=True)
+    bind_parser.add_argument("--config-sha256", required=True)
+    bind_parser.add_argument("--environment", default=DRY_RUN_ENVIRONMENT)
     sub.add_parser("preflight", help="fail-closed readiness check")
+    arm_parser = sub.add_parser("arm", help="authorize short-lived dry-run entries after preflight")
+    arm_parser.add_argument("--authorization-id", required=True)
+    arm_parser.add_argument("--ttl-seconds", type=int, default=300)
+    disarm_parser = sub.add_parser("disarm", help="immediately disable new entries")
+    disarm_parser.add_argument("--reason", default="operator_disarm")
+    sub.add_parser("pause", help="pause an armed runtime without stopping it")
+    sub.add_parser("recover", help="move KILLED to DISARMED; preflight is still required")
+    sub.add_parser("state", help="show the local gate state")
     sub.add_parser("health", help="heartbeat, clock, and count verdict")
     sub.add_parser("reconcile", help="cross-check bot view against audit journal")
     audit_parser = sub.add_parser("audit", help="audit journal management")
@@ -566,8 +852,26 @@ def main(argv: list[str] | None = None) -> int:
     if local_env.get("GMAQ_API_BASE"):
         API_BASE = local_env["GMAQ_API_BASE"]
 
-    if args.command == "preflight":
+    if args.command == "bind-runtime":
+        result = bind_runtime(
+            args.run_id,
+            args.candidate_sha,
+            args.config_sha256,
+            args.environment,
+        )
+    elif args.command == "preflight":
         result = preflight()
+    elif args.command == "arm":
+        result = arm(args.authorization_id, args.ttl_seconds)
+    elif args.command == "disarm":
+        result = disarm(args.reason)
+    elif args.command == "pause":
+        result = pause()
+    elif args.command == "recover":
+        result = recover()
+    elif args.command == "state":
+        state, error = read_object_strict(STATE_PATH, "state")
+        result = fail(error) if error else ok("STATE", gate_state=state)
     elif args.command == "health":
         result = health()
     elif args.command == "reconcile":

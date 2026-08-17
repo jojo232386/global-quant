@@ -55,10 +55,12 @@ def test_active_runtime_is_credential_free_freqtrade() -> None:
     assert "ws_token" not in config["api_server"]
     assert IMAGE_DIGEST in compose
     assert "LiveExecutionCanaryStrategy" in compose
-    assert "gmaq-freqtrade-continuation" in compose
-    # The continuation stack uses host port 8081; the original global-quant
-    # runtime owns 127.0.0.1:8080.
-    assert "127.0.0.1:8081:8080" in compose
+    assert "gmaq-freqtrade-p0-remediation" in compose
+    # The remediation stack uses host port 8082; the original and continuation
+    # runtimes own 8080 and 8081 respectively.
+    assert "GMAQ_HOST_PORT:-8082" in compose
+    for binding in ("GMAQ_GATE_ENVIRONMENT", "GMAQ_CANDIDATE_SHA", "GMAQ_CONFIG_SHA256", "GMAQ_RUN_ID"):
+        assert binding in compose
     assert "sqlite:////freqtrade/runtime/tradesv3.dryrun.sqlite" in compose
     assert "runtime_data:/freqtrade/runtime" in compose
     assert "runtime_backups:/freqtrade/backups" in compose
@@ -94,6 +96,7 @@ def test_canary_is_explicitly_not_alpha_and_is_fixed_at_one_x() -> None:
         },
     ]
     assert instance.leverage("ETH/USDT:USDT", None, 1.0, 5.0, 20.0, None, "long") == 1.0
+    assert hasattr(instance, "confirm_trade_entry")
 
 
 def test_canary_dry_run_timeout_is_bounded() -> None:

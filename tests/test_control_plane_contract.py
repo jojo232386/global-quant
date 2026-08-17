@@ -1,4 +1,6 @@
 import importlib.util
+import hashlib
+import json
 import pathlib
 from importlib.machinery import SourceFileLoader
 
@@ -39,9 +41,24 @@ def test_control_plane_spec_covers_required_surface() -> None:
 
 def test_control_script_exposes_all_commands() -> None:
     text = SCRIPT.read_text()
-    for command in ("preflight", "health", "reconcile", "audit", "exit", "kill"):
+    for command in (
+        "bind-runtime",
+        "preflight",
+        "arm",
+        "disarm",
+        "pause",
+        "recover",
+        "state",
+        "health",
+        "reconcile",
+        "audit",
+        "exit",
+        "kill",
+    ):
         assert f'"{command}"' in text or f"'{command}'" in text, f"missing command: {command}"
     assert 'add_parser("preflight"' in text
+    assert 'add_parser("arm"' in text
+    assert 'add_parser("disarm"' in text
     assert 'add_parser("health"' in text
     assert 'add_parser("reconcile"' in text
     assert 'add_parser("exit"' in text
@@ -143,6 +160,13 @@ def test_committed_strategy_has_inner_protections() -> None:
     assert missing == []
 
 
+def test_strategy_entry_path_calls_fail_closed_gate() -> None:
+    text = (ROOT / "user_data" / "strategies" / "LiveExecutionCanaryStrategy.py").read_text()
+    assert "def confirm_trade_entry(" in text
+    assert "decision_from_environment()" in text
+    assert "return decision.allowed" in text
+
+
 def test_alerts_route_fail_verdicts_and_never_leak_credentials() -> None:
     text = SCRIPT.read_text()
     for marker in (
@@ -180,3 +204,73 @@ def test_preflight_is_fail_closed_on_unknown_inputs() -> None:
     kill_source = text[text.index("def kill") : text.index("def exit_all")]
     assert "api_login" not in kill_source
     assert "docker" in kill_source
+
+
+def test_bind_and_arm_outputs_are_accepted_by_strategy_gate(tmp_path, monkeypatch) -> None:
+    control = load_control()
+    gate_path = ROOT / "user_data" / "strategies" / "gmaq_entry_gate.py"
+    loader = SourceFileLoader("gmaq_entry_gate_control_test", str(gate_path))
+    spec = importlib.util.spec_from_loader("gmaq_entry_gate_control_test", loader)
+    gate = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    import sys
+
+    sys.modules[spec.name] = gate
+    spec.loader.exec_module(gate)
+
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"dry_run": True, "exchange": {"key": "", "secret": ""}}) + "\n")
+    config_sha = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    candidate_sha = "c" * 40
+
+    monkeypatch.setattr(control, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(control, "AUDIT_DIR", audit_dir)
+    monkeypatch.setattr(control, "AUDIT_PATH", audit_dir / "manifest.jsonl")
+    monkeypatch.setattr(control, "STATE_PATH", audit_dir / "state.json")
+    monkeypatch.setattr(control, "BINDING_PATH", audit_dir / "runtime-binding.json")
+    monkeypatch.setattr(
+        control,
+        "git_text",
+        lambda *args: candidate_sha if args == ("rev-parse", "HEAD") else "",
+    )
+
+    bound = control.bind_runtime("dryrun-control-0001", candidate_sha, config_sha, "dry_run")
+    assert bound["verdict"] == "BOUND_DISARMED"
+    binding = json.loads(control.BINDING_PATH.read_text())
+    control.write_state(
+        "PREFLIGHT_PASS",
+        **control.binding_fields(binding),
+        preflight_verdict="PASS",
+        preflight_expires_at_epoch=2_000_000_000,
+    )
+    monkeypatch.setattr(control.time, "time", lambda: 1_900_000_000)
+    armed = control.arm("demo-control-0001", 300)
+    assert armed["verdict"] == "ARMED"
+
+    decision = gate.evaluate_entry_gate(
+        state_path=control.STATE_PATH,
+        audit_path=control.AUDIT_PATH,
+        config_path=config_path,
+        expected_environment="dry_run",
+        expected_candidate_sha=candidate_sha,
+        expected_config_sha256=config_sha,
+        expected_run_id="dryrun-control-0001",
+        now_epoch=1_900_000_001,
+    )
+    assert decision.allowed is True
+
+    control.disarm("test_complete")
+    decision = gate.evaluate_entry_gate(
+        state_path=control.STATE_PATH,
+        audit_path=control.AUDIT_PATH,
+        config_path=config_path,
+        expected_environment="dry_run",
+        expected_candidate_sha=candidate_sha,
+        expected_config_sha256=config_sha,
+        expected_run_id="dryrun-control-0001",
+        now_epoch=1_900_000_002,
+    )
+    assert decision.allowed is False
+    assert decision.reason == "state_not_armed"

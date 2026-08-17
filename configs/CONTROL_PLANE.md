@@ -4,7 +4,8 @@
 
 This document specifies the control surface that must exist around the
 Freqtrade runtime before any live canary can even be proposed. Everything
-here is designed and validated under dry-run only.
+here is designed and validated under dry-run only. The live authorization
+plane is intentionally absent.
 This document does not authorize live trading. Live use additionally
 requires the same-day read-only exchange verification
 (`configs/LIVE_READINESS.md`) and a new, explicit, one-time authorization.
@@ -14,20 +15,24 @@ requires the same-day read-only exchange verification
 States: `DISARMED`, `PREFLIGHTING`, `PREFLIGHT_PASS`, `ARMED`, `PAUSED`,
 `KILLED`.
 
-- `DISARMED`: repository default. The bot may run dry-run.
+- `DISARMED`: repository and startup default. The bot may run dry-run, but
+  `confirm_trade_entry()` rejects every new entry.
 - `PREFLIGHTING`: `scripts/gmaq-control preflight` is checking the control
   surface.
 - `PREFLIGHT_PASS`: all preflight gates passed for the current exact
   configuration SHA. Any config change invalidates this state.
-- `ARMED`: only reachable with a fresh explicit authorization for a live
-  configuration. Never reachable from the committed dry-run config.
+- `ARMED`: a short-lived `DEMO_DRY_RUN_ENTRY` authorization only. It is bound
+  to the exact candidate commit, config digest, runtime run id, passing
+  preflight, expiry, and authorization audit record. It is not live authority.
 - `PAUSED`: operator or a protection halted trading while keeping the
   runtime alive.
 - `KILLED`: the independent kill switch fired. Restart requires a full
   preflight and a new authorization.
 
 Transitions allowed: `DISARMED -> PREFLIGHTING -> {PREFLIGHT_PASS | DISARMED}`;
-`PREFLIGHT_PASS -> ARMED` (authorization only); `ARMED -> PAUSED -> ARMED`;
+`PREFLIGHT_PASS -> ARMED` (fresh dry-run authorization only);
+`ARMED -> PAUSED`; a new preflight/authorization is required after stronger
+recovery boundaries;
 `* -> KILLED`; `KILLED -> DISARMED` (recovery). Everything else is invalid and
 must be refused by the control plane.
 
@@ -112,9 +117,17 @@ must be refused by the control plane.
 
 ## 10. Dry-run constraints
 
-- The committed configuration stays dry-run. The control plane validates
-  that: `dry_run` is true, key and secret are empty, protections are present,
-  and armed states are unreachable without fresh authorization.
+- The committed configuration stays dry-run. `scripts/gmaq up` and `restart`
+  create a new runtime binding and force `DISARMED` before the container is
+  started or recreated. Direct Compose startup receives `UNBOUND` identities
+  and therefore cannot pass the entry gate.
+- `LiveExecutionCanaryStrategy.confirm_trade_entry()` is the final entry
+  callback. It rereads the state on every attempt and rejects missing,
+  malformed, expired, wrong-environment, wrong-commit, wrong-config,
+  wrong-run-id, or broken-audit authorization.
+- `scripts/gmaq-control arm --authorization-id <id> --ttl-seconds <30..3600>`
+  can authorize only `DEMO_DRY_RUN_ENTRY` after a fresh `PREFLIGHT_PASS`.
+  There is no command in this candidate that can authorize live entry.
 - Live must not reuse `initial_state=running`,
   `cancel_open_orders_on_exit=false`, or `stoploss_on_exchange=false`
   without the explicit protections in this document, exchange-side order
@@ -124,5 +137,6 @@ must be refused by the control plane.
 ## Validation
 
 - Contract tests: `tests/test_control_plane_contract.py`.
+- Behavioral gate tests: `tests/test_entry_gate_behavior.py`.
 - Runtime preflight: `./scripts/gmaq-control preflight`.
 - Audit chain: `./scripts/gmaq-control audit verify`.

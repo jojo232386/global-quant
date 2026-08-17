@@ -1,0 +1,16 @@
+{
+  "captured_at_utc": "2026-08-17T11:55:04Z",
+  "purpose": "immutable starting point for the isolated P0 remediation branch",
+  "source_worktree": "/Users/ASUS/Desktop/global-quant-continuation",
+  "remediation_worktree": "/Users/ASUS/Desktop/global-quant-p0-remediation",
+  "branch": "codex/gmaq-p0-remediation",
+  "base_commit_sha": "d1b0706cce2ddb3d638b4f671be024e4084e5ed9",
+  "base_tree_sha": "c7c81c6000b75634eeafbe79b798b37f5adc210b",
+  "base_config_sha256": "38d31f7b750a58e6648efae807954a3ce4c8ada356e207636529f7988e34c726",
+  "base_compose_sha256": "aeb0ffca08dac473dacdaeb4596d0d43ef7b7374303f74c3cd15b9967e3e5a9d",
+  "pinned_image_digest": "sha256:50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486",
+  "candidate_runtime_launched": false,
+  "exchange_private_api_called": false,
+  "demo_or_live_order_submitted": false,
+  "continuation_soak_preserved": true
+}
