@@ -51,6 +51,8 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert "gmaq-control exit" in text
     assert "runtime-binding.json" in text
     assert "trap cleanup EXIT INT TERM" in text
+    assert "wait_control_verdict health HEALTHY" in text
+    assert "wait_control_verdict reconcile MATCH" in text
     smoke = text[text.index("if [[ $MODE == smoke ]]"):text.index("# A promoted soak")]
     assert "gmaq-control arm" not in smoke
     assert "SMOKE_ONLY_PASS" in smoke

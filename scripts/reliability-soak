@@ -69,20 +69,27 @@ json_verdict() {
 
 record_command() {
   local output=$1
-  local payload
+  local payload code
   shift
+  set +e
   payload=$("$@")
+  code=$?
+  set -e
   echo "$payload"
-  python3 - "$output" "$payload" <<'PY'
+  python3 - "$output" "$payload" "$code" <<'PY'
 import json
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
-record = json.loads(sys.argv[2])
+try:
+    record = json.loads(sys.argv[2])
+except json.JSONDecodeError:
+    record = {"ok": False, "verdict": "INVALID_OUTPUT", "command_exit_code": int(sys.argv[3])}
 with path.open("a") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\n")
 PY
+  return "$code"
 }
 
 wait_ping() {
@@ -104,6 +111,25 @@ PY
     fi
     sleep 2
   done
+}
+
+wait_control_verdict() {
+  local command=$1 expected=$2 attempts=0 payload="" code=1 verdict=""
+  while (( attempts < 60 )); do
+    attempts=$((attempts + 1))
+    set +e
+    payload=$(./scripts/gmaq-control "$command")
+    code=$?
+    set -e
+    verdict=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("verdict", ""))' "$payload" 2>/dev/null || true)
+    if (( code == 0 )) && [[ $verdict == "$expected" ]]; then
+      echo "$payload"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "$payload"
+  return 1
 }
 
 append_event() {
@@ -194,8 +220,8 @@ record_command "$EVIDENCE_DIR/audit-verify.json" ./scripts/gmaq-control audit ve
 [[ $(json_verdict <"$EVIDENCE_DIR/audit-verify.json") == VERIFIED ]]
 
 if [[ $MODE == smoke ]]; then
-  record_command "$EVIDENCE_DIR/health-samples.jsonl" ./scripts/gmaq-control health
-  record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile
+  record_command "$EVIDENCE_DIR/health-samples.jsonl" wait_control_verdict health HEALTHY
+  record_command "$EVIDENCE_DIR/reconcile-records.jsonl" wait_control_verdict reconcile MATCH
   [[ $(json_verdict <"$EVIDENCE_DIR/reconcile-records.jsonl") == MATCH ]]
   cp "$EVIDENCE_DIR/reconcile-records.jsonl" "$EVIDENCE_DIR/final-exit.json"
   append_event E1 HEALTHY "credential-free health smoke"
