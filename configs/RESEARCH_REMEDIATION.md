@@ -37,6 +37,10 @@ Binance at <https://developers.binance.com/en/docs/catalog/core-trading-derivati
 - Existing point-in-time studies ended `REJECT`, so no strategy is eligible for
   promotion. The fixed execution canary is intentionally `NOT_PROVEN_ALPHA` and
   may only be used to test the Demo order lifecycle under separate authority.
+- The new preregistered PIT funding-shock dollar-neutral study also ended
+  `REJECT`: OOS return -17.20%, Sharpe -1.236, max drawdown 33.92%, and stress
+  return -33.29%. All frozen parameter neighbors and the 15-minute delayed
+  stress run were negative. This hypothesis is closed, not a tuning target.
 - A corrected result must be a new preregistration; changing the old study in
   place after seeing its outcome would contaminate the research record.
 

@@ -1,4 +1,6 @@
+import hashlib
 import importlib.util
+import json
 import pathlib
 from importlib.machinery import SourceFileLoader
 
@@ -70,3 +72,17 @@ def test_study_is_explicitly_non_promotable_with_current_inputs():
 
 def module_id():
     return "study-2026-08-17-pit-funding-shock-neutral"
+
+
+def test_committed_result_is_bound_to_frozen_engine_and_preregistration():
+    study = ROOT / "research" / "backtests" / module_id()
+    result = json.loads((study / "results.json").read_text())
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    assert result["study_id"] == module_id()
+    assert result["verdict"] == "REJECT"
+    assert result["promotion_eligible"] is False
+    assert result["engine_sha256"] == digest(SCRIPT)
+    assert result["preregistration_sha256"] == digest(study / "preregistration.md")
+    assert result["cost_model_sha256"] == digest(ROOT / "configs" / "execution-costs.json")
+    assert result["out_of_sample"]["total_return"] < 0
+    assert result["out_of_sample"]["stress"]["total_return"] < 0

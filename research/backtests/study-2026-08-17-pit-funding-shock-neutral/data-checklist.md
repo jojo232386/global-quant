@@ -16,4 +16,16 @@
 - account limitation: fee tier and maintenance margin are placeholders until a
   separately authorized, read-only, version-bound verification.
 
+## Run-time evidence
+
+- PIT manifest file SHA-256:
+  `2dc62f0897e4c43bcc62ebc80b8285370fa1c7c919956a53325fed155c581c8e`
+- dataset SHA-256 recorded inside that manifest:
+  `4e2a8a7a3eebfa0011657bce0fe3e77b138db1369126a990b135bde31f8ee48f`
+- PIT universes SHA-256:
+  `47bdcd6e646ce3c92a6ca870378b4266c88abe42bac600c11af04aa0fb59f785`
+- 100 candidates, 77 daily-universe symbols, 61 scoreable OOS rebalance days.
+- the supplied manifest has no `funding_coverage` request-window section;
+  `funding_request_window_complete=false` is retained in `results.json`.
+
 The data supports falsification research but cannot support strategy promotion.

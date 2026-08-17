@@ -123,6 +123,7 @@ snapshot itself does not authorize live trading.
 ./scripts/gmaq-research-crosssection --rule funding_crosssection
 ./scripts/gmaq-fetch-pit --start ... --end ...             # point-in-time universe
 ./scripts/gmaq-research-pit --rule funding_crosssection
+./scripts/gmaq-research-pit-funding-shock-neutral --data-dir /path/to/pit
 ```
 
 Every study lives under `research/backtests/` with a locked
