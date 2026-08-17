@@ -216,8 +216,8 @@ mkdir -p "$EVIDENCE_DIR"
 ./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
 append_event E0 EXACT_MATCH "isolated runtime manifest bound"
 
-record_command "$EVIDENCE_DIR/audit-verify.json" ./scripts/gmaq-control audit verify
-[[ $(json_verdict <"$EVIDENCE_DIR/audit-verify.json") == VERIFIED ]]
+record_command "$EVIDENCE_DIR/initial-audit-verify.json" ./scripts/gmaq-control audit verify
+[[ $(json_verdict <"$EVIDENCE_DIR/initial-audit-verify.json") == VERIFIED ]]
 
 if [[ $MODE == smoke ]]; then
   record_command "$EVIDENCE_DIR/health-samples.jsonl" wait_control_verdict health HEALTHY
@@ -226,6 +226,8 @@ if [[ $MODE == smoke ]]; then
   cp "$EVIDENCE_DIR/reconcile-records.jsonl" "$EVIDENCE_DIR/final-exit.json"
   append_event E1 HEALTHY "credential-free health smoke"
   append_event E2 MATCH "REST and database zero-state match"
+  record_command "$EVIDENCE_DIR/final-audit-verify.json" ./scripts/gmaq-control audit verify
+  [[ $(json_verdict <"$EVIDENCE_DIR/final-audit-verify.json") == VERIFIED ]]
   write_verdict SMOKE_ONLY_PASS "runtime verified while entry gate remained DISARMED; not 48-72h evidence"
   FINISHED=1
   ./scripts/gmaq stop >/dev/null

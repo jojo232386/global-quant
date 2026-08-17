@@ -50,6 +50,8 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert "gmaq-control reconcile" in text
     assert "gmaq-control exit" in text
     assert "runtime-binding.json" in text
+    assert "initial-audit-verify.json" in text
+    assert text.count("final-audit-verify.json") >= 2
     assert "trap cleanup EXIT INT TERM" in text
     assert "wait_control_verdict health HEALTHY" in text
     assert "wait_control_verdict reconcile MATCH" in text
