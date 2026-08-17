@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Build a point-in-time universe dataset for the PIT studies.
+
+Step 1: candidate pool = today's top-N USD-M perps by 24h quote volume.
+Step 2: fetch 1d klines for every candidate; for each trading day D the
+        universe is the top-15 by the 1d quote volume of day D-2 (the last
+        complete daily bar known before the D-1 23:45 signal time).
+Step 3: fetch 15m klines + funding history for every symbol that appears in
+        the point-in-time universe on at least one day.
+
+Credential-free. This script never reads or prints API credentials.
+"""
+
+import argparse
+import calendar
+import hashlib
+import importlib.util
+import json
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from importlib.machinery import SourceFileLoader
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+FAPI = "https://fapi.binance.com"
+TIMEOUT_S = 10
+DAY_MS = 86_400_000
+
+
+def load_module(name, path):
+    loader = SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def fetch_daily_volumes(symbol: str, start_ms: int, end_ms: int) -> dict[int, float]:
+    params = urllib.parse.urlencode(
+        {"symbol": symbol, "interval": "1d", "startTime": start_ms, "endTime": end_ms, "limit": 1000}
+    )
+    request = urllib.request.Request(f"{FAPI}/fapi/v1/klines?{params}", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+            rows = json.loads(response.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+        return {}
+    return {int(row[0]): float(row[7]) for row in rows if float(row[7]) > 0}
+
+
+def build_daily_universes(volumes: dict[str, dict[int, float]], start_ms: int, end_ms: int, top_n: int) -> dict[int, list[str]]:
+    universes: dict[int, list[str]] = {}
+    day = start_ms
+    while day <= end_ms:
+        ref_day = day - 2 * DAY_MS
+        scores = {symbol: series.get(ref_day) for symbol, series in volumes.items()}
+        ranked = sorted(
+            ((s, v) for s, v in scores.items() if v is not None),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        universes[day] = [symbol for symbol, _ in ranked[:top_n]]
+        day += DAY_MS
+    return universes
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-fetch-pit", description="Build point-in-time universe dataset")
+    parser.add_argument("--candidates", type=int, default=100)
+    parser.add_argument("--top", type=int, default=15)
+    parser.add_argument("--start", required=True, help="YYYY-MM-DD UTC")
+    parser.add_argument("--end", required=True, help="YYYY-MM-DD UTC")
+    parser.add_argument("--out-dir", default=str(ROOT / "user_data" / "data" / "pit"))
+    args = parser.parse_args(argv)
+
+    start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
+    end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
+    out_dir = pathlib.Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    universe_script = load_module("u", ROOT / "scripts" / "gmaq-fetch-universe")
+    fetcher = load_module("k", ROOT / "scripts" / "gmaq-fetch-klines")
+
+    ticker = fetcher.get_json(f"{FAPI}/fapi/v1/ticker/24hr")
+    if not ticker:
+        print(json.dumps({"ok": False, "error": "ticker fetch failed"}, indent=2))
+        return 1
+    candidates = universe_script.select_universe(ticker, args.candidates)
+    print(f"candidates ({len(candidates)}): {' '.join(candidates)}")
+
+    volumes = {}
+    for symbol in candidates:
+        series = fetch_daily_volumes(symbol, start_ms - 2 * DAY_MS, end_ms)
+        if series:
+            volumes[symbol] = series
+        time.sleep(0.3)
+    print(f"daily volumes fetched for {len(volumes)} symbols")
+
+    universes = build_daily_universes(volumes, start_ms, end_ms, args.top)
+    universe_text = json.dumps(universes, ensure_ascii=False, sort_keys=True)
+    needed = sorted({symbol for symbols in universes.values() for symbol in symbols})
+    print(f"point-in-time universe spans {len(needed)} symbols")
+
+    partials = {}
+    for symbol in needed:
+        klines_path = out_dir / f"{symbol}-15m.jsonl"
+        funding_path = out_dir / f"{symbol}-funding.jsonl"
+        if klines_path.exists() and funding_path.exists():
+            continue  # resume: already fetched
+        rows = fetcher.fetch_range(symbol, start_ms, end_ms, "15m", strict=False)
+        lines = fetcher.serialize(rows)
+        klines_path.write_text("".join(line + "\n" for line in lines))
+        expected = (end_ms - start_ms) // 900_000 + 1
+        if len(lines) < expected:
+            partials[symbol] = f"{len(lines)}/{expected}"
+        funding = []
+        try:
+            params = urllib.parse.urlencode({"symbol": symbol, "limit": 1000})
+            request = urllib.request.Request(f"{FAPI}/fapi/v1/fundingRate?{params}", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+                funding = json.loads(response.read().decode())
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+            pass
+        funding_text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in funding)
+        funding_path.write_text(funding_text)
+        time.sleep(0.3)
+
+    manifest = {
+        "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "candidates": candidates,
+        "top_n": args.top,
+        "start": args.start,
+        "end": args.end,
+        "universes_sha256": sha256_text(universe_text),
+        "universe_symbols": needed,
+        "partial_klines": partials,
+    }
+    manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    manifest["sha256"] = sha256_text(manifest_text)
+    (out_dir / "pit-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    (out_dir / "pit-universes.json").write_text(json.dumps(universes, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"universes_days": len(universes), "symbols": len(needed), "sha256": manifest["sha256"]}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

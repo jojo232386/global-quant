@@ -35,16 +35,18 @@ def get_json(url: str) -> list | None:
     return None
 
 
-def fetch_range(symbol: str, start_ms: int, end_ms: int) -> list[list]:
+def fetch_range(symbol: str, start_ms: int, end_ms: int, interval: str = "15m", strict: bool = True) -> list[list]:
     rows: list[list] = []
     cursor = start_ms
     while cursor < end_ms:
         params = urllib.parse.urlencode(
-            {"symbol": symbol, "interval": "15m", "startTime": cursor, "endTime": end_ms, "limit": LIMIT}
+            {"symbol": symbol, "interval": interval, "startTime": cursor, "endTime": end_ms, "limit": LIMIT}
         )
         batch = get_json(f"{KLINES_URL}?{params}")
         if not batch:
-            raise RuntimeError(f"fetch failed at cursor {cursor}")
+            if strict:
+                raise RuntimeError(f"fetch failed at cursor {cursor}")
+            break  # partial data; caller records the shortfall
         rows.extend(batch)
         last_open = batch[-1][0]
         if last_open <= cursor:
@@ -81,12 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", required=True, help="start date YYYY-MM-DD (UTC)")
     parser.add_argument("--end", required=True, help="end date YYYY-MM-DD (UTC)")
     parser.add_argument("--out", required=True, help="output .jsonl path")
+    parser.add_argument("--interval", default="15m", help="klines interval, e.g. 15m or 1d")
     args = parser.parse_args(argv)
 
     start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
     end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
 
-    rows = fetch_range(args.symbol, start_ms, end_ms)
+    rows = fetch_range(args.symbol, start_ms, end_ms, args.interval)
     lines = serialize(rows)
     payload = "".join(line + "\n" for line in lines)
 
@@ -97,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     digest = sha256_text(payload)
     meta = {
         "symbol": args.symbol,
-        "interval": "15m",
+        "interval": args.interval,
         "start": args.start,
         "end": args.end,
         "bars": len(lines),
