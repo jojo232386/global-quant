@@ -33,14 +33,55 @@ def load_klines_fetcher():
     return module
 
 
-def fetch_funding(symbol: str, limit: int = 1000) -> list:
-    params = urllib.parse.urlencode({"symbol": symbol, "limit": limit})
-    request = urllib.request.Request(f"{FUNDING_URL}?{params}", headers={"Accept": "application/json"})
+def get_json(url: str) -> list | None:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-            return json.loads(response.read().decode())
+            value = json.loads(response.read().decode())
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
-        return []
+        return None
+    return value if isinstance(value, list) else None
+
+
+def fetch_funding_history(
+    symbol: str, start_ms: int, end_ms: int, fetch_json=get_json
+) -> tuple[list[dict], bool]:
+    """Fetch the exact inclusive historical window in ascending pages."""
+    cursor = start_ms
+    records: list[dict] = []
+    seen: set[tuple[int, str, str]] = set()
+    while cursor <= end_ms:
+        params = urllib.parse.urlencode(
+            {
+                "symbol": symbol,
+                "startTime": cursor,
+                "endTime": end_ms,
+                "limit": 1000,
+            }
+        )
+        batch = fetch_json(f"{FUNDING_URL}?{params}")
+        if batch is None:
+            return records, False
+        if not batch:
+            break
+        for item in batch:
+            key = (
+                int(item["fundingTime"]),
+                str(item["fundingRate"]),
+                str(item.get("rateType", "Regular")),
+            )
+            if key not in seen:
+                records.append(item)
+                seen.add(key)
+        last_time = int(batch[-1]["fundingTime"])
+        if last_time < cursor:
+            return records, False
+        if len(batch) < 1000 or last_time >= end_ms:
+            break
+        cursor = last_time + 1
+        time.sleep(0.3)
+    records.sort(key=lambda item: int(item["fundingTime"]))
+    return records, True
 
 
 def sha256_text(text: str) -> str:
@@ -69,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         "start": args.start,
         "end": args.end,
         "symbols": {},
+        "funding_coverage": {},
     }
 
     for symbol in symbols:
@@ -81,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         klines_path = out_dir / f"{symbol}-15m.jsonl"
         klines_path.write_text("".join(line + "\n" for line in lines))
 
-        funding = fetch_funding(symbol)
+        funding, funding_complete = fetch_funding_history(symbol, start_ms, end_ms)
         funding_path = out_dir / f"{symbol}-funding.jsonl"
         funding_text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in funding)
         funding_path.write_text(funding_text)
@@ -91,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
             "klines_sha256": sha256_text("".join(line + "\n" for line in lines)),
             "funding_records": len(funding),
             "funding_sha256": sha256_text(funding_text),
+        }
+        manifest["funding_coverage"][symbol] = {
+            "complete_request_window": funding_complete,
+            "records": len(funding),
+            "first_funding_time": int(funding[0]["fundingTime"]) if funding else None,
+            "last_funding_time": int(funding[-1]["fundingTime"]) if funding else None,
         }
         print(f"OK {symbol}: {len(lines)} bars, {len(funding)} funding records")
         time.sleep(0.4)

@@ -42,6 +42,7 @@ def test_universe_uses_d2_volume_without_lookahead() -> None:
 
 def test_pit_runner_executes_open_to_open() -> None:
     module = load("p", SCRIPT)
+    assert module.PARAMS["stress_cost_bps_per_side"] == 30.0
     day = 1769990400000 + 86_400_000
     symbols = {
         "AAA": {
@@ -66,6 +67,49 @@ def test_pit_runner_executes_open_to_open() -> None:
     assert trade["net_return"] == 220.0 / 210.0 - 1
 
 
+def test_pit_runner_charges_funding_inside_hold_window() -> None:
+    module = load("p_funding", SCRIPT)
+    day = 1770076800000
+    symbols = {
+        "AAA": {
+            "open": {day: 100.0, day + module.DAY_MS: 101.0},
+            "close": {day - 900_000: 100.0},
+            "funding": [
+                (day - 900_001, -0.5),
+                (day + 8 * 3_600_000, 0.001),
+                (day + module.DAY_MS + 1, 0.5),
+            ],
+        }
+    }
+    params = dict(module.PARAMS, legs=1)
+    trade = module.run_pit(
+        symbols, {day: ["AAA"]}, "funding_crosssection", 0.0, 0.0, params
+    )[0]
+    assert trade["funding_return"] == 0.001
+    assert abs(trade["net_return"] - 0.009) < 1e-12
+
+
+def test_funding_fetch_pages_the_exact_historical_window() -> None:
+    module = load("f_funding", FETCH_SCRIPT)
+    calls = []
+    first = [
+        {"fundingTime": 1000 + i, "fundingRate": "0.001"}
+        for i in range(1000)
+    ]
+    second = [{"fundingTime": 2000, "fundingRate": "-0.001"}]
+
+    def fake(url):
+        calls.append(url)
+        return first if len(calls) == 1 else second
+
+    records, complete = module.fetch_funding_history("ETHUSDT", 1000, 3000, fake)
+    assert complete is True
+    assert len(records) == 1001
+    assert "startTime=1000" in calls[0]
+    assert "startTime=2000" in calls[1]
+    assert "endTime=3000" in calls[0]
+
+
 def test_pit_studies_artifacts_and_verdict_consistent() -> None:
     module = load("p", SCRIPT)
     shared = load("shared", ROOT / "scripts" / "gmaq-research-backtest")
@@ -82,5 +126,8 @@ def test_fetch_script_pins_and_policies() -> None:
     text = FETCH_SCRIPT.read_text()
     assert "top-15 by the 1d quote volume of day D-2" in text
     assert "universes_sha256" in text
+    assert "funding_coverage" in text
+    assert "funding_gaps" in text
+    assert "startTime" in text and "endTime" in text
     assert "X-MBX-APIKEY" not in text
     assert "signature" not in text

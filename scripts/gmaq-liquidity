@@ -7,6 +7,7 @@ Credential-free: this script never reads or prints API credentials.
 """
 
 import argparse
+import copy
 import json
 import pathlib
 import sys
@@ -18,22 +19,36 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "user_data" / "config.json"
 AUDIT_DIR = ROOT / "user_data" / "audit"
 OUTPUT_PATH = AUDIT_DIR / "liquidity-snapshot.json"
+COST_INPUT_PATH = ROOT / "configs" / "execution-costs.json"
 
 FAPI = "https://fapi.binance.com"
 DEPTH_URL = f"{FAPI}/fapi/v1/depth"
 BOOK_TICKER_URL = f"{FAPI}/fapi/v1/ticker/bookTicker"
 PREMIUM_URL = f"{FAPI}/fapi/v1/premiumIndex"
 FUNDING_URL = f"{FAPI}/fapi/v1/fundingRate"
+FUNDING_INFO_URL = f"{FAPI}/fapi/v1/fundingInfo"
 TIMEOUT_S = 8
 
 SIZES_USDT = [25.0, 100.0, 1000.0, 10000.0]
 DEPTH_SCALES = [1.0, 0.5, 0.1]
 SPREAD_STRESS = [1.0, 2.0, 5.0]
-LATENCY_DRIFT_BPS_PER_S = 2.0
 LATENCY_SECONDS = [1.0, 5.0]
-TAKER_FEE = 0.0005  # PLACEHOLDER_UNVERIFIED
-MMR = 0.005  # PLACEHOLDER_UNVERIFIED (tier-1 maintenance margin rate)
 LEVERAGES = [1.0, 2.0, 3.0]
+
+
+def load_cost_inputs(path: pathlib.Path = COST_INPUT_PATH) -> dict:
+    value = json.loads(path.read_text())
+    if value.get("live_authorization") is not False:
+        raise ValueError("cost inputs must never authorize live trading")
+    if not str(value.get("taker_fee_source", "")).startswith("PLACEHOLDER_UNVERIFIED"):
+        raise ValueError("account fee must remain unverified until authenticated check")
+    return value
+
+
+COST_INPUTS = load_cost_inputs()
+TAKER_FEE = float(COST_INPUTS["taker_fee_rate"])
+MMR = float(COST_INPUTS["maintenance_margin_rate"])
+LATENCY_DRIFT_BPS_PER_S = float(COST_INPUTS["latency_adverse_drift_bps_per_second"])
 
 
 def get_json(url: str) -> dict | list | None:
@@ -108,6 +123,18 @@ def scale_depth(levels: list[tuple[float, float]], scale: float) -> list[tuple[f
     return [(price, qty * scale) for price, qty in levels]
 
 
+def shift_book_to_best(
+    levels: list[tuple[float, float]], new_best: float
+) -> list[tuple[float, float]]:
+    """Move every level by the same absolute amount so stressed spread
+    changes executable prices while preserving level spacing and quantity."""
+    if not levels:
+        return []
+    delta = new_best - levels[0][0]
+    shifted = [(price + delta, qty) for price, qty in levels]
+    return shifted if all(price > 0 for price, _ in shifted) else []
+
+
 def liquidation_price(entry: float, leverage: float, mmr: float, side: str) -> float | None:
     if leverage <= 0:
         return None
@@ -142,6 +169,13 @@ def size_report(size: float, bids: list, asks: list, spread: dict, mark: float |
     buy_bps_mid = slippage_bps(buy["vwap"], mid)
     sell_bps_mid = slippage_bps(sell["vwap"], mid)
     roundtrip_bps = (buy_bps + (-sell_bps)) if (buy_bps is not None and sell_bps is not None) else None
+    roundtrip_market_bps = (
+        buy_bps_mid + (-sell_bps_mid)
+        if (buy_bps_mid is not None and sell_bps_mid is not None)
+        else None
+    )
+    fee_bps = TAKER_FEE * 10_000
+    all_in_bps = roundtrip_market_bps + 2 * fee_bps if roundtrip_market_bps is not None else None
     mark_deviation_bps = slippage_bps(mid, mark)
     return {
         "size_usdt": size,
@@ -158,9 +192,41 @@ def size_report(size: float, bids: list, asks: list, spread: dict, mark: float |
             "unfillable": sell["notional_remaining"] > 1e-9,
         },
         "roundtrip_slippage_bps": round(roundtrip_bps, 4) if roundtrip_bps is not None else None,
-        "taker_fee_bps": TAKER_FEE * 10_000,
+        "roundtrip_market_bps": round(roundtrip_market_bps, 4) if roundtrip_market_bps is not None else None,
+        "taker_fee_bps_per_side": fee_bps,
+        "all_in_roundtrip_bps": round(all_in_bps, 4) if all_in_bps is not None else None,
         "mark_vs_mid_bps": round(mark_deviation_bps, 4) if mark_deviation_bps is not None else None,
     }
+
+
+def apply_latency_drift(report: dict, drift_bps: float) -> dict:
+    """Apply adverse drift to both executable sides, not just a label."""
+    stressed = copy.deepcopy(report)
+    drift = drift_bps / 10_000
+    if stressed["buy"]["vwap"] is not None:
+        stressed["buy"]["vwap"] = round(stressed["buy"]["vwap"] * (1 + drift), 8)
+    if stressed["sell"]["vwap"] is not None:
+        stressed["sell"]["vwap"] = round(stressed["sell"]["vwap"] * (1 - drift), 8)
+    for side, sign in (("buy", 1.0), ("sell", -1.0)):
+        for field in ("slippage_bps_vs_best", "slippage_bps_vs_mid"):
+            if stressed[side][field] is not None:
+                stressed[side][field] = round(stressed[side][field] + sign * drift_bps, 4)
+    for field in ("roundtrip_slippage_bps", "roundtrip_market_bps", "all_in_roundtrip_bps"):
+        if stressed[field] is not None:
+            stressed[field] = round(stressed[field] + 2 * drift_bps, 4)
+    stressed["latency_adverse_drift_bps_per_side"] = drift_bps
+    return stressed
+
+
+def apply_fee_rate(report: dict, fee_rate: float) -> dict:
+    stressed = copy.deepcopy(report)
+    fee_bps = fee_rate * 10_000
+    stressed["taker_fee_bps_per_side"] = fee_bps
+    market_bps = stressed.get("roundtrip_market_bps")
+    stressed["all_in_roundtrip_bps"] = (
+        round(market_bps + 2 * fee_bps, 4) if market_bps is not None else None
+    )
+    return stressed
 
 
 def run_snapshot(symbol: str) -> dict:
@@ -188,6 +254,12 @@ def run_snapshot(symbol: str) -> dict:
     funding = get_json(f"{FUNDING_URL}?symbol={symbol}&limit=1")
     funding_rate = float(funding[0].get("fundingRate")) if isinstance(funding, list) and funding else None
     checks.append({"name": "funding rate", "passed": funding_rate is not None, "detail": f"rate={funding_rate}"})
+    funding_info = get_json(FUNDING_INFO_URL)
+    funding_info_item = next(
+        (item for item in funding_info if isinstance(item, dict) and item.get("symbol") == symbol),
+        None,
+    ) if isinstance(funding_info, list) else None
+    funding_interval_hours = float(funding_info_item.get("fundingIntervalHours", 8)) if funding_info_item else 8.0
 
     baseline = [size_report(size, bids, asks, spread, mark) for size in SIZES_USDT] if bids and asks else []
 
@@ -210,8 +282,11 @@ def run_snapshot(symbol: str) -> dict:
             "mid": spread["mid"],
             "spreadBps": spread["spreadBps"] * factor,
         }
+        stressed_bids = shift_book_to_best(bids, stressed_spread["bid"])
+        stressed_asks = shift_book_to_best(asks, stressed_spread["ask"])
         spread_stress[f"spread_x{factor:g}"] = [
-            size_report(size, bids, asks, stressed_spread, mark) for size in SIZES_USDT
+            size_report(size, stressed_bids, stressed_asks, stressed_spread, mark)
+            for size in SIZES_USDT
         ]
 
     latency_stress = {}
@@ -219,15 +294,20 @@ def run_snapshot(symbol: str) -> dict:
         drift_bps = LATENCY_DRIFT_BPS_PER_S * seconds
         latency_stress[f"latency_{seconds:g}s"] = {
             "assumed_drift_bps": drift_bps,
-            "note": "worst-case adverse drift applied additively to measured slippage",
+            "scenarios": [apply_latency_drift(item, drift_bps) for item in baseline],
+            "note": "worst-case adverse drift applied directly to buy/sell VWAP",
         }
+
+    fee_stress = {
+        "taker_fee_x2": [apply_fee_rate(item, TAKER_FEE * 2) for item in baseline]
+    }
 
     funding_parts = {}
     if funding_rate is not None:
         for hours in (8.0, 24.0, 72.0):
             funding_parts[f"{hours:g}h"] = {
-                "carry_per_usdt": funding_carry(funding_rate, 8.0, 1.0, hours),
-                "stressed_5x_per_usdt": funding_carry(funding_rate * 5, 8.0, 1.0, hours),
+                "carry_per_usdt": funding_carry(funding_rate, funding_interval_hours, 1.0, hours),
+                "stressed_5x_per_usdt": funding_carry(funding_rate * 5, funding_interval_hours, 1.0, hours),
             }
 
     liquidations = {}
@@ -259,10 +339,12 @@ def run_snapshot(symbol: str) -> dict:
         "indexPrice": index,
         "lastFundingRate": last_funding,
         "fundingRate": funding_rate,
+        "fundingIntervalHours": funding_interval_hours,
         "takerFeePlaceholder": TAKER_FEE,
+        "costInputs": COST_INPUTS,
         "mmrPlaceholder": MMR,
         "baseline": baseline,
-        "stress": {"depth": stress, "spread": spread_stress, "latency": latency_stress},
+        "stress": {"depth": stress, "spread": spread_stress, "latency": latency_stress, "fee": fee_stress},
         "fundingCarry": funding_parts,
         "liquidation": liquidations,
         "adl": {

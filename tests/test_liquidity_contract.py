@@ -78,6 +78,37 @@ def test_depth_stress_scales_quantities() -> None:
     assert tenth == [(100.0, 1.0)]
 
 
+def test_spread_and_latency_stress_change_executable_fills() -> None:
+    module = load_liquidity()
+    bids = [(99.0, 10.0), (98.0, 10.0)]
+    asks = [(101.0, 10.0), (102.0, 10.0)]
+    spread = module.spread_from_book(99.0, 101.0)
+    baseline = module.size_report(100.0, bids, asks, spread, 100.0)
+    stressed_spread = {"bid": 98.0, "ask": 102.0, "mid": 100.0, "spreadBps": 400.0}
+    stressed = module.size_report(
+        100.0,
+        module.shift_book_to_best(bids, 98.0),
+        module.shift_book_to_best(asks, 102.0),
+        stressed_spread,
+        100.0,
+    )
+    assert stressed["buy"]["vwap"] > baseline["buy"]["vwap"]
+    assert stressed["sell"]["vwap"] < baseline["sell"]["vwap"]
+    assert stressed["all_in_roundtrip_bps"] > baseline["all_in_roundtrip_bps"]
+
+    delayed = module.apply_latency_drift(baseline, 10.0)
+    assert delayed["buy"]["vwap"] > baseline["buy"]["vwap"]
+    assert delayed["sell"]["vwap"] < baseline["sell"]["vwap"]
+    assert delayed["all_in_roundtrip_bps"] == baseline["all_in_roundtrip_bps"] + 20.0
+
+
+def test_fee_source_is_machine_readable_and_unverified() -> None:
+    module = load_liquidity()
+    assert module.COST_INPUTS["taker_fee_source"].startswith("PLACEHOLDER_UNVERIFIED")
+    assert module.COST_INPUTS["live_authorization"] is False
+    assert module.TAKER_FEE == module.COST_INPUTS["taker_fee_rate"]
+
+
 def test_liquidation_distance_matches_leverage() -> None:
     module = load_liquidity()
     entry = 3000.0
@@ -100,7 +131,7 @@ def test_funding_carry_per_interval() -> None:
 
 def test_script_is_credential_free_and_fail_closed() -> None:
     text = SCRIPT.read_text()
-    for endpoint in ("/fapi/v1/depth", "/fapi/v1/ticker/bookTicker", "/fapi/v1/premiumIndex", "/fapi/v1/fundingRate"):
+    for endpoint in ("/fapi/v1/depth", "/fapi/v1/ticker/bookTicker", "/fapi/v1/premiumIndex", "/fapi/v1/fundingRate", "/fapi/v1/fundingInfo"):
         assert endpoint in text, f"missing endpoint: {endpoint}"
     assert "X-MBX-APIKEY" not in text
     assert "signature" not in text

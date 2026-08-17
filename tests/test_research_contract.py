@@ -120,3 +120,21 @@ def test_research_never_authorizes_live_trading() -> None:
     for name, path in ARTIFACTS.items():
         text = path.read_text()
         assert "does not authorize live trading" in text, name
+
+
+def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
+    text = (ROOT / "configs" / "RESEARCH_REMEDIATION.md").read_text()
+    assert "PROMOTION_BLOCKED = TRUE" in text
+    for defect in (
+        "stop loss",
+        "daily risk metrics",
+        "funding",
+        "spread stress",
+        "latency stress",
+        "cost provenance",
+        "funding history",
+    ):
+        assert defect in text
+    assert "today's top-100" in text
+    assert "not silently overwritten" in text
+    assert "does not authorize Demo entries or live trading" in text

@@ -8,6 +8,7 @@ This script does not authorize live trading.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -20,12 +21,28 @@ MULTI_DIR = ROOT / "user_data" / "data" / "multi"
 SPLIT_UTC_MS = 1781568000000  # 2026-06-16T00:00:00Z
 DAY_MS = 86_400_000
 BAR_MS = 900_000
+COST_MODEL_PATH = ROOT / "configs" / "execution-costs.json"
+
+
+def load_cost_params(path: pathlib.Path = COST_MODEL_PATH) -> dict:
+    model = json.loads(path.read_text())
+    fee_bps = float(model["taker_fee_rate"]) * 10_000
+    slippage_bps = float(model["baseline_slippage_bps_per_side"])
+    return {
+        "baseline": fee_bps + slippage_bps,
+        "stress": fee_bps * float(model["stress_fee_multiplier"])
+        + slippage_bps * float(model["stress_slippage_multiplier"]),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+COST_PARAMS = load_cost_params()
 
 PARAMS = {
     "notional": 100.0,
     "initial_equity": 1000.0,
-    "cost_bps_per_side": 15.0,
-    "stress_cost_bps_per_side": 30.0,
+    "cost_bps_per_side": COST_PARAMS["baseline"],
+    "stress_cost_bps_per_side": COST_PARAMS["stress"],
     "stress_funding_buffer_bps": 1.0,
     "legs": 3,
     "universe_top": 15,
@@ -93,7 +110,24 @@ def select_legs(scores: dict[str, float | None], legs: int, reverse: bool) -> li
     return [symbol for symbol, _ in valid[:legs]]
 
 
-def run_cross_section(symbols: dict[str, dict], rule: str, cost_per_side: float, funding_buffer: float, params: dict) -> list[dict]:
+def funding_return_between(
+    symbol_data: dict, entry_ts_ms: int, exit_ts_ms: int, multiplier: float = 1.0
+) -> float:
+    return sum(
+        rate
+        for ts, rate in symbol_data.get("funding", [])
+        if entry_ts_ms < ts <= exit_ts_ms
+    ) * multiplier
+
+
+def run_cross_section(
+    symbols: dict[str, dict],
+    rule: str,
+    cost_per_side: float,
+    funding_buffer: float,
+    params: dict,
+    funding_multiplier: float = 1.0,
+) -> list[dict]:
     if rule == "funding_crosssection":
         signal_fn = funding_mean_until
         reverse = False  # ascending: lowest funding first
@@ -122,7 +156,15 @@ def run_cross_section(symbols: dict[str, dict], rule: str, cost_per_side: float,
             if entry is None or exit_price is None or entry <= 0:
                 continue
             gross = exit_price / entry
-            net = gross * (1 - cost_per_side) / (1 + cost_per_side) - 1 - funding_buffer
+            funding_return = funding_return_between(
+                data, day_ts, day_ts + DAY_MS, funding_multiplier
+            )
+            net = (
+                gross * (1 - cost_per_side) / (1 + cost_per_side)
+                - 1
+                - funding_return
+                - funding_buffer
+            )
             trades.append(
                 {
                     "entry_ts_ms": day_ts,
@@ -132,6 +174,7 @@ def run_cross_section(symbols: dict[str, dict], rule: str, cost_per_side: float,
                     "exit": round(exit_price, 8),
                     "net_return": net,
                     "notional": params["notional"],
+                    "funding_return": funding_return,
                 }
             )
         day_ts += DAY_MS
@@ -172,22 +215,37 @@ def main(argv: list[str] | None = None) -> int:
     stress_buffer = PARAMS["stress_funding_buffer_bps"] / 10_000
 
     baseline = run_cross_section(symbols, args.rule, c, 0.0, PARAMS)
-    stress = run_cross_section(symbols, args.rule, stress_c, stress_buffer, PARAMS)
+    stress = run_cross_section(
+        symbols, args.rule, stress_c, stress_buffer, PARAMS, funding_multiplier=5.0
+    )
 
     train_base = [t for t in baseline if t["entry_ts_ms"] < SPLIT_UTC_MS]
     oos_base = [t for t in baseline if t["entry_ts_ms"] >= SPLIT_UTC_MS]
     oos_stress = [t for t in stress if t["entry_ts_ms"] >= SPLIT_UTC_MS]
     train_stress = [t for t in stress if t["entry_ts_ms"] < SPLIT_UTC_MS]
 
-    train_metrics = shared.metrics(train_base, PARAMS["initial_equity"])
-    oos_metrics = shared.metrics(oos_base, PARAMS["initial_equity"])
-    oos_stress_metrics = shared.metrics(oos_stress, PARAMS["initial_equity"])
+    study_start = min(min(data["ts"]) for data in symbols.values())
+    study_end = min(max(data["ts"]) for data in symbols.values())
+    train_window = (study_start, SPLIT_UTC_MS - 1)
+    oos_window = (SPLIT_UTC_MS, study_end)
+    train_metrics = shared.metrics(train_base, PARAMS["initial_equity"], *train_window)
+    oos_metrics = shared.metrics(oos_base, PARAMS["initial_equity"], *oos_window)
+    oos_stress_metrics = shared.metrics(oos_stress, PARAMS["initial_equity"], *oos_window)
 
     oos_start = min((t["entry_ts_ms"] for t in oos_base), default=SPLIT_UTC_MS)
     oos_end = max((t["exit_ts_ms"] for t in oos_base), default=SPLIT_UTC_MS + 60 * DAY_MS)
     benchmark = basket_benchmark(symbols, oos_start, oos_end, c)
 
     verdict_name, conditions = shared.verdict(oos_metrics, oos_stress_metrics, train_metrics)
+    funding_coverage = manifest.get("funding_coverage") or {}
+    funding_complete = bool(funding_coverage) and all(
+        bool(funding_coverage.get(symbol, {}).get("complete_request_window"))
+        and int(funding_coverage.get(symbol, {}).get("records", 0)) > 0
+        for symbol in manifest["symbols"]
+    )
+    verdict_name, conditions = shared.enforce_data_gate(
+        verdict_name, conditions, funding_complete
+    )
     rebalances = len({t["entry_ts_ms"] for t in oos_base})
 
     result = {
@@ -199,11 +257,18 @@ def main(argv: list[str] | None = None) -> int:
         "universe_sha256": manifest.get("sha256"),
         "legs": PARAMS["legs"],
         "oos_rebalance_events": rebalances,
-        "train": {**train_metrics, "stress": shared.metrics(train_stress, PARAMS["initial_equity"])},
+        "cost_model_sha256": COST_PARAMS["sha256"],
+        "cost_model_source": "configs/execution-costs.json",
+        "train": {
+            **train_metrics,
+            "stress": shared.metrics(train_stress, PARAMS["initial_equity"], *train_window),
+        },
         "out_of_sample": {**oos_metrics, "stress": oos_stress_metrics},
         "benchmark": benchmark,
         "verdict": verdict_name,
         "verdict_conditions": conditions,
+        "funding_model": "ACTUAL_PUBLISHED_TIMESTAMPS; stress=5x plus flat uncertainty buffer",
+        "funding_coverage_complete": funding_complete,
         "note": "This study does not authorize live trading. Taker fee is PLACEHOLDER_UNVERIFIED. Universe is today's top-15 (survivorship bias upward).",
     }
     study_dir = ROOT / "research" / "backtests" / RULE_STUDY[args.rule]

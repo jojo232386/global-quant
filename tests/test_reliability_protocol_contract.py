@@ -81,19 +81,20 @@ def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None
 
 def test_live_readiness_stays_planning_only_and_lists_blockers() -> None:
     text = LIVE_READINESS.read_text()
+    flat = " ".join(text.split())
     assert "PLANNING_ONLY = TRUE" in text
     assert "does not authorize credentials" in text
     assert "Tooling presence does not remove any blocker" in text
     for blocker in (
         "sole-operator status are unverified",
         "account modes are unverified",
-        "VERIFIED on the account",
+        "no same-day, version-bound account evidence",
         "Portfolio Margin account",
         "not approved",
         "reliability run has not yet been completed",
         "cannot be inferred from dry-run",
     ):
-        assert blocker in text, f"missing blocker: {blocker}"
+        assert blocker in flat, f"missing blocker: {blocker}"
     assert "LIVE_READINESS_BLOCKER" in text
     assert "CONTRACT" not in text or True  # no-op guard: never weaken to a pass
 

@@ -7,6 +7,7 @@ from importlib.machinery import SourceFileLoader
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "gmaq-research-crosssection"
 UNIVERSE_SCRIPT = ROOT / "scripts" / "gmaq-fetch-universe"
+MULTI_FETCH_SCRIPT = ROOT / "scripts" / "gmaq-fetch-multi"
 STUDIES = {
     "funding_crosssection": ROOT / "research" / "backtests" / "study-2026-08-16-multi-funding-crosssection",
     "xts_momentum": ROOT / "research" / "backtests" / "study-2026-08-16-multi-xts-momentum",
@@ -41,6 +42,8 @@ def test_universe_excludes_stablecoin_bases() -> None:
 
 def test_funding_and_return_signals() -> None:
     module = load("cs", SCRIPT)
+    assert module.PARAMS["cost_bps_per_side"] == 15.0
+    assert len(module.COST_PARAMS["sha256"]) == 64
     data = {"funding": [(1000, 0.001), (2000, -0.002), (3000, -0.003), (4000, 0.004)]}
     assert module.funding_mean_until(data, 3500) == (-0.002 + -0.003 + 0.001) / 3
     assert module.funding_mean_until(data, 500) is None
@@ -54,6 +57,27 @@ def test_selection_order() -> None:
     scores = {"A": 0.01, "B": -0.02, "C": 0.03, "D": None}
     assert module.select_legs(scores, 2, reverse=False) == ["B", "A"]
     assert module.select_legs(scores, 2, reverse=True) == ["C", "A"]
+
+
+def test_multi_fetch_pages_exact_funding_window() -> None:
+    module = load("multi_fetch", MULTI_FETCH_SCRIPT)
+    calls = []
+    first = [
+        {"fundingTime": 1000 + i, "fundingRate": "0.001"}
+        for i in range(1000)
+    ]
+    second = [{"fundingTime": 2000, "fundingRate": "-0.001"}]
+
+    def fake(url):
+        calls.append(url)
+        return first if len(calls) == 1 else second
+
+    records, complete = module.fetch_funding_history("ETHUSDT", 1000, 3000, fake)
+    assert complete is True
+    assert len(records) == 1001
+    assert "startTime=1000" in calls[0]
+    assert "startTime=2000" in calls[1]
+    assert "endTime=3000" in calls[0]
 
 
 def test_rebalance_executes_at_open_without_lookahead() -> None:
@@ -82,6 +106,26 @@ def test_rebalance_executes_at_open_without_lookahead() -> None:
     assert trade["entry"] == 210.0
     assert trade["exit"] == 220.0
     assert trade["net_return"] == 220.0 / 210.0 - 1
+
+
+def test_cross_section_charges_published_funding_during_hold() -> None:
+    module = load("cs_funding", SCRIPT)
+    day = 1770076800000
+    signal = day - module.BAR_MS
+    symbols = {
+        "AAA": {
+            "ts": [signal, day, day + module.DAY_MS],
+            "open": {signal: 99.0, day: 100.0, day + module.DAY_MS: 101.0},
+            "close": {signal: 100.0, day: 100.0, day + module.DAY_MS: 101.0},
+            "funding": [(signal, -0.5), (day + 8 * 3_600_000, 0.001)],
+        }
+    }
+    params = dict(module.PARAMS, legs=1)
+    trade = module.run_cross_section(
+        symbols, "funding_crosssection", 0.0, 0.0, params
+    )[0]
+    assert trade["funding_return"] == 0.001
+    assert abs(trade["net_return"] - (0.01 - 0.001)) < 1e-12
 
 
 def test_cross_section_studies_artifacts_and_verdict_consistent() -> None:

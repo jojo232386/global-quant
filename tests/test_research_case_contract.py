@@ -96,6 +96,32 @@ def test_stoploss_uses_worse_price() -> None:
     assert trades[0]["exit"] == 99.0
 
 
+def test_stoploss_scans_every_held_bar_and_models_gap_worse_than_stop() -> None:
+    module = load_backtest()
+    n = 40
+    bars = {
+        "ts": [i * 900_000 for i in range(n)],
+        "open": [100.0] * n,
+        "high": [103.0] * n,
+        "low": [99.5] * n,
+        "close": [101.0] * n,
+    }
+    bars["close"][4] = 102.0
+    bars["open"][7] = 98.0
+    bars["low"][7] = 97.0
+    trade = module.run_rule(bars, 0.0)[0]
+    assert trade["stop_triggered"] is True
+    assert trade["exit_ts_ms"] == bars["ts"][7]
+    assert trade["exit"] == 98.0
+
+
+def test_actual_funding_is_charged_only_while_long_is_held() -> None:
+    module = load_backtest()
+    records = [(1000, 0.001), (2000, -0.002), (3000, 0.003)]
+    assert module.funding_return_between(records, 1000, 3000) == 0.001
+    assert module.funding_return_between(records, 1000, 3000, 5.0) == 0.005
+
+
 def test_metrics_math_on_synthetic_trades() -> None:
     module = load_backtest()
     trades = [
@@ -108,7 +134,61 @@ def test_metrics_math_on_synthetic_trades() -> None:
     assert abs(m["win_rate"] - 2 / 3) < 1e-4
     assert m["max_consecutive_losses"] == 1
     assert m["profit_factor"] is not None and m["profit_factor"] > 0
-    assert m["span_days"] == 2
+    assert m["span_days"] == 3
+
+
+def test_daily_equity_keeps_zero_return_calendar_days() -> None:
+    module = load_backtest()
+    trades = [
+        {"exit_ts_ms": 86_400_000, "net_return": 0.01, "notional": 100.0},
+        {"exit_ts_ms": 4 * 86_400_000, "net_return": -0.01, "notional": 100.0},
+    ]
+    days, equity = module.daily_equity(trades, 1000.0)
+    assert days == [0, 1, 2, 3, 4]
+    assert equity == [1000.0, 1001.0, 1001.0, 1001.0, 1000.0]
+
+
+def test_daily_equity_sorts_trade_completion_times() -> None:
+    module = load_backtest()
+    trades = [
+        {"exit_ts_ms": 2 * 86_400_000, "net_return": -0.01, "notional": 100.0},
+        {"exit_ts_ms": 86_400_000, "net_return": 0.02, "notional": 100.0},
+    ]
+    days, equity = module.daily_equity(trades, 1000.0)
+    assert days == [0, 1, 2]
+    assert equity == [1000.0, 1002.0, 1001.0]
+
+
+def test_missing_funding_blocks_only_a_statistical_pass() -> None:
+    module = load_backtest()
+    conditions = {"statistical_gate": True}
+    assert module.enforce_data_gate("PASS", conditions, False)[0] == "INCONCLUSIVE"
+    assert module.enforce_data_gate("PASS", conditions, True)[0] == "PASS"
+    assert module.enforce_data_gate("REJECT", conditions, False)[0] == "REJECT"
+
+
+def test_metrics_include_flat_days_and_first_day_drawdown() -> None:
+    module = load_backtest()
+    day = 86_400_000
+    trades = [
+        {
+            "entry_ts_ms": 0,
+            "exit_ts_ms": day,
+            "net_return": -0.1,
+            "notional": 100.0,
+        }
+    ]
+    result = module.metrics(trades, 1000.0, day, 3 * day)
+    assert result["span_days"] == 3
+    assert result["max_drawdown"] == 0.01
+
+
+def test_research_costs_are_derived_from_machine_readable_source() -> None:
+    module = load_backtest()
+    assert module.PARAMS["cost_bps_per_side"] == 15.0
+    assert module.PARAMS["stress_cost_bps_per_side"] == 30.0
+    assert module.RESEARCH_COSTS["source"]["live_authorization"] is False
+    assert len(module.RESEARCH_COSTS["sha256"]) == 64
 
 
 def test_max_drawdown_and_benchmark() -> None:

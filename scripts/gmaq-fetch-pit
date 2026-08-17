@@ -52,6 +52,62 @@ def fetch_daily_volumes(symbol: str, start_ms: int, end_ms: int) -> dict[int, fl
     return {int(row[0]): float(row[7]) for row in rows if float(row[7]) > 0}
 
 
+def get_json(url: str) -> list | None:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+            value = json.loads(response.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+        return None
+    return value if isinstance(value, list) else None
+
+
+def fetch_funding_history(
+    symbol: str, start_ms: int, end_ms: int, fetch_json=get_json
+) -> tuple[list[dict], bool]:
+    """Fetch the whole inclusive window in ascending pages.
+
+    The official endpoint returns at most 1000 records and advances from
+    startTime, so a single unbounded latest-page request is not historical
+    evidence.
+    """
+    cursor = start_ms
+    records: list[dict] = []
+    seen: set[tuple[int, str, str]] = set()
+    while cursor <= end_ms:
+        params = urllib.parse.urlencode(
+            {
+                "symbol": symbol,
+                "startTime": cursor,
+                "endTime": end_ms,
+                "limit": 1000,
+            }
+        )
+        batch = fetch_json(f"{FAPI}/fapi/v1/fundingRate?{params}")
+        if batch is None:
+            return records, False
+        if not batch:
+            break
+        for item in batch:
+            key = (
+                int(item["fundingTime"]),
+                str(item["fundingRate"]),
+                str(item.get("rateType", "Regular")),
+            )
+            if key not in seen:
+                records.append(item)
+                seen.add(key)
+        last_time = int(batch[-1]["fundingTime"])
+        if last_time < cursor:
+            return records, False
+        if len(batch) < 1000 or last_time >= end_ms:
+            break
+        cursor = last_time + 1
+        time.sleep(0.3)
+    records.sort(key=lambda item: int(item["fundingTime"]))
+    return records, True
+
+
 def build_daily_universes(volumes: dict[str, dict[int, float]], start_ms: int, end_ms: int, top_n: int) -> dict[int, list[str]]:
     universes: dict[int, list[str]] = {}
     day = start_ms
@@ -110,27 +166,29 @@ def main(argv: list[str] | None = None) -> int:
     print(f"point-in-time universe spans {len(needed)} symbols")
 
     partials = {}
+    funding_gaps = {}
+    funding_coverage = {}
     for symbol in needed:
         klines_path = out_dir / f"{symbol}-15m.jsonl"
         funding_path = out_dir / f"{symbol}-funding.jsonl"
-        if klines_path.exists() and funding_path.exists():
-            continue  # resume: already fetched
-        rows = fetcher.fetch_range(symbol, start_ms, end_ms, "15m", strict=False)
-        lines = fetcher.serialize(rows)
-        klines_path.write_text("".join(line + "\n" for line in lines))
-        expected = (end_ms - start_ms) // 900_000 + 1
-        if len(lines) < expected:
-            partials[symbol] = f"{len(lines)}/{expected}"
-        funding = []
-        try:
-            params = urllib.parse.urlencode({"symbol": symbol, "limit": 1000})
-            request = urllib.request.Request(f"{FAPI}/fapi/v1/fundingRate?{params}", headers={"Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-                funding = json.loads(response.read().decode())
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
-            pass
+        if not klines_path.exists():
+            rows = fetcher.fetch_range(symbol, start_ms, end_ms, "15m", strict=False)
+            lines = fetcher.serialize(rows)
+            klines_path.write_text("".join(line + "\n" for line in lines))
+            expected = (end_ms - start_ms) // 900_000 + 1
+            if len(lines) < expected:
+                partials[symbol] = f"{len(lines)}/{expected}"
+        funding, funding_complete = fetch_funding_history(symbol, start_ms, end_ms)
         funding_text = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in funding)
         funding_path.write_text(funding_text)
+        funding_coverage[symbol] = {
+            "complete_request_window": funding_complete,
+            "records": len(funding),
+            "first_funding_time": int(funding[0]["fundingTime"]) if funding else None,
+            "last_funding_time": int(funding[-1]["fundingTime"]) if funding else None,
+        }
+        if not funding_complete:
+            funding_gaps[symbol] = "INCOMPLETE_REQUEST_WINDOW"
         time.sleep(0.3)
 
     manifest = {
@@ -142,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
         "universes_sha256": sha256_text(universe_text),
         "universe_symbols": needed,
         "partial_klines": partials,
+        "funding_gaps": funding_gaps,
+        "funding_coverage": funding_coverage,
     }
     manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     manifest["sha256"] = sha256_text(manifest_text)

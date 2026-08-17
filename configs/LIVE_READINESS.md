@@ -51,8 +51,9 @@ evidence does.
 
 - Dedicated account/subaccount ownership and sole-operator status are unverified.
 - One-way and Single-Asset account modes are unverified.
-- Fee rates and tier-1 maintenance margin are VERIFIED on the account
-  (2026-08-16 read-only session: maker 2 bps, taker 5 bps, tier-1 MMR 0.4%).
+- A 2026-08-16 read-only snapshot reported maker 2 bps, taker 5 bps and
+  tier-1 MMR 0.4%, but the current candidate has no same-day, version-bound
+  account evidence. Committed research values remain placeholders.
 - NEW: the verified account is a Portfolio Margin account (unified margin,
   hedge position mode). The canary isolated-margin/one-way layout must be
   adapted, or a classic USD-M futures account used, before any live
@@ -64,6 +65,8 @@ evidence does.
   are not configured.
 - The 48–72h reliability run has not yet been completed on the promoted
   layout per `configs/RELIABILITY_SOAK_PROTOCOL.md`.
+- No strategy has passed the corrected research engine. The runtime canary is
+  explicitly `NOT_PROVEN_ALPHA`; see `configs/RESEARCH_REMEDIATION.md`.
 - Real fill/slippage, funding, liquidation, and live restart behavior remain
   untested and cannot be inferred from dry-run or from public snapshots.
 

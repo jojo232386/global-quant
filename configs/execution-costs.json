@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "taker_fee_rate": 0.0005,
+  "taker_fee_source": "PLACEHOLDER_UNVERIFIED_ACCOUNT_SPECIFIC",
+  "taker_fee_verified_at_utc": null,
+  "baseline_slippage_bps_per_side": 10.0,
+  "baseline_slippage_source": "CONSERVATIVE_RESEARCH_ASSUMPTION",
+  "stress_fee_multiplier": 2.0,
+  "stress_slippage_multiplier": 2.0,
+  "maintenance_margin_rate": 0.005,
+  "maintenance_margin_source": "PLACEHOLDER_UNVERIFIED_ACCOUNT_TIER_SPECIFIC",
+  "latency_adverse_drift_bps_per_second": 2.0,
+  "funding_history_source": "https://fapi.binance.com/fapi/v1/fundingRate",
+  "scope": "dry_run_research_only",
+  "live_authorization": false
+}

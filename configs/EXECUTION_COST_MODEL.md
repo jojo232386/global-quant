@@ -38,13 +38,19 @@ explicit stress cases.
 | liquidation | mark vs liquidation distance | computed for 1x/2x/3x with placeholder MMR 0.5% |
 | ADL | no public queue API | flagged qualitatively; stressed via liquidation distance |
 
+The machine-readable assumptions live in `configs/execution-costs.json`.
+Account-specific taker fee and maintenance margin remain explicitly
+`PLACEHOLDER_UNVERIFIED`; they cannot be promoted by a public-data snapshot.
+
 ## 3. Stress methodology
 
 Every snapshot report includes stress scenarios:
 
 1. Depth stress: available quantity scaled to 50% and 10% of the snapshot.
-2. Spread stress: spread doubled and quintupled.
-3. Latency stress: price drift of 2 bps/s for 1s and 5s.
+2. Spread stress: spread doubled and quintupled by shifting the executable bid
+   and ask books around the same mid price.
+3. Latency stress: price drift of 2 bps/s for 1s and 5s, applied adversely to
+   both executable VWAPs.
 4. Funding stress: funding at the adjusted cap/floor when available,
    otherwise 5x the current rate.
 5. Fee stress: taker fee doubled.
