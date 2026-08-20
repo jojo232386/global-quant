@@ -29,9 +29,13 @@ active runtime, and it does not authorize live trading.
   `LiveExecutionCanaryStrategy`, which remains a runtime canary and is
   explicitly not alpha.
 - A run without a preregistration and a manifest is not evidence.
-- Latest formal study: `study-2026-08-20-btceth-weekly-tsmom` is `REJECT`;
-  complete data and positive baseline OOS return did not survive drawdown,
-  funding/cost, delay, parameter-neighbor, or bootstrap gates.
+- Every new formal run must consume a Data Layer V1 `VERIFIED` curated
+  snapshot and bind its dataset ID, snapshot-manifest SHA, and input-file
+  SHAs. A research runner must not fetch exchange data directly. Missing data
+  may be added only through the existing raw -> validated -> curated V1 flow.
+- Latest formal study: `study-2026-08-20-btceth-volscaled-ls-tsmom` is
+  `REJECT`; its negative OOS return, 36.51% drawdown, adverse-funding stress,
+  parameter neighbors, delay, bootstrap, and short-risk screen all failed.
 
 ## Layout
 
