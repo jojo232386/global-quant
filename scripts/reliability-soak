@@ -219,10 +219,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-START_SEQ=$(audit_count)
 ./scripts/gmaq up
 RUNTIME_STARTED=1
 wait_ping
+START_SEQ=$(audit_count)
 
 RUN_ID=$(python3 - <<'PY'
 import json

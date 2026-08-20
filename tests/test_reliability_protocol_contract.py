@@ -88,6 +88,16 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert "SMOKE_ONLY_PASS" in smoke
 
 
+def test_runner_anchors_audit_after_runtime_binding() -> None:
+    text = RUNNER.read_text()
+    first_up = text.index("./scripts/gmaq up")
+    first_wait = text.index("wait_ping", first_up)
+    first_anchor_seq = text.index("START_SEQ=$(audit_count)")
+    first_anchor = text.index("capture_audit_anchor", first_wait)
+
+    assert first_up < first_wait < first_anchor_seq < first_anchor
+
+
 def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None:
     module = load_manifest("gmaq_runtime_manifest_test")
     assert module.SAFE_ENV_KEYS == {
