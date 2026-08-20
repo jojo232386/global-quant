@@ -22,7 +22,7 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from gmaq_live import committed_candidate_sha, validate_live_config
+from gmaq_live import committed_candidate_sha, validated_live_config_sha256
 
 ENV_FILE = ROOT / ".env.readonly"
 AUDIT_DIR = ROOT / "user_data" / "audit"
@@ -47,18 +47,6 @@ HTTP_OPENER = urllib.request.build_opener(_NoRedirectHandler())
 
 def current_sha() -> str:
     return committed_candidate_sha(ROOT)
-
-
-def validated_config_sha256(path: pathlib.Path) -> str:
-    config = json.loads(path.read_text())
-    errors = validate_live_config(config)
-    if errors:
-        raise ValueError("invalid proposed live config: " + ",".join(errors))
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def read_creds() -> tuple[str, str]:
@@ -382,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         candidate_sha = current_sha()
-        config_sha256 = validated_config_sha256(pathlib.Path(args.config))
+        config_sha256 = validated_live_config_sha256(args.config)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         manifest = {
             "schema_version": 2,

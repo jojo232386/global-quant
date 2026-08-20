@@ -1,6 +1,11 @@
 """Credential-free live-candidate admission and broker-truth contracts."""
 
-from .admission import evaluate_live_candidate, reconcile_binance_usdm_truth, validate_live_config
+from .admission import (
+    evaluate_live_candidate,
+    reconcile_binance_usdm_truth,
+    validate_live_config,
+    validated_live_config_sha256,
+)
 from .worktree import committed_candidate_sha
 
 __all__ = [
@@ -8,4 +13,5 @@ __all__ = [
     "evaluate_live_candidate",
     "reconcile_binance_usdm_truth",
     "validate_live_config",
+    "validated_live_config_sha256",
 ]

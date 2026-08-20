@@ -10,7 +10,12 @@ from importlib.machinery import SourceFileLoader
 import pytest
 
 from gmaq_live import committed_candidate_sha
-from gmaq_live.admission import evaluate_live_candidate, reconcile_binance_usdm_truth, validate_live_config
+from gmaq_live.admission import (
+    evaluate_live_candidate,
+    reconcile_binance_usdm_truth,
+    validate_live_config,
+    validated_live_config_sha256,
+)
 
 
 CANDIDATE = "a" * 40
@@ -637,7 +642,7 @@ def test_cli_is_non_ordering_and_does_not_print_credentials() -> None:
     assert '"entry_authorized": True' not in script
     assert '"order_submission_enabled": True' not in script
     assert "--config-sha256" not in script
-    assert "validated_config_sha256(args.config)" in script
+    assert "validated_live_config_sha256(args.config)" in script
     assert "committed_candidate_sha(ROOT)" in script
     assert "load_committed_strategy_result(args.strategy_result, candidate_sha)" in script
     assert '"merge-base", "--is-ancestor", implementation_sha, candidate_sha' in script
@@ -711,6 +716,28 @@ def test_proposed_live_config_is_non_secret_and_minimal() -> None:
     config["exchange"].pop("key")
     config["max_open_trades"] = True
     assert "config_max_open_trades_invalid" in validate_live_config(config)
+
+
+def test_live_config_validation_and_sha_use_the_same_bytes(tmp_path, monkeypatch) -> None:
+    config = {
+        "dry_run": False,
+        "trading_mode": "futures",
+        "margin_mode": "isolated",
+        "stake_currency": "USDT",
+        "max_open_trades": 1,
+        "exchange": {"name": "binance", "pair_whitelist": ["ETH/USDT:USDT"]},
+    }
+    payload = json.dumps(config).encode()
+    reads = 0
+
+    def read_bytes(_path):
+        nonlocal reads
+        reads += 1
+        return payload
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", read_bytes)
+    assert validated_live_config_sha256(tmp_path / "live.json") == hashlib.sha256(payload).hexdigest()
+    assert reads == 1
 
 
 def test_numeric_permission_values_cannot_impersonate_booleans() -> None:

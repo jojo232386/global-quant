@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import pathlib
 import re
 from typing import Any
 
@@ -85,6 +86,16 @@ def validate_live_config(config: object) -> list[str]:
     if exchange.get("pair_whitelist") != ["ETH/USDT:USDT"]:
         errors.append("config_pair_scope_invalid")
     return errors
+
+
+def validated_live_config_sha256(path: str | pathlib.Path) -> str:
+    """Validate and hash one immutable read of a proposed live config."""
+
+    payload = pathlib.Path(path).read_bytes()
+    errors = validate_live_config(json.loads(payload))
+    if errors:
+        raise ValueError("invalid proposed live config: " + ",".join(errors))
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _iso_epoch(value: object) -> int | None:
