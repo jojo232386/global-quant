@@ -173,3 +173,28 @@ def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
     assert "today's top-100" in text
     assert "not silently overwritten" in text
     assert "does not authorize Demo entries or live trading" in text
+
+
+def test_pending_carry_study_cannot_bypass_data_layer_v1() -> None:
+    path = (
+        RESEARCH
+        / "backtests"
+        / "study-2026-08-20-btceth-spot-perp-carry"
+        / "preregistration.md"
+    )
+    text = path.read_text()
+    for marker in (
+        "WAITING_FOR_VERIFIED_DATASET",
+        "raw -> validated -> curated",
+        'verify_snapshot(..., minimum_stage="curated")',
+        "curated dataset ID",
+        "snapshot-manifest SHA-256",
+        "every input-file SHA-256",
+        "No runner may fetch Binance",
+        "UNASSIGNED",
+        "one formal run",
+        "does not authorize building",
+        "exchange-bound",
+    ):
+        assert marker in text
+    assert "Next frozen study" in (RESEARCH / "README.md").read_text()
