@@ -8,6 +8,7 @@ import datetime
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -97,6 +98,40 @@ def inspect_field(container: str, template: str) -> str:
     return run_text(["docker", "inspect", "--format", template, container])
 
 
+def compose_service_image() -> str:
+    try:
+        text = COMPOSE_PATH.read_text()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ManifestError("compose freqtrade image is missing or invalid") from error
+    service = re.search(
+        r"(?ms)^  freqtrade:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_.-]+:\s*(?:#.*)?$|\Z)",
+        text,
+    )
+    image_match = (
+        re.search(r"(?m)^    image:\s*(?P<image>\S.*?)\s*$", service.group("body"))
+        if service
+        else None
+    )
+    if image_match is None:
+        raise ManifestError("compose freqtrade image is missing or invalid")
+    image = image_match.group("image").strip("'\"")
+    if not image:
+        raise ManifestError("compose freqtrade image is missing or invalid")
+    return image
+
+
+def verified_container_image(container: str) -> tuple[str, str]:
+    image_ref = inspect_field(container, "{{.Config.Image}}")
+    image_id = inspect_field(container, "{{.Image}}")
+    expected_ref = compose_service_image()
+    expected_id = run_text(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", expected_ref]
+    )
+    if image_ref != expected_ref or image_id != expected_id:
+        raise ManifestError("container image does not match compose-pinned image")
+    return image_ref, image_id
+
+
 def build_manifest(expected_state: str | None = None) -> dict:
     env = safe_env()
     container = env["GMAQ_CONTAINER_NAME"]
@@ -141,8 +176,7 @@ def build_manifest(expected_state: str | None = None) -> dict:
             f"gate state is {state.get('state')}, expected {expected_state}"
         )
 
-    image_ref = inspect_field(container, "{{.Config.Image}}")
-    image_id = inspect_field(container, "{{.Image}}")
+    image_ref, image_id = verified_container_image(container)
     container_id = inspect_field(container, "{{.Id}}")
     published_port = run_text(["docker", "port", container, "8080/tcp"])
     if published_port != f"127.0.0.1:{host_port}":

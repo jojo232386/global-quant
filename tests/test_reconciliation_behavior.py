@@ -151,6 +151,62 @@ def test_api_disconnect_is_fail_closed_instead_of_crashing(monkeypatch) -> None:
     assert control.api_post("/api/v1/stopentry", "opaque") == (0, None)
 
 
+def test_health_api_failure_disarms_audits_and_alerts(monkeypatch) -> None:
+    control = load_control("gmaq_control_health_api_failure_test")
+    audit = []
+    disarms = []
+    alerts = []
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: None)
+    monkeypatch.setattr(control, "append_audit", lambda *args, **kwargs: audit.append((args, kwargs)) or {"ok": True})
+    monkeypatch.setattr(control, "disarm", lambda reason: disarms.append(reason) or {"ok": True})
+    monkeypatch.setattr(control, "dispatch_alert", lambda *args, **kwargs: alerts.append((args, kwargs)) or {"sent": False})
+
+    result = control.health()
+
+    assert result["verdict"] == "UNKNOWN"
+    assert audit[0][0][:2] == ("health", "gmaq-control")
+    assert audit[0][1]["verdict"] == "UNKNOWN"
+    assert disarms == ["health_unknown"]
+    assert alerts == [(('health', 'UNKNOWN'), {'checks': ['ping']})]
+
+
+def test_reconcile_api_failure_dispatches_alert(monkeypatch) -> None:
+    control = load_control("gmaq_control_reconcile_api_failure_test")
+    alerts = []
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: None)
+    monkeypatch.setattr(control, "append_audit", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(control, "disarm", lambda reason: {"ok": True})
+    monkeypatch.setattr(control, "dispatch_alert", lambda *args, **kwargs: alerts.append((args, kwargs)) or {"sent": False})
+
+    result = control.reconcile()
+
+    assert result["verdict"] == "UNKNOWN"
+    assert alerts == [
+        (("reconcile", "UNKNOWN"), {"unknown_outcomes": ["bot_api_auth_unavailable"]})
+    ]
+
+
+def test_exit_api_failure_dispatches_alert(monkeypatch) -> None:
+    control = load_control("gmaq_control_exit_api_failure_test")
+    alerts = []
+    disarms = []
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: None)
+    monkeypatch.setattr(control, "append_audit", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(control, "disarm", lambda reason: disarms.append(reason) or {"ok": True})
+    monkeypatch.setattr(control, "dispatch_alert", lambda *args, **kwargs: alerts.append((args, kwargs)) or {"sent": False})
+
+    result = control.exit_all()
+
+    assert result["verdict"] == "UNKNOWN"
+    assert alerts == [
+        (("exit", "UNKNOWN"), {"unknown_outcomes": ["bot_api_auth_unavailable"]})
+    ]
+    assert disarms == ["controlled_exit_requested", "controlled_exit_unknown"]
+
+
 def test_reconcile_mismatch_disarms_and_writes_real_top_level_verdict(tmp_path, monkeypatch) -> None:
     control = load_control("gmaq_control_reconcile_disarm_test")
     audit_dir = tmp_path / "audit"

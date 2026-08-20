@@ -1071,9 +1071,19 @@ def health() -> dict:
     token = api_login(env)
 
     if token is None:
-        return fail("unable to reach bot API", checks=checks)
+        checks.append({"name": "ping", "passed": False, "detail": "bot API authentication unavailable"})
+        result = fail("unable to reach bot API", verdict="UNKNOWN", checks=checks)
+        append_audit("health", "gmaq-control", refs={"failed": ["ping"]}, verdict="UNKNOWN")
+        disarm("health_unknown")
+        dispatch_alert("health", "UNKNOWN", checks=["ping"])
+        return result
     if not bot_ping(token):
-        return fail("bot ping failed", checks=checks)
+        checks.append({"name": "ping", "passed": False, "detail": "bot ping failed"})
+        result = fail("bot ping failed", verdict="UNKNOWN", checks=checks)
+        append_audit("health", "gmaq-control", refs={"failed": ["ping"]}, verdict="UNKNOWN")
+        disarm("health_unknown")
+        dispatch_alert("health", "UNKNOWN", checks=["ping"])
+        return result
 
     checks.append({"name": "ping", "passed": True, "detail": "pong"})
 
@@ -1132,6 +1142,7 @@ def health() -> dict:
     result = ok(verdict, checks=checks)
     append_audit("health", "gmaq-control", refs={"failed": [c["name"] for c in checks if not c["passed"]]}, verdict=verdict)
     if verdict in ALERT_FAIL_VERDICTS:
+        disarm(f"health_{verdict.lower()}")
         dispatch_alert("health", verdict, checks=[c["name"] for c in checks if not c["passed"]])
     return result
 
@@ -1148,6 +1159,7 @@ def reconcile() -> dict:
         }
         append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": result["unknown_outcomes"]}, verdict="UNKNOWN")
         disarm("reconcile_unknown")
+        dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=result["unknown_outcomes"])
         return result
     rest_payload = bot_open_trades(token)
     db_payload = bot_db_snapshot(env)
@@ -1254,15 +1266,21 @@ def exit_all() -> dict:
     token = api_login(env)
     if token is None:
         append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["bot_api_auth_unavailable"]}, verdict="UNKNOWN")
+        disarm("controlled_exit_unknown")
+        dispatch_alert("exit", "UNKNOWN", unknown_outcomes=["bot_api_auth_unavailable"])
         return fail("unable to reach bot API", verdict="UNKNOWN", unknown_outcomes=["bot_api_auth_unavailable"])
     open_payload = bot_open_trades(token)
     if open_payload is None:
         append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["rest_status_unavailable"]}, verdict="UNKNOWN")
+        disarm("controlled_exit_unknown")
+        dispatch_alert("exit", "UNKNOWN", unknown_outcomes=["rest_status_unavailable"])
         return fail("unable to read open trades", verdict="UNKNOWN", unknown_outcomes=["rest_status_unavailable"])
     try:
         open_trades, _ = normalize_rest_snapshot(open_payload)
     except ValueError as error:
         append_audit("exit", "gmaq-control", refs={"unknown_outcomes": [str(error)]}, verdict="UNKNOWN")
+        disarm("controlled_exit_unknown")
+        dispatch_alert("exit", "UNKNOWN", unknown_outcomes=[str(error)])
         return fail("invalid open trade snapshot", verdict="UNKNOWN", unknown_outcomes=[str(error)])
 
     unknown_outcomes = []
@@ -1273,6 +1291,7 @@ def exit_all() -> dict:
             unknown_outcomes.append(f"forceexit_unacknowledged:{trade_id}:http_{code}")
     if unknown_outcomes:
         append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+        disarm("controlled_exit_unknown")
         dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
         return fail(
             "one or more force-exit outcomes are unknown; no automatic retry",
@@ -1297,6 +1316,7 @@ def exit_all() -> dict:
             if db_payload is None:
                 unknown_outcomes.append("database_snapshot_unavailable_after_exit")
             append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+            disarm("controlled_exit_unknown")
             dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
             return fail(
                 "unable to verify outcome after force-exit; no automatic retry",
@@ -1306,6 +1326,7 @@ def exit_all() -> dict:
         last = compare_snapshots(rest_payload, db_payload)
         if last.get("verdict") in ("UNKNOWN", "MISMATCH"):
             append_audit("exit", "gmaq-control", refs=last, verdict=last["verdict"])
+            disarm("controlled_exit_unknown")
             details = {key: value for key, value in last.items() if key != "verdict"}
             dispatch_alert("exit", last["verdict"], **details)
             return fail(
@@ -1325,6 +1346,7 @@ def exit_all() -> dict:
             return ok("ZERO_POSITIONS_AND_ORDERS", **details)
         time.sleep(5)
     append_audit("exit", "gmaq-control", refs=last, verdict="TIMEOUT")
+    disarm("controlled_exit_timeout")
     details = {key: value for key, value in last.items() if key != "verdict"}
     dispatch_alert("exit", "TIMEOUT", **details)
     return fail("zero proof not obtained within 120s", verdict="TIMEOUT", **details)
