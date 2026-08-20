@@ -1152,28 +1152,36 @@ def reconcile() -> dict:
         disarm("reconcile_unknown")
         dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=result["unknown_outcomes"])
         return result
-    rest_payload = bot_open_trades(token)
-    db_payload = bot_db_snapshot(env)
-    if rest_payload is None or db_payload is None:
-        unknown = []
-        if rest_payload is None:
-            unknown.append("rest_status_unavailable")
-        if db_payload is None:
-            unknown.append("database_snapshot_unavailable")
-        result = {
-            "ok": False,
-            "verdict": "UNKNOWN",
-            "unknown_outcomes": unknown,
-            "error": "unable to obtain complete REST/database snapshot",
-        }
-        append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": unknown}, verdict="UNKNOWN")
-        disarm("reconcile_unknown")
-        dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=unknown)
-        return result
+    comparison = None
+    snapshot_attempts = 0
+    for snapshot_attempts in range(1, 4):
+        rest_payload = bot_open_trades(token)
+        db_payload = bot_db_snapshot(env)
+        if rest_payload is None or db_payload is None:
+            unknown = []
+            if rest_payload is None:
+                unknown.append("rest_status_unavailable")
+            if db_payload is None:
+                unknown.append("database_snapshot_unavailable")
+            result = {
+                "ok": False,
+                "verdict": "UNKNOWN",
+                "unknown_outcomes": unknown,
+                "error": "unable to obtain complete REST/database snapshot",
+            }
+            append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": unknown}, verdict="UNKNOWN")
+            disarm("reconcile_unknown")
+            dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=unknown)
+            return result
 
-    comparison = compare_snapshots(rest_payload, db_payload)
+        comparison = compare_snapshots(rest_payload, db_payload)
+        if comparison["verdict"] != "MISMATCH" or snapshot_attempts == 3:
+            break
+        time.sleep(0.2)
+
+    assert comparison is not None
     verdict = comparison["verdict"]
-    result = {"ok": verdict == "MATCH", **comparison}
+    result = {"ok": verdict == "MATCH", **comparison, "snapshot_attempts": snapshot_attempts}
     append_audit(
         "reconcile",
         "gmaq-control",
@@ -1184,6 +1192,7 @@ def reconcile() -> dict:
             "unknown_outcomes": comparison.get("unknown_outcomes", []),
             "mismatches": comparison.get("mismatches", []),
             "snapshot_sha256": comparison.get("snapshot_sha256"),
+            "snapshot_attempts": snapshot_attempts,
         },
         verdict=verdict,
     )
