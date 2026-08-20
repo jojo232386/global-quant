@@ -28,12 +28,13 @@ def test_daily_fetch_validation_is_exact_and_end_exclusive() -> None:
     start -= start % DAY_MS
     rows = [row(start), row(start + DAY_MS), row(start + 2 * DAY_MS)]
     assert module.validate_daily_rows(rows, start, start + 2 * DAY_MS) == rows[:2]
+    assert module.end_boundary_open(rows, start + 2 * DAY_MS) == 100.0
     try:
         module.validate_daily_rows([rows[0], rows[2]], start, start + 3 * DAY_MS)
     except ValueError as error:
         assert "coverage mismatch" in str(error)
     else:
-        raise AssertionError("missing daily bar was accepted")
+            raise AssertionError("missing daily bar was accepted")
 
 
 def test_funding_validation_rejects_duplicate_or_edge_gap() -> None:

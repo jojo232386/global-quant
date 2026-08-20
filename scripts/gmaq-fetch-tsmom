@@ -60,6 +60,14 @@ def validate_daily_rows(rows: list[list], start_ms: int, end_ms: int) -> list[li
     return filtered
 
 
+def end_boundary_open(rows: list[list], end_ms: int) -> float:
+    """Use only the fixed open of the excluded end-date candle as valuation boundary."""
+    matches = [row for row in rows if int(row[0]) == end_ms]
+    if len(matches) != 1 or len(matches[0]) < 2 or float(matches[0][1]) <= 0:
+        raise ValueError("end-date open valuation boundary is missing or invalid")
+    return float(matches[0][1])
+
+
 def validate_mark_rows(rows: list[list], start_ms: int, end_ms: int) -> list[list]:
     filtered = [row for row in rows if start_ms <= int(row[0]) < end_ms]
     timestamps = [int(row[0]) for row in filtered]
@@ -173,8 +181,9 @@ def main(argv: list[str] | None = None) -> int:
 
     for raw_symbol in SYMBOLS:
         symbol = universe.validate_symbol(raw_symbol)
-        rows = fetcher.fetch_range(symbol, start_ms, end_ms, "1d", strict=True)
-        rows = validate_daily_rows(rows, start_ms, end_ms)
+        raw_rows = fetcher.fetch_range(symbol, start_ms, end_ms, "1d", strict=True)
+        boundary_open = end_boundary_open(raw_rows, end_ms)
+        rows = validate_daily_rows(raw_rows, start_ms, end_ms)
         kline_payload = "".join(line + "\n" for line in fetcher.serialize(rows))
         kline_path = out_dir / f"{symbol}-1d.jsonl"
         kline_path.write_text(kline_payload)
@@ -209,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
             "bars": len(rows),
             "first_bar_utc_ms": int(rows[0][0]),
             "last_bar_utc_ms": int(rows[-1][0]),
+            "end_boundary_utc_ms": end_ms,
+            "end_boundary_open": boundary_open,
+            "end_boundary_source": "excluded_incomplete_candle_open_only",
             "klines_path": str(kline_path.relative_to(ROOT)),
             "klines_sha256": sha256_bytes(kline_payload.encode()),
             "funding_records": len(funding),

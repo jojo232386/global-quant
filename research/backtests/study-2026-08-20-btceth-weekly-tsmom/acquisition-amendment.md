@@ -24,3 +24,17 @@ Frozen deterministic resolution before retry:
 
 No signal, parameter, split, cost, stress, or PASS threshold changed. This is a
 source-completeness amendment made before viewing any return or verdict.
+
+## End-of-window valuation boundary
+
+The first formal runner invocation then stopped before writing results because
+the last complete 2026-08-19 open-to-next-open return requires the fixed
+2026-08-20 00:00 open. The acquisition file correctly excluded the incomplete
+2026-08-20 OHLC row, so that valuation boundary was unavailable.
+
+The retry records only the positive 2026-08-20 00:00 `open` as
+`end_boundary_open` in the manifest. The incomplete high, low, close, and
+volume remain excluded; the boundary cannot enter any signal or parameter and
+is used only to mark and liquidate positions at the predeclared exclusive end.
+Missing or duplicated boundary values fail acquisition. No return or verdict
+was written before this clarification.

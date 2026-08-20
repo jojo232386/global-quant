@@ -108,6 +108,12 @@ def load_dataset(data_dir: pathlib.Path) -> dict:
         ordered = sorted(symbol_bars)
         if any(right - left != DAY_MS for left, right in zip(ordered, ordered[1:])):
             raise ValueError(f"{symbol} daily bar gap")
+        if details.get("end_boundary_utc_ms") != SAMPLE_END or details.get("end_boundary_source") != "excluded_incomplete_candle_open_only":
+            raise ValueError(f"{symbol} end valuation boundary mismatch")
+        boundary_open = float(details["end_boundary_open"])
+        if boundary_open <= 0 or SAMPLE_END in symbol_bars:
+            raise ValueError(f"{symbol} end valuation boundary invalid")
+        symbol_bars[SAMPLE_END] = {"open": boundary_open}
         bars[symbol] = symbol_bars
 
         records = []
