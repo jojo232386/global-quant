@@ -63,7 +63,7 @@ function renderRisk(reconcile, audit, gate) {
 
 function renderResearch(research) {
   const counts = research.counts || {};
-  text("passCount", counts.PASS || 0);
+  text("passCount", research.unverified_pass_count || 0);
   text("rejectCount", counts.REJECT || 0);
   text("inconclusiveCount", counts.INCONCLUSIVE || 0);
   const currentPass = Number(research.current_pass_count || 0);

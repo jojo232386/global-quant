@@ -348,11 +348,17 @@ def research_snapshot() -> dict:
         and study["evidence_generation"] == "VERIFIED_CURATED_V1"
         for study in studies
     )
+    unverified_pass_count = sum(
+        study["verdict"] == "PASS"
+        and study["evidence_generation"] != "VERIFIED_CURATED_V1"
+        for study in studies
+    )
     return {
         "promotion_verdict": (
             "RESEARCH_PASS_SHADOW_ONLY" if current_pass_count else "BLOCKED_NO_CURRENT_PASS"
         ),
         "current_pass_count": current_pass_count,
+        "unverified_pass_count": unverified_pass_count,
         "counts": counts,
         "studies": studies,
     }
