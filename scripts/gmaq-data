@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Manage the local credential-free GMAQ research data layer."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import sys
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from gmaq_data import (  # noqa: E402
+    DataLayerError,
+    default_data_root,
+    initialize,
+    migrate_tsmom,
+    status_summary,
+    verify_snapshot,
+)
+
+
+def selected_root(value: str | None) -> pathlib.Path:
+    return pathlib.Path(value).expanduser().resolve() if value else default_data_root(ROOT)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-data", description="Immutable GMAQ research data registry")
+    parser.add_argument("--data-root", help="external warehouse root; defaults to a sibling gmaq-data directory")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("init")
+    migrate = subparsers.add_parser("migrate-tsmom")
+    migrate.add_argument("--source-dir", required=True)
+    verify = subparsers.add_parser("verify")
+    verify.add_argument("--snapshot-id", required=True)
+    status = subparsers.add_parser("status")
+    status.add_argument("--strict", action="store_true")
+    args = parser.parse_args(argv)
+    data_root = selected_root(args.data_root)
+
+    try:
+        if args.command == "init":
+            initialize(data_root)
+            result = {"verdict": "INITIALIZED", "data_root": str(data_root)}
+        elif args.command == "migrate-tsmom":
+            result = migrate_tsmom(
+                source_dir=pathlib.Path(args.source_dir),
+                data_root=data_root,
+                repo_root=ROOT,
+            )
+        elif args.command == "verify":
+            record = verify_snapshot(data_root, args.snapshot_id)
+            result = {
+                "verdict": record["integrity_verdict"],
+                "snapshot_id": record["snapshot_id"],
+                "dataset": record["dataset"],
+                "stage": record["stage"],
+                "quality_verdict": record["quality_verdict"],
+                "artifact_path": record["artifact_path"],
+            }
+        else:
+            result = status_summary(data_root)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        if args.command == "status" and args.strict and result.get("verdict") != "PASS":
+            return 2
+        return 0
+    except (DataLayerError, OSError, ValueError) as error:
+        print(
+            json.dumps(
+                {"verdict": "FAIL", "error_type": type(error).__name__, "detail": str(error)},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
