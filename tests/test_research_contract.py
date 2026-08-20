@@ -154,7 +154,7 @@ def test_every_active_formal_result_writer_consumes_verified_curated_v1() -> Non
         assert "expected_dataset=" in source
         assert "urllib" not in source
         assert "requests" not in source
-    assert writers == ["gmaq-research-ls-tsmom"]
+    assert writers == ["gmaq-research-ls-tsmom", "gmaq-research-spot-perp-carry"]
 
 
 def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
