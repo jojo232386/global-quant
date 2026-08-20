@@ -330,6 +330,25 @@ def test_complete_fixture_contract_remains_structurally_blocked() -> None:
 
 
 @pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("account_evidence", None, "account_evidence_invalid"),
+        ("broker_evidence", [], "broker_evidence_invalid"),
+        ("readiness", "invalid", "readiness_evidence_invalid"),
+        ("candidate_sha", None, "candidate_sha_invalid"),
+        ("config_sha256", [], "config_sha256_invalid"),
+        ("now_epoch", True, "evaluation_time_invalid"),
+    ],
+)
+def test_malformed_candidate_inputs_fail_closed(field, value, expected) -> None:
+    result = evaluate(**{field: value})
+    assert result["verdict"] == "BLOCKED"
+    assert expected in result["blockers"]
+    assert result["entry_authorized"] is False
+    assert result["order_submission_enabled"] is False
+
+
+@pytest.mark.parametrize(
     ("overrides", "expected"),
     [
         ({"now_epoch": NOW + 3600}, "account_evidence_stale_or_invalid"),
