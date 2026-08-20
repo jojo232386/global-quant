@@ -26,9 +26,9 @@ jobs:
       - name: Check executable syntax
         run: |
           bash -n scripts/gmaq scripts/reliability-soak
-          python -m py_compile \
-            scripts/gmaq-control \
-            scripts/gmaq-control-room \
-            scripts/gmaq-fetch-tsmom \
-            scripts/gmaq-research-tsmom \
-            scripts/gmaq-set-readonly-creds
+          for script in scripts/*; do
+            [ -f "$script" ] || continue
+            if head -n 1 "$script" | grep -q python; then
+              python -m py_compile "$script"
+            fi
+          done
