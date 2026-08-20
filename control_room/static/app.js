@@ -66,12 +66,16 @@ function renderResearch(research) {
   text("passCount", counts.PASS || 0);
   text("rejectCount", counts.REJECT || 0);
   text("inconclusiveCount", counts.INCONCLUSIVE || 0);
-  const currentPass = 0;
+  const currentPass = Number(research.current_pass_count || 0);
   text("currentPassCount", currentPass);
-  text("promotionVerdict", currentPass ? "ELIGIBLE" : "BLOCKED");
+  text("promotionVerdict", currentPass ? "SHADOW ONLY" : "BLOCKED");
   setPill($("researchPill"), research.promotion_verdict);
   if (research.promotion_verdict === "BLOCKED_UNVERIFIED_ARTIFACTS") {
     $("researchPill").textContent = "无可验证 PASS";
+  } else if (research.promotion_verdict === "BLOCKED_NO_CURRENT_PASS") {
+    $("researchPill").textContent = "无当前 PASS";
+  } else if (research.promotion_verdict === "RESEARCH_PASS_SHADOW_ONLY") {
+    $("researchPill").textContent = "仅可进入影子验证";
   }
   const root = $("researchRows");
   root.replaceChildren();
@@ -80,7 +84,8 @@ function renderResearch(research) {
     const fields = [
       study.study_id,
       study.verdict,
-      study.evidence_generation === "COST_MODEL_MATCH_ONLY" ? "仅成本哈希匹配" : "未验证产物",
+      study.evidence_generation === "VERIFIED_CURATED_V1" ? "V1 已验证" :
+        study.evidence_generation === "COST_MODEL_MATCH_ONLY" ? "仅成本哈希匹配" : "未验证产物",
       percent(study.total_return),
       numeric(study.sharpe),
       numeric(study.trade_count),

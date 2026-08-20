@@ -226,6 +226,58 @@ def cost_model_sha() -> str | None:
         return None
 
 
+def pinned_sha(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def verified_curated_v1(result: dict) -> bool:
+    binding = result.get("dataset_binding")
+    if not isinstance(binding, dict):
+        return False
+    files = binding.get("files")
+    return (
+        binding.get("data_layer_version") == 1
+        and binding.get("integrity_verdict") == "VERIFIED"
+        and binding.get("stage") == "curated"
+        and binding.get("quality_verdict") == "PASS"
+        and pinned_sha(binding.get("dataset_id"))
+        and pinned_sha(binding.get("snapshot_manifest_sha256"))
+        and isinstance(files, dict)
+        and bool(files)
+        and all(isinstance(role, str) and role and pinned_sha(digest) for role, digest in files.items())
+    )
+
+
+def research_metrics(result: dict) -> dict:
+    legacy = result.get("out_of_sample")
+    if isinstance(legacy, dict):
+        return {
+            "total_return": legacy.get("total_return"),
+            "sharpe": legacy.get("sharpe"),
+            "max_drawdown": legacy.get("max_drawdown"),
+            "trade_count": legacy.get("trade_count"),
+        }
+    oos = result.get("oos")
+    baseline = oos.get("baseline") if isinstance(oos, dict) else None
+    if not isinstance(baseline, dict):
+        baseline = {}
+    activity = baseline.get("position_entries")
+    if activity is None:
+        activity = baseline.get("active_symbol_weeks")
+    if activity is None:
+        activity = baseline.get("scheduled_decisions")
+    return {
+        "total_return": baseline.get("net_total_return"),
+        "sharpe": baseline.get("annualized_sharpe"),
+        "max_drawdown": baseline.get("max_drawdown"),
+        "trade_count": activity,
+    }
+
+
 def research_snapshot() -> dict:
     studies = []
     current_cost_sha = cost_model_sha()
@@ -234,27 +286,39 @@ def research_snapshot() -> dict:
             result = read_json_object(path)
             if not result:
                 continue
-            oos = result.get("out_of_sample") if isinstance(result.get("out_of_sample"), dict) else {}
+            metrics = research_metrics(result)
+            cost = result.get("cost_model")
+            result_cost_sha = cost.get("sha256") if isinstance(cost, dict) else None
+            if not result_cost_sha:
+                result_cost_sha = result.get("cost_model_sha256")
+            if verified_curated_v1(result) and current_cost_sha == result_cost_sha:
+                evidence_generation = "VERIFIED_CURATED_V1"
+            elif current_cost_sha and current_cost_sha == result_cost_sha:
+                evidence_generation = "COST_MODEL_MATCH_ONLY"
+            else:
+                evidence_generation = "UNVERIFIED_ARTIFACT"
             studies.append(
                 {
                     "study_id": str(result.get("study_id") or path.parent.name),
                     "verdict": str(result.get("verdict") or "UNKNOWN"),
-                    "total_return": oos.get("total_return"),
-                    "sharpe": oos.get("sharpe"),
-                    "max_drawdown": oos.get("max_drawdown"),
-                    "trade_count": oos.get("trade_count"),
-                    "evidence_generation": (
-                        "COST_MODEL_MATCH_ONLY"
-                        if current_cost_sha and result.get("cost_model_sha256") == current_cost_sha
-                        else "UNVERIFIED_ARTIFACT"
-                    ),
+                    **metrics,
+                    "evidence_generation": evidence_generation,
                 }
             )
+    studies.sort(key=lambda item: item["study_id"], reverse=True)
     counts: dict[str, int] = {}
     for study in studies:
         counts[study["verdict"]] = counts.get(study["verdict"], 0) + 1
+    current_pass_count = sum(
+        study["verdict"] == "PASS"
+        and study["evidence_generation"] == "VERIFIED_CURATED_V1"
+        for study in studies
+    )
     return {
-        "promotion_verdict": "BLOCKED_UNVERIFIED_ARTIFACTS",
+        "promotion_verdict": (
+            "RESEARCH_PASS_SHADOW_ONLY" if current_pass_count else "BLOCKED_NO_CURRENT_PASS"
+        ),
+        "current_pass_count": current_pass_count,
         "counts": counts,
         "studies": studies,
     }
