@@ -55,6 +55,13 @@ Binance at <https://developers.binance.com/en/docs/catalog/core-trading-derivati
   adverse-funding stress -40.19%, delayed stress -34.73%, bootstrap confidence
   33.0%, and worst short adverse excursion 92.02%. This hypothesis is closed
   without parameter rescue.
+- The 2026-08-20 BTC/ETH spot-perpetual carry study consumed VERIFIED curated
+  Data Layer V1 dataset `9601a8ff1cbfd52b75744d3380bf7b0961d289c11d3ef4641c5c4e42cd38aee8`
+  and ended `REJECT`: OOS return -0.18%, Sharpe -0.381, bootstrap confidence
+  23.35%, and only 9 active symbol-weeks. Both symbols lost after four-sided
+  costs; cost, funding-haircut, and delayed combined stresses were negative.
+  The second OOS half had no qualifying entry. This hypothesis is closed and
+  is not a threshold-tuning target.
 - A corrected result must be a new preregistration; changing the old study in
   place after seeing its outcome would contaminate the research record.
 

@@ -209,5 +209,6 @@ def test_pending_carry_study_cannot_bypass_data_layer_v1() -> None:
     ):
         assert marker in binding
     readme = (RESEARCH / "README.md").read_text()
-    assert "Next frozen study" in readme
-    assert "DATASET_BOUND_READY_FOR_RUNNER" in readme
+    assert "Latest formal study" in readme
+    assert "spot-perp-carry" in readme
+    assert "REJECT" in readme

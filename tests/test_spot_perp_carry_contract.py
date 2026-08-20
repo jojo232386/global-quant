@@ -1,4 +1,5 @@
 from importlib.machinery import SourceFileLoader
+import json
 import pathlib
 
 import pytest
@@ -114,3 +115,16 @@ def test_score_rejects_weak_result() -> None:
     assert verdict == "REJECT"
     assert checks["oos_return_positive"] is False
     assert checks["active_symbol_weeks_gte_52"] is False
+
+
+def test_archived_formal_result_is_bound_and_closed() -> None:
+    study = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-spot-perp-carry"
+    result = json.loads((study / "results.json").read_text())
+    assert result["verdict"] == "REJECT"
+    assert result["live_readiness"] == "INCONCLUSIVE_FOR_LIVE"
+    assert result["implementation_candidate_sha"] == "71780adcffeb8686b43b07048982d75cd8c57090"
+    assert result["dataset_binding"]["dataset_id"] == "9601a8ff1cbfd52b75744d3380bf7b0961d289c11d3ef4641c5c4e42cd38aee8"
+    assert result["dataset_binding"]["snapshot_manifest_sha256"] == "d0afd4e8e448859933cedfeb83bf8edc6fb185ed047c3e4439ec312f3e61c01d"
+    assert result["oos"]["baseline"]["active_symbol_weeks"] == 9
+    assert result["gate_checks"]["data_layer_v1_verified_curated"] is True
+    assert "without parameter rescue" in (ROOT / "research" / "README.md").read_text()

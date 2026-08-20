@@ -33,13 +33,10 @@ active runtime, and it does not authorize live trading.
   snapshot and bind its dataset ID, snapshot-manifest SHA, and input-file
   SHAs. A research runner must not fetch exchange data directly. Missing data
   may be added only through the existing raw -> validated -> curated V1 flow.
-- Latest formal study: `study-2026-08-20-btceth-volscaled-ls-tsmom` is
-  `REJECT`; its negative OOS return, 36.51% drawdown, adverse-funding stress,
-  parameter neighbors, delay, bootstrap, and short-risk screen all failed.
-- Next frozen study: `study-2026-08-20-btceth-spot-perp-carry` is
-  `DATASET_BOUND_READY_FOR_RUNNER`. Its separate immutable binding pins a new
-  VERIFIED Data Layer V1 curated spot/perpetual dataset by dataset ID,
-  snapshot-manifest SHA, schema ID, and every input-file SHA. No result exists.
+- Latest formal study: `study-2026-08-20-btceth-spot-perp-carry` consumed its
+  separately bound VERIFIED Data Layer V1 curated dataset and is `REJECT`:
+  OOS -0.18%, Sharpe -0.381, only 9 active symbol-weeks, and all cost/funding/
+  delay stresses negative. The hypothesis is closed without parameter rescue.
 
 ## Layout
 

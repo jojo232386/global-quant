@@ -1,0 +1,198 @@
+{
+  "bootstrap": {
+    "block_weeks": 4,
+    "samples": 2000,
+    "seed": 20260820
+  },
+  "bootstrap_positive_probability": 0.2335,
+  "cost_model": {
+    "baseline_bps_per_side": 15.0,
+    "entry_threshold_roundtrip_bps": 60.0,
+    "sha256": "effa8ab33aa35f94788e77049adf13a4a0a3f226b68771797eded866d2689dc6",
+    "stress_bps_per_side": 30.0
+  },
+  "dataset_binding": {
+    "cross_source_verdict": "UNVERIFIED_SINGLE_VENUE",
+    "data_layer_version": 1,
+    "dataset": "btceth-spot-perp-carry",
+    "dataset_id": "9601a8ff1cbfd52b75744d3380bf7b0961d289c11d3ef4641c5c4e42cd38aee8",
+    "files": {
+      "BTCUSDT.funding": "2886a5b621e9207bf6cc1da9c3490abd6bb183b512f9a9b7b0f21269373cd35c",
+      "BTCUSDT.mark_8h": "f06bd79f001f83f4435bd8251d7f285c33fa56f657a3b1281c7c805dc701ccc4",
+      "BTCUSDT.spot_8h": "9c5f57f18c086c7c7b1d7d05af6727235a3909d5186def13104fae46603e2e6c",
+      "ETHUSDT.funding": "d414437905c5528d31e24eca77e6e751063827a2984a545b3c9b2ab2b07020ff",
+      "ETHUSDT.mark_8h": "9b7aec88870aebc9e8c8b9edff6d62025044834d94b834beb2028b658c2c30e1",
+      "ETHUSDT.spot_8h": "33ab5be99912e982f784b3bfe1c5c9cb7ba539568fd0997c8b8aec6e569c287b",
+      "dataset_manifest": "158025e742778807b155cdeab9953d436671175e37fddf794ae1b8e3931e30bb"
+    },
+    "integrity_verdict": "VERIFIED",
+    "parent_snapshot_id": "7901e6493671cfd6550076ae17c4d1c5bf94c94a0eb77573cff780a5c306a592",
+    "quality_verdict": "PASS",
+    "schema_id": "31f35151bd5c9c6135a2ece74937aee0a5caa8f17c7964fea60fc6d4bae6c652",
+    "snapshot_manifest_sha256": "d0afd4e8e448859933cedfeb83bf8edc6fb185ed047c3e4439ec312f3e61c01d",
+    "stage": "curated",
+    "window_end": "2026-08-20",
+    "window_start": "2020-01-01"
+  },
+  "gate_checks": {
+    "active_symbol_weeks_gte_52": false,
+    "bootstrap_positive_probability_gte_80pct": false,
+    "both_oos_halves_positive": false,
+    "both_symbols_positive": false,
+    "cost_stress_positive": false,
+    "data_layer_v1_verified_curated": true,
+    "delayed_combined_stress_positive": false,
+    "funding_stress_positive": false,
+    "oos_max_drawdown_lte_15pct": true,
+    "oos_return_positive": false,
+    "oos_sharpe_gte_0_70": false,
+    "scoreable_decisions_gte_104": true,
+    "symbol_contribution_share_lte_75pct": false
+  },
+  "implementation_candidate_sha": "71780adcffeb8686b43b07048982d75cd8c57090",
+  "implementation_semantics": {
+    "drawdown_path": "8h_mark_to_market_after_cost_and_funding",
+    "funding_inclusion": "entry_time_strictly_less_than_funding_time_strictly_less_than_exit_time",
+    "persistent_signal": "forced_weekly_exit_then_reentry_with_four_sided_cost",
+    "sharpe_frequency": "weekly_sqrt_52"
+  },
+  "live_readiness": "INCONCLUSIVE_FOR_LIVE",
+  "oos": {
+    "baseline": {
+      "active_symbol_weeks": 9,
+      "annualized_return": -0.0006745711006537203,
+      "annualized_sharpe": -0.38091367612650073,
+      "annualized_volatility": 0.0017674428238082013,
+      "basis_pnl": 0.27919648030884225,
+      "end_equity": 998.2237443073836,
+      "funding_pnl": 12.940713413869913,
+      "largest_absolute_symbol_contribution_share": 0.9746092516649651,
+      "max_drawdown": 0.004595250858907329,
+      "net_total_return": -0.001776255692616413,
+      "perpetual_mark_pnl": -5.20726781446235,
+      "scheduled_decisions": 137,
+      "spot_price_pnl": 5.486464294771192,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": -0.04510046,
+        "ETHUSDT": -1.73115523
+      },
+      "transaction_cost": 14.996165586795199,
+      "weekly_win_rate": 0.014598540145985401
+    },
+    "cost_stress": {
+      "active_symbol_weeks": 9,
+      "annualized_return": -0.006346646530570488,
+      "annualized_sharpe": -1.3108868892447831,
+      "annualized_volatility": 0.004847700222148985,
+      "basis_pnl": 0.2758940571890598,
+      "end_equity": 983.3656453069219,
+      "funding_pnl": 12.858441856774546,
+      "largest_absolute_symbol_contribution_share": 0.6355868147244006,
+      "max_drawdown": 0.016634354693078057,
+      "net_total_return": -0.016634354693078057,
+      "perpetual_mark_pnl": -5.496141994735023,
+      "scheduled_decisions": 137,
+      "spot_price_pnl": 5.772036051924083,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": -6.06177818,
+        "ETHUSDT": -10.57257651
+      },
+      "transaction_cost": 29.768690607041446,
+      "weekly_win_rate": 0.0
+    },
+    "delayed_combined_stress": {
+      "active_symbol_weeks": 9,
+      "annualized_return": -0.008932280654998959,
+      "annualized_sharpe": -1.3835977122338667,
+      "annualized_volatility": 0.006469220619057806,
+      "basis_pnl": 0.351020871582044,
+      "end_equity": 976.6383528072679,
+      "funding_pnl": 6.255053033537646,
+      "largest_absolute_symbol_contribution_share": 0.6130944438928488,
+      "max_drawdown": 0.02336164719273215,
+      "net_total_return": -0.02336164719273215,
+      "perpetual_mark_pnl": -52.96141314738282,
+      "scheduled_decisions": 137,
+      "spot_price_pnl": 53.312434018964865,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": -9.0387511,
+        "ETHUSDT": -14.32289609
+      },
+      "transaction_cost": 29.967721097851783,
+      "weekly_win_rate": 0.0
+    },
+    "funding_stress": {
+      "active_symbol_weeks": 9,
+      "annualized_return": -0.0031275383753632813,
+      "annualized_sharpe": -1.2592405919580363,
+      "annualized_volatility": 0.002485049783289959,
+      "basis_pnl": 0.27682568162524035,
+      "end_equity": 991.781187753565,
+      "funding_pnl": 6.454817925939029,
+      "largest_absolute_symbol_contribution_share": 0.6418693872585329,
+      "max_drawdown": 0.008218812246435059,
+      "net_total_return": -0.008218812246435059,
+      "perpetual_mark_pnl": -5.410814022765405,
+      "scheduled_decisions": 137,
+      "spot_price_pnl": 5.687639704390645,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": -2.94340827,
+        "ETHUSDT": -5.27540398
+      },
+      "transaction_cost": 14.95045585399944,
+      "weekly_win_rate": 0.0
+    }
+  },
+  "oos_halves": [
+    {
+      "inherits_primary_path": true,
+      "net_total_return": -0.001776255692616413,
+      "weekly_observations": 68
+    },
+    {
+      "inherits_primary_path": true,
+      "net_total_return": 0.0,
+      "weekly_observations": 69
+    }
+  ],
+  "parameters": {
+    "decision": "Monday 00:00 UTC",
+    "delayed_execution": "Monday 16:00 UTC",
+    "execution": "Monday 08:00 UTC",
+    "holding_days": 7,
+    "maximum_gross_notional": 1.0,
+    "signal_funding_events": 21
+  },
+  "run_at_utc": "2026-08-20T15:43:03Z",
+  "schema_version": 1,
+  "study_id": "study-2026-08-20-btceth-spot-perp-carry",
+  "train": {
+    "baseline": {
+      "active_symbol_weeks": 40,
+      "annualized_return": 0.023165730190980893,
+      "annualized_sharpe": 1.0876944430621613,
+      "annualized_volatility": 0.02126410359535576,
+      "basis_pnl": 8.064070034311428,
+      "end_equity": 1070.6479444904835,
+      "funding_pnl": 131.8111506336762,
+      "largest_absolute_symbol_contribution_share": 0.6401802817335339,
+      "max_drawdown": 0.02434480287117924,
+      "net_total_return": 0.0706479444904835,
+      "perpetual_mark_pnl": 78.78978390834762,
+      "scheduled_decisions": 155,
+      "spot_price_pnl": -70.72571387403619,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 25.42052348,
+        "ETHUSDT": 45.22742101
+      },
+      "transaction_cost": 69.22727617750276,
+      "weekly_win_rate": 0.08387096774193549
+    }
+  },
+  "verdict": "REJECT"
+}
