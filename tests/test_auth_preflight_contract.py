@@ -171,3 +171,66 @@ def test_live_readiness_fields_are_reported() -> None:
         "ipRestrict",
     ):
         assert field in text, f"missing live-readiness field: {field}"
+
+
+def test_unreachable_account_never_claims_portfolio_margin_or_verified_fees(
+    tmp_path, monkeypatch
+) -> None:
+    module = load_auth()
+    monkeypatch.setattr(module, "read_creds", lambda: ("key", "A" * 64))
+    monkeypatch.setattr(
+        module,
+        "signed_get",
+        lambda *_args, **_kwargs: (401, {"error": {"code": -2015, "msg": "rejected"}}),
+    )
+    monkeypatch.setattr(module, "OUTPUT_PATH", tmp_path / "account-preflight.json")
+
+    result = module.run_preflight()
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["verdict"] == "PARTIAL"
+    assert result["facts"]["accountType"] is None
+    assert result["facts"]["marginMode"] is None
+    assert checks["margin mode readable"]["passed"] is False
+    assert checks["fee rates on account"]["passed"] is False
+    assert "fee rates are UNVERIFIED" in result["live_readiness_note"]
+    assert "tier-1 MMR is UNVERIFIED" in result["live_readiness_note"]
+
+
+def test_portfolio_margin_is_reported_as_incompatible_with_isolated_canary(
+    tmp_path, monkeypatch
+) -> None:
+    module = load_auth()
+    monkeypatch.setattr(module, "read_creds", lambda: ("key", "A" * 64))
+
+    def signed_get(_base, endpoint, _params, _key, _secret):
+        responses = {
+            "/fapi/v2/account": (401, {"error": {"code": -2015, "msg": "rejected"}}),
+            "/papi/v1/account": (200, {"accountStatus": "NORMAL"}),
+            "/papi/v1/um/positionSide/dual": (200, {"dualSidePosition": True}),
+            "/papi/v1/um/commissionRate": (
+                200,
+                {"symbol": "ETHUSDT", "makerCommissionRate": "0.0002", "takerCommissionRate": "0.0005"},
+            ),
+            "/papi/v1/um/leverageBracket": (
+                200,
+                [{"brackets": [{"maintMarginRatio": "0.004", "initialLeverage": 125}]}],
+            ),
+            "/sapi/v1/account/apiRestrictions": (
+                200,
+                {"enableWithdrawals": False, "ipRestrict": True},
+            ),
+        }
+        return responses[endpoint]
+
+    monkeypatch.setattr(module, "signed_get", signed_get)
+    monkeypatch.setattr(module, "OUTPUT_PATH", tmp_path / "account-preflight.json")
+
+    result = module.run_preflight()
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["verdict"] == "PASS_READONLY"
+    assert checks["margin mode"]["passed"] is False
+    assert checks["one-way position mode"]["passed"] is False
+    assert "fee rates are VERIFIED" in result["live_readiness_note"]
+    assert "tier-1 MMR is VERIFIED" in result["live_readiness_note"]

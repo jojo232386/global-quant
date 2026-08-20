@@ -135,7 +135,10 @@ def run_preflight() -> dict:
 
     # --- account discovery: classic USD-M futures first, then Portfolio Margin ---
     code, account = signed_get(FAPI, "/fapi/v2/account", {}, key, secret)
+    fapi_account = account
     account_type = None
+    code_p = 0
+    account_p = None
     if code == 200 and isinstance(account, dict):
         account_type = "usd_m_futures"
     else:
@@ -150,7 +153,8 @@ def run_preflight() -> dict:
         check(
             "account reachable",
             account_type is not None,
-            f"{account_type or 'neither fapi nor papi'} (fapi={code}, papi={code_p if account_type == 'portfolio_margin' else 'n/a'})",
+            account_type
+            or f"neither fapi nor papi ({describe(code, fapi_account)}; {describe(code_p, account_p)})",
         )
     )
     if account is not None:
@@ -198,14 +202,14 @@ def run_preflight() -> dict:
             checks.append(check("asset mode readable", False, f"HTTP {code}"))
         code, commission = signed_get(FAPI, "/fapi/v1/commissionRate", {"symbol": "ETHUSDT"}, key, secret)
         code_b, bracket = signed_get(FAPI, "/fapi/v1/leverageBracket", {"symbol": "ETHUSDT"}, key, secret)
-    else:
+    elif account_type == "portfolio_margin":
         # Portfolio Margin: unified margin; fees/MMR/mode via papi um endpoints.
         facts["marginMode"] = "unified_margin_pm"
         checks.append(
             check(
                 "margin mode",
-                True,
-                "Portfolio Margin account: unified cross margin (isolated-margin config not applicable)",
+                False,
+                "Portfolio Margin account uses unified cross margin; isolated-margin canary is incompatible",
                 kind="live_requirement",
             )
         )
@@ -224,9 +228,20 @@ def run_preflight() -> dict:
             checks.append(check("position mode readable", False, f"HTTP {code}"))
         code, commission = signed_get(PAPI, "/papi/v1/um/commissionRate", {"symbol": "ETHUSDT"}, key, secret)
         code_b, bracket = signed_get(PAPI, "/papi/v1/um/leverageBracket", {"symbol": "ETHUSDT"}, key, secret)
+    else:
+        facts["marginMode"] = None
+        checks.append(check("margin mode readable", False, "account type is unknown"))
+        code, commission = 0, None
+        code_b, bracket = 0, None
 
     commission_ok = code == 200 and isinstance(commission, dict) and "makerCommissionRate" in commission
-    checks.append(check("fee rates on account", commission_ok, f"HTTP {code}"))
+    checks.append(
+        check(
+            "fee rates on account",
+            commission_ok,
+            f"HTTP {code}" if code else "not queried because account type is unknown",
+        )
+    )
     if commission_ok:
         facts["commission"] = {
             "symbol": commission.get("symbol"),
@@ -243,7 +258,13 @@ def run_preflight() -> dict:
         )
 
     bracket_ok = code_b == 200 and isinstance(bracket, list) and bracket
-    checks.append(check("leverage brackets readable", bracket_ok, f"HTTP {code_b}"))
+    checks.append(
+        check(
+            "leverage brackets readable",
+            bracket_ok,
+            f"HTTP {code_b}" if code_b else "not queried because account type is unknown",
+        )
+    )
     if bracket_ok:
         first = bracket[0].get("brackets", [{}])[0]
         facts["leverageBracketTier1"] = {
@@ -291,9 +312,10 @@ def run_preflight() -> dict:
         "facts": facts,
         "secrets": "none stored",
         "live_readiness_note": (
-            "Fee rates and tier-1 MMR are now verified on the account. "
-            "Portfolio Margin accounts trade on unified margin; the canary "
-            "isolated-margin layout must be adapted before any live proposal. "
+            f"Account fee rates are {'VERIFIED' if commission_ok else 'UNVERIFIED'}; "
+            f"tier-1 MMR is {'VERIFIED' if bracket_ok else 'UNVERIFIED'}. "
+            f"Account layout is {account_type or 'UNKNOWN'}; the canary requires "
+            "an isolated-margin-compatible one-way USD-M layout. "
             "Live still requires: dedicated account/solo operator, withdrawals "
             "disabled, approved limits, secret management, alert routing, and "
             "the 48-72h soak evidence."
