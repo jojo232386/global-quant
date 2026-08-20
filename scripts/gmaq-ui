@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import pathlib
+import shlex
 import signal
 import subprocess
 import sys
@@ -23,6 +24,7 @@ LOG_PATH = AUDIT_DIR / "control-room.log"
 HOST = "127.0.0.1"
 PORT = 8090
 URL = f"http://{HOST}:{PORT}"
+SERVER_PATH = (ROOT / "control_room" / "server.py").resolve()
 
 
 def read_pid() -> int | None:
@@ -45,7 +47,25 @@ def process_command(pid: int) -> str | None:
 
 def owned_process(pid: int) -> bool:
     command = process_command(pid)
-    return bool(command and "control_room.server" in command and str(ROOT) in command)
+    if not command:
+        return False
+    try:
+        arguments = shlex.split(command)
+    except ValueError:
+        return False
+    if len(arguments) < 2:
+        return False
+    try:
+        launched_script = pathlib.Path(arguments[1]).resolve()
+    except OSError:
+        return False
+    return (
+        launched_script == SERVER_PATH
+        and "--host" in arguments
+        and HOST in arguments
+        and "--port" in arguments
+        and str(PORT) in arguments
+    )
 
 
 def owns_listener(pid: int) -> bool:
