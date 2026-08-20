@@ -13,7 +13,7 @@ test = ["pytest>=8,<10"]
 
 [tool.setuptools]
 py-modules = []
-packages = ["gmaq_data", "control_room"]
+packages = ["gmaq_data", "gmaq_live", "control_room"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -50,16 +50,15 @@ must be refused by the control plane.
 
 ## 3. Unique client-order identity
 
-- Format: `gmaq-<env>-<pair>-<utc-micros>-<8 base32 chars>`.
-- Generated once per order intent, written to the audit manifest before
-  submission, and never reused. The identity carries no secrets.
-- Dry-run still exercises the format and uniqueness checks so the promoted
-  layout behaves identically.
+- A future Binance USD-M adapter must create an exchange-compliant identifier
+  (maximum 36 safe characters), write it before submission, pass the exact
+  value as Binance `newClientOrderId`, and never reuse it. The identity carries
+  no secrets.
 - Current pinned Freqtrade does not expose a Binance client-order-id callback
-  or order-create parameter. Therefore this identifier is not claimed as
-  exchange-bound in this candidate. Freqtrade/SQLite `order_id` is the
-  dry-run reconciliation identity. A live candidate remains blocked until a
-  reviewed adapter can prove exchange-bound client identity end to end.
+  or order-create parameter. Therefore no local generator is presented as
+  exchange-bound. Freqtrade/SQLite `order_id` remains the dry-run
+  reconciliation identity. A live candidate remains blocked until a reviewed
+  adapter can prove exchange-bound client identity end to end.
 
 ## 4. Reconciliation
 
@@ -73,6 +72,12 @@ must be refused by the control plane.
   price, open flag, and status. Duplicate identity, unknown status, partial
   outcome, API/DB failure, or field mismatch disarms entry and returns
   `UNKNOWN`/`MISMATCH`; there is no automatic retry.
+- `gmaq_live.admission.reconcile_binance_usdm_truth()` provides the pure,
+  keyless contract for correlating a pre-submit intent, Binance REST order and
+  position snapshots, and `ORDER_TRADE_UPDATE`/`ACCOUNT_UPDATE` events. Missing
+  stream continuity, duplicate identity, unknown state, or any field mismatch
+  returns `QUARANTINE`. Capture transport and listen-key lifecycle remain live
+  blockers.
 
 ## 5. Audit manifest
 
@@ -148,6 +153,26 @@ must be refused by the control plane.
   without the explicit protections in this document, exchange-side order
   protection, and reconciliation proof. A live config requires its own
   review and its own config file.
+
+## 11. Live candidate admission (non-ordering)
+
+- `scripts/gmaq-live-admission evaluate` is a read-only evidence aggregator. It
+  requires exact candidate/config identity, fresh account evidence, matched
+  broker truth, credential presence, dedicated-account/sole-operator evidence,
+  approved risk limits, verified alert/secret handling, a strategy PASS, and a
+  completed soak PASS.
+- Strategy PASS is read from a committed `research/backtests/<study>/results.json`;
+  its dataset ID, manifest/schema/file SHAs, stage, quality, and integrity must
+  match `verify_snapshot(..., minimum_stage="curated")` against the existing
+  Data Layer V1 registry.
+- Caller-authored fixtures can validate only the contract and remain
+  `BLOCKED`. `CANDIDATE_ELIGIBLE` is unreachable until reviewed authenticated
+  capture, exchange-bound submission, and live-credential/account binding are
+  implemented. Every result sets `entry_authorized=false` and
+  `order_submission_enabled=false`; there is still no live arm or order command.
+- `scripts/gmaq-live-admission truth` reconciles already captured fixtures. It
+  performs no network request and cannot establish stream capture provenance by
+  itself. Synthetic fixtures validate the contract, not live readiness.
 
 ## Validation
 

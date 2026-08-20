@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import os
 import pathlib
 import stat
@@ -160,6 +161,36 @@ def test_request_query_is_sent_in_the_same_sorted_order_as_signing() -> None:
     assert "urllib.parse.urlencode(sorted(stamped.items()))" in text
 
 
+def test_signed_requests_never_follow_redirects() -> None:
+    module = load_auth()
+    handler = module._NoRedirectHandler()
+    request = module.urllib.request.Request(
+        "https://fapi.binance.com/fapi/v2/account",
+        headers={"X-MBX-APIKEY": "test-key"},
+    )
+    assert handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://example.invalid/collect",
+    ) is None
+    assert any(isinstance(item, module._NoRedirectHandler) for item in module.HTTP_OPENER.handlers)
+
+
+def test_exchange_response_body_is_bounded(monkeypatch) -> None:
+    module = load_auth()
+    monkeypatch.setattr(module, "MAX_RESPONSE_BYTES", 8)
+    assert module._read_json_response(io.BytesIO(b'{"a":1}')) == {"a": 1}
+    try:
+        module._read_json_response(io.BytesIO(b"123456789"))
+    except ValueError as error:
+        assert "safety limit" in str(error)
+    else:
+        raise AssertionError("oversized exchange response was accepted")
+
+
 def test_live_readiness_fields_are_reported() -> None:
     text = SCRIPT.read_text()
     for field in (
@@ -171,6 +202,28 @@ def test_live_readiness_fields_are_reported() -> None:
         "ipRestrict",
     ):
         assert field in text, f"missing live-readiness field: {field}"
+
+
+def test_account_evidence_is_candidate_and_config_bound() -> None:
+    module = load_auth()
+    module.OUTPUT_PATH = pathlib.Path("/dev/null")
+    # No credentials means no request, but the failed evidence still preserves
+    # the exact proposed candidate identity for fail-closed admission.
+    module.read_creds = lambda: ("", "")
+    result = module.run_preflight("a" * 40, "b" * 64)
+    assert result["schema_version"] == 2
+    assert result["candidate_sha"] == "a" * 40
+    assert result["config_sha256"] == "b" * 64
+    assert result["verdict"] == "FAIL"
+
+
+def test_cli_computes_identity_instead_of_accepting_claimed_digests() -> None:
+    text = SCRIPT.read_text()
+    assert 'parser.add_argument("--config", required=True' in text
+    assert 'parser.add_argument("--candidate-sha"' not in text
+    assert 'parser.add_argument("--config-sha256"' not in text
+    assert "run_preflight(candidate_sha, config_sha256)" in text
+    assert "committed_candidate_sha(ROOT)" in text
 
 
 def test_unreachable_account_never_claims_portfolio_margin_or_verified_fees(

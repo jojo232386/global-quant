@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Evaluate captured live-candidate evidence without network or order actions."""
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from gmaq_live import (
+    committed_candidate_sha,
+    evaluate_live_candidate,
+    reconcile_binance_usdm_truth,
+    validate_live_config,
+)
+from gmaq_data import DataLayerError, default_data_root, verify_snapshot
+
+MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
+MAX_EVIDENCE_ROWS = 10_000
+
+
+def read_json(path: str) -> object:
+    with pathlib.Path(path).open("rb") as handle:
+        payload = handle.read(MAX_EVIDENCE_FILE_BYTES + 1)
+    if len(payload) > MAX_EVIDENCE_FILE_BYTES:
+        raise ValueError(f"{path} exceeds evidence size limit")
+    return json.loads(payload.decode())
+
+
+def load_object(path: str) -> dict:
+    value = read_json(path)
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain one JSON object")
+    return value
+
+
+def load_list(path: str) -> list[dict]:
+    value = read_json(path)
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise ValueError(f"{path} must contain one JSON object list")
+    if len(value) > MAX_EVIDENCE_ROWS:
+        raise ValueError(f"{path} exceeds evidence row limit")
+    return value
+
+
+def load_committed_strategy_result(path: str) -> dict:
+    resolved = pathlib.Path(path).resolve()
+    try:
+        relative = resolved.relative_to(ROOT)
+    except ValueError as error:
+        raise ValueError("strategy result must be inside the candidate repository") from error
+    if (
+        len(relative.parts) != 4
+        or relative.parts[:2] != ("research", "backtests")
+        or relative.name != "results.json"
+    ):
+        raise ValueError("strategy result must be research/backtests/<study>/results.json")
+    subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", str(relative)],
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return load_object(str(resolved))
+
+
+def current_sha() -> str:
+    return committed_candidate_sha(ROOT)
+
+
+def validated_config_sha256(path: str) -> str:
+    config = load_object(path)
+    errors = validate_live_config(config)
+    if errors:
+        raise ValueError("invalid proposed live config: " + ",".join(errors))
+    digest = hashlib.sha256()
+    with pathlib.Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-live-admission")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    truth = sub.add_parser("truth", help="reconcile captured Binance REST/user-stream fixtures")
+    truth.add_argument("--intent", required=True)
+    truth.add_argument("--rest-orders", required=True)
+    truth.add_argument("--user-stream-events", required=True)
+    truth.add_argument("--rest-positions", required=True)
+    truth.add_argument("--stream-state", required=True)
+    truth.add_argument("--config", required=True, help="proposed non-secret live config")
+    truth.add_argument("--output")
+
+    evaluate = sub.add_parser("evaluate", help="fail-closed live-candidate eligibility check")
+    evaluate.add_argument("--account-evidence", required=True)
+    evaluate.add_argument("--broker-evidence", required=True)
+    evaluate.add_argument("--readiness", required=True)
+    evaluate.add_argument("--strategy-result", required=True, help="committed V1-bound research results.json")
+    evaluate.add_argument("--data-root", help="existing Data Layer V1 root")
+    evaluate.add_argument("--config", required=True, help="proposed non-secret live config")
+
+    args = parser.parse_args(argv)
+    now = datetime.now(timezone.utc)
+    try:
+        candidate_sha = current_sha()
+        config_sha256 = validated_config_sha256(args.config)
+        if args.command == "truth":
+            result = reconcile_binance_usdm_truth(
+                intent=load_object(args.intent),
+                rest_orders=load_list(args.rest_orders),
+                user_stream_events=load_list(args.user_stream_events),
+                rest_positions=load_list(args.rest_positions),
+                stream_state=load_object(args.stream_state),
+                candidate_sha=candidate_sha,
+                config_sha256=config_sha256,
+                captured_at_utc=now.isoformat(),
+            )
+            if args.output:
+                pathlib.Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
+        else:
+            strategy_result = load_committed_strategy_result(args.strategy_result)
+            binding = strategy_result.get("dataset_binding")
+            if not isinstance(binding, dict):
+                raise ValueError("strategy result lacks dataset binding")
+            data_root = (
+                pathlib.Path(args.data_root).expanduser().resolve()
+                if args.data_root
+                else default_data_root(ROOT)
+            )
+            verified_dataset = verify_snapshot(
+                data_root,
+                str(binding.get("dataset_id", "")),
+                expected_dataset=str(binding.get("dataset", "")),
+                minimum_stage="curated",
+            )
+            result = evaluate_live_candidate(
+                account_evidence=load_object(args.account_evidence),
+                broker_evidence=load_object(args.broker_evidence),
+                readiness=load_object(args.readiness),
+                strategy_result=strategy_result,
+                verified_dataset=verified_dataset,
+                candidate_sha=candidate_sha,
+                config_sha256=config_sha256,
+                now_epoch=int(now.timestamp()),
+            )
+    except (
+        DataLayerError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+    ) as error:
+        result = {
+            "schema_version": 1,
+            "verdict": "BLOCKED",
+            "blockers": ["evidence_unreadable_or_invalid"],
+            "entry_authorized": False,
+            "order_submission_enabled": False,
+            "error": str(error),
+        }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["verdict"] in {"MATCH", "CANDIDATE_ELIGIBLE"} else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
