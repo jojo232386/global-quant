@@ -1,0 +1,288 @@
+{
+  "bootstrap": {
+    "block_days": 28,
+    "samples": 2000,
+    "seed": 20260820
+  },
+  "bootstrap_positive_probability": 0.548,
+  "cost_model": {
+    "baseline_bps_per_side": 15.0,
+    "funding_stress_multiplier": 5.0,
+    "sha256": "effa8ab33aa35f94788e77049adf13a4a0a3f226b68771797eded866d2689dc6",
+    "stress_bps_per_side": 30.0
+  },
+  "data_integrity": "PASS",
+  "gate_checks": {
+    "benchmark_reported": true,
+    "bootstrap_positive_probability_gte_70pct": false,
+    "both_oos_halves_positive": true,
+    "data_integrity_complete": true,
+    "delayed_stress_positive": false,
+    "neighbor_stress_returns_positive": false,
+    "oos_max_drawdown_lte_25pct": false,
+    "oos_rebalances_gte_100": true,
+    "oos_return_positive": true,
+    "oos_sharpe_gte_0_5": false,
+    "oos_stress_positive": false,
+    "symbol_contribution_share_lte_75pct": true,
+    "train_return_positive": true
+  },
+  "implementation_candidate_sha": "97208bbef6b60cbc9eef09613f99ae60cb4de2e8",
+  "neighbor_stress": {
+    "126": {
+      "active_symbol_days": 973,
+      "annualized_return": -0.23391254287481233,
+      "annualized_sharpe": -0.44785395290624447,
+      "annualized_volatility": 0.4085109827488957,
+      "average_holding_days": 121.625,
+      "calmar": -0.35629381840610863,
+      "daily_observations": 962,
+      "daily_profit_factor": 0.9185004043758356,
+      "daily_win_rate": 0.28274428274428276,
+      "end_equity": 495.45261147,
+      "executed_symbol_orders": 147,
+      "largest_absolute_symbol_contribution_share": 0.7947207023412437,
+      "max_consecutive_losing_days": 6,
+      "max_drawdown": 0.6565158607612877,
+      "max_drawdown_duration_days": 620,
+      "net_total_return": -0.5045473885335852,
+      "position_entries": 8,
+      "scheduled_rebalances": 138,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": -103.57313355,
+        "ETHUSDT": -400.97425498
+      },
+      "total_turnover": 15.659184110949832
+    },
+    "252": {
+      "active_symbol_days": 1337,
+      "annualized_return": -0.21158854938520189,
+      "annualized_sharpe": -0.26149086711647734,
+      "annualized_volatility": 0.4763209353371468,
+      "average_holding_days": 222.83333333333334,
+      "calmar": -0.3379486134352092,
+      "daily_observations": 962,
+      "daily_profit_factor": 0.9582224034849187,
+      "daily_win_rate": 0.39293139293139295,
+      "end_equity": 534.41705219,
+      "executed_symbol_orders": 197,
+      "largest_absolute_symbol_contribution_share": 0.8379484049979052,
+      "max_consecutive_losing_days": 8,
+      "max_drawdown": 0.6260968116851504,
+      "max_drawdown_duration_days": 693,
+      "net_total_return": -0.4655829478135797,
+      "position_entries": 6,
+      "scheduled_rebalances": 138,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 111.62718655,
+        "ETHUSDT": -577.21013437
+      },
+      "total_turnover": 12.877960032459395
+    }
+  },
+  "oos": {
+    "baseline": {
+      "active_symbol_days": 1092,
+      "annualized_return": 0.036587501860633864,
+      "annualized_sharpe": 0.3048953534543836,
+      "annualized_volatility": 0.45352220154846296,
+      "average_holding_days": 99.27272727272727,
+      "calmar": 0.07526239472436422,
+      "daily_observations": 962,
+      "daily_profit_factor": 1.0543531026266189,
+      "daily_win_rate": 0.3731808731808732,
+      "end_equity": 1099.33826903,
+      "executed_symbol_orders": 167,
+      "largest_absolute_symbol_contribution_share": 0.5429110083441768,
+      "max_consecutive_losing_days": 6,
+      "max_drawdown": 0.4861325764962622,
+      "max_drawdown_duration_days": 393,
+      "net_total_return": 0.09933826902618348,
+      "position_entries": 11,
+      "scheduled_rebalances": 138,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 628.41496722,
+        "ETHUSDT": -529.0766982
+      },
+      "total_turnover": 21.979697534586947
+    },
+    "benchmark_50_50": {
+      "active_symbol_days": 1924,
+      "annualized_return": 0.0018560703533501144,
+      "annualized_sharpe": 0.3061494474528584,
+      "annualized_volatility": 0.60912603004442,
+      "average_holding_days": 962.0,
+      "calmar": 0.002770103973508598,
+      "daily_observations": 962,
+      "daily_profit_factor": 1.0465649952403175,
+      "daily_win_rate": 0.5072765072765073,
+      "end_equity": 1004.8993179,
+      "executed_symbol_orders": 4,
+      "largest_absolute_symbol_contribution_share": 0.5085984905746332,
+      "max_consecutive_losing_days": 7,
+      "max_drawdown": 0.6700363492129959,
+      "max_drawdown_duration_days": 321,
+      "net_total_return": 0.004899317899633937,
+      "position_entries": 2,
+      "scheduled_rebalances": 1,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 144.89669245,
+        "ETHUSDT": -139.99737455
+      },
+      "total_turnover": 2.3011638757846375
+    },
+    "cash_benchmark_return": 0.0,
+    "delayed_stress": {
+      "active_symbol_days": 1092,
+      "annualized_return": -0.18382699923357437,
+      "annualized_sharpe": -0.21722301965669383,
+      "annualized_volatility": 0.45672608816796767,
+      "average_holding_days": 99.27272727272727,
+      "calmar": -0.3008238274289687,
+      "daily_observations": 962,
+      "daily_profit_factor": 0.9629787541183301,
+      "daily_win_rate": 0.3596673596673597,
+      "end_equity": 585.45265475,
+      "executed_symbol_orders": 167,
+      "largest_absolute_symbol_contribution_share": 0.7804394851297852,
+      "max_consecutive_losing_days": 8,
+      "max_drawdown": 0.6110785864426915,
+      "max_drawdown_duration_days": 620,
+      "net_total_return": -0.4145473452536558,
+      "position_entries": 11,
+      "scheduled_rebalances": 138,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 162.27784137,
+        "ETHUSDT": -576.82518662
+      },
+      "total_turnover": 22.301904110408437
+    },
+    "stress": {
+      "active_symbol_days": 1092,
+      "annualized_return": -0.20751748203668907,
+      "annualized_sharpe": -0.2856817683570131,
+      "annualized_volatility": 0.45414615661086344,
+      "average_holding_days": 99.27272727272727,
+      "calmar": -0.31792969461704756,
+      "daily_observations": 962,
+      "daily_profit_factor": 0.9516564394402025,
+      "daily_win_rate": 0.3596673596673597,
+      "end_equity": 541.72087081,
+      "executed_symbol_orders": 167,
+      "largest_absolute_symbol_contribution_share": 0.881168583562507,
+      "max_consecutive_losing_days": 8,
+      "max_drawdown": 0.6527150044497978,
+      "max_drawdown_duration_days": 620,
+      "net_total_return": -0.45827912919217617,
+      "position_entries": 11,
+      "scheduled_rebalances": 138,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 71.435528,
+        "ETHUSDT": -529.71465719
+      },
+      "total_turnover": 22.318548791594786
+    }
+  },
+  "parameters": {
+    "direction": "long_or_cash",
+    "gross_cap": 1.0,
+    "lookback_days": 180,
+    "neighbor_lookbacks": [
+      126,
+      252
+    ],
+    "rebalance": "Monday 00:00 UTC"
+  },
+  "run_at_utc": "2026-08-20T06:57:22Z",
+  "schema_version": 1,
+  "study_id": "study-2026-08-20-btceth-weekly-tsmom",
+  "train": {
+    "baseline": {
+      "active_symbol_days": 1365,
+      "annualized_return": 0.35897238665339315,
+      "annualized_sharpe": 0.8157221324919443,
+      "annualized_volatility": 0.5928603113464935,
+      "average_holding_days": 105.0,
+      "calmar": 0.686047388085592,
+      "daily_observations": 1095,
+      "daily_profit_factor": 1.1588550636398984,
+      "daily_win_rate": 0.35251141552511417,
+      "end_equity": 2509.75828641,
+      "executed_symbol_orders": 208,
+      "largest_absolute_symbol_contribution_share": 0.9286834447124078,
+      "max_consecutive_losing_days": 7,
+      "max_drawdown": 0.5232472171566775,
+      "max_drawdown_duration_days": 70,
+      "net_total_return": 1.5097582864130947,
+      "position_entries": 13,
+      "scheduled_rebalances": 156,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 107.6707603,
+        "ETHUSDT": 1402.08752611
+      },
+      "total_turnover": 23.177100167328252
+    }
+  },
+  "verdict": "REJECT",
+  "walk_forward_halves": [
+    {
+      "active_symbol_days": 719,
+      "annualized_return": 0.05264541718577931,
+      "annualized_sharpe": 0.3634823217440274,
+      "annualized_volatility": 0.541651373437143,
+      "average_holding_days": 79.88888888888889,
+      "calmar": 0.108294361931501,
+      "daily_observations": 481,
+      "daily_profit_factor": 1.0577466450487543,
+      "daily_win_rate": 0.4698544698544699,
+      "end_equity": 1069.95013989,
+      "executed_symbol_orders": 112,
+      "largest_absolute_symbol_contribution_share": 0.5388554342146054,
+      "max_consecutive_losing_days": 6,
+      "max_drawdown": 0.4861325764962622,
+      "max_drawdown_duration_days": 393,
+      "net_total_return": 0.06995013989152232,
+      "position_entries": 9,
+      "scheduled_rebalances": 69,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 485.04171638,
+        "ETHUSDT": -415.09157649
+      },
+      "total_turnover": 17.598025828547065
+    },
+    {
+      "active_symbol_days": 371,
+      "annualized_return": 0.02572547212966869,
+      "annualized_sharpe": 0.24557552874755736,
+      "annualized_volatility": 0.3439135832346903,
+      "average_holding_days": 123.66666666666667,
+      "calmar": 0.06810086666375766,
+      "daily_observations": 481,
+      "daily_profit_factor": 1.0505238665264616,
+      "daily_win_rate": 0.2765072765072765,
+      "end_equity": 1034.03902087,
+      "executed_symbol_orders": 56,
+      "largest_absolute_symbol_contribution_share": 0.5684977599856404,
+      "max_consecutive_losing_days": 5,
+      "max_drawdown": 0.3777554294086456,
+      "max_drawdown_duration_days": 100,
+      "net_total_return": 0.03403902086704602,
+      "position_entries": 3,
+      "scheduled_rebalances": 69,
+      "start_equity": 1000.0,
+      "symbol_net_pnl_contribution": {
+        "BTCUSDT": 141.25357617,
+        "ETHUSDT": -107.2145553
+      },
+      "total_turnover": 6.381735350881188
+    }
+  ]
+}
