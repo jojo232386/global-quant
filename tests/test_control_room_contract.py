@@ -124,6 +124,7 @@ def test_research_snapshot_reads_verified_curated_v1_results(monkeypatch) -> Non
     assert carry["trade_count"] == 9
     assert trend["evidence_generation"] == "VERIFIED_CURATED_V1"
     assert snapshot["current_pass_count"] == 0
+    assert snapshot["unverified_pass_count"] == 2
     assert snapshot["promotion_verdict"] == "BLOCKED_NO_CURRENT_PASS"
 
 
@@ -231,6 +232,7 @@ def test_self_declared_research_pass_is_blocked_without_registry(monkeypatch, tm
     snapshot = server.research_snapshot()
     assert snapshot["studies"][0]["evidence_generation"] == "COST_MODEL_MATCH_ONLY"
     assert snapshot["current_pass_count"] == 0
+    assert snapshot["unverified_pass_count"] == 1
     assert snapshot["promotion_verdict"] == "BLOCKED_NO_CURRENT_PASS"
 
     monkeypatch.setattr(
@@ -248,6 +250,7 @@ def test_self_declared_research_pass_is_blocked_without_registry(monkeypatch, tm
     )
     snapshot = server.research_snapshot()
     assert snapshot["current_pass_count"] == 1
+    assert snapshot["unverified_pass_count"] == 0
     assert snapshot["promotion_verdict"] == "RESEARCH_PASS_SHADOW_ONLY"
 
 
