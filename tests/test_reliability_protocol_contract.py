@@ -24,6 +24,9 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
     assert "A zero-trade soak fails" in flat
     assert "trade-baseline.json" in flat
     assert "trade-lifecycle.json" in flat
+    assert "MATCH verdicts" in flat
+    assert "API reconnection" in flat
+    assert "restart-recovery.md" not in flat
     assert "duplicate" in flat
     assert "does not authorize live trading" in flat
     assert "DRY_RUN_ONLY = TRUE" in text
