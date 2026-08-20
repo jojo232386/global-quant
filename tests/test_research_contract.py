@@ -197,4 +197,17 @@ def test_pending_carry_study_cannot_bypass_data_layer_v1() -> None:
         "exchange-bound",
     ):
         assert marker in text
-    assert "Next frozen study" in (RESEARCH / "README.md").read_text()
+    binding = (path.parent / "dataset-binding.md").read_text()
+    for marker in (
+        "DATASET_BOUND_READY_FOR_RUNNER",
+        "9601a8ff1cbfd52b75744d3380bf7b0961d289c11d3ef4641c5c4e42cd38aee8",
+        "d0afd4e8e448859933cedfeb83bf8edc6fb185ed047c3e4439ec312f3e61c01d",
+        "31f35151bd5c9c6135a2ece74937aee0a5caa8f17c7964fea60fc6d4bae6c652",
+        "VERIFIED / curated / PASS",
+        'verify_snapshot(..., minimum_stage="curated")',
+        "contain no exchange network client",
+    ):
+        assert marker in binding
+    readme = (RESEARCH / "README.md").read_text()
+    assert "Next frozen study" in readme
+    assert "DATASET_BOUND_READY_FOR_RUNNER" in readme

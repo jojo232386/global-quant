@@ -37,9 +37,9 @@ active runtime, and it does not authorize live trading.
   `REJECT`; its negative OOS return, 36.51% drawdown, adverse-funding stress,
   parameter neighbors, delay, bootstrap, and short-risk screen all failed.
 - Next frozen study: `study-2026-08-20-btceth-spot-perp-carry` is
-  `WAITING_FOR_VERIFIED_DATASET`. It permits no runner or formal result until a
-  new Data Layer V1 curated spot/perpetual dataset is VERIFIED and bound by
-  dataset ID, snapshot-manifest SHA, schema ID, and input-file SHAs.
+  `DATASET_BOUND_READY_FOR_RUNNER`. Its separate immutable binding pins a new
+  VERIFIED Data Layer V1 curated spot/perpetual dataset by dataset ID,
+  snapshot-manifest SHA, schema ID, and every input-file SHA. No result exists.
 
 ## Layout
 
