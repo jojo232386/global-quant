@@ -141,6 +141,22 @@ def test_legacy_direct_file_runners_cannot_write_new_formal_results(name: str) -
         module.main([])
 
 
+def test_every_active_formal_result_writer_consumes_verified_curated_v1() -> None:
+    writers = []
+    for script in sorted((ROOT / "scripts").glob("gmaq-research-*")):
+        source = script.read_text()
+        if "results.json" not in source:
+            continue
+        writers.append(script.name)
+        assert 'parser.add_argument("--dataset-id", required=True)' in source
+        assert "verify_snapshot(" in source
+        assert 'minimum_stage="curated"' in source
+        assert "expected_dataset=" in source
+        assert "urllib" not in source
+        assert "requests" not in source
+    assert writers == ["gmaq-research-ls-tsmom"]
+
+
 def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
     text = (ROOT / "configs" / "RESEARCH_REMEDIATION.md").read_text()
     assert "PROMOTION_BLOCKED = TRUE" in text
