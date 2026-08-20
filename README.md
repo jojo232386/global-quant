@@ -124,6 +124,8 @@ submission adapter, or that live credentials belong to the verified account.
 The strategy result must be committed under `research/backtests/`; its dataset
 binding is replayed against the existing Data Layer V1 registry as
 `VERIFIED / curated / PASS`. A caller-authored PASS string is never accepted.
+The result's recorded implementation commit must also be an ancestor of the
+candidate commit; unrelated or missing research-engine provenance is blocked.
 Entry authorization and order submission are always false. The repository
 still has no live configuration, live arm, or order command.
 Both candidate commands also require a clean, committed worktree; uncommitted

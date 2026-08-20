@@ -393,7 +393,8 @@ def test_cli_is_non_ordering_and_does_not_print_credentials() -> None:
     assert "--config-sha256" not in script
     assert "validated_config_sha256(args.config)" in script
     assert "committed_candidate_sha(ROOT)" in script
-    assert "load_committed_strategy_result(args.strategy_result)" in script
+    assert "load_committed_strategy_result(args.strategy_result, candidate_sha)" in script
+    assert '"merge-base", "--is-ancestor", implementation_sha, candidate_sha' in script
     assert 'minimum_stage="curated"' in script
     assert "--max-age-seconds" not in script
 
@@ -496,6 +497,45 @@ def test_admission_cli_bounds_evidence_bytes_and_rows(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(module, "MAX_EVIDENCE_ROWS", 1)
     with pytest.raises(ValueError, match="evidence row limit"):
         module.load_list(str(rows))
+
+
+def test_strategy_implementation_must_be_candidate_ancestor(tmp_path, monkeypatch) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "GMAQ Test"], cwd=tmp_path, check=True)
+    marker = tmp_path / "marker"
+    marker.write_text("root\n")
+    subprocess.run(["git", "add", "marker"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "root"], cwd=tmp_path, check=True)
+    root_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+
+    subprocess.run(["git", "switch", "-qc", "candidate"], cwd=tmp_path, check=True)
+    marker.write_text("candidate\n")
+    subprocess.run(["git", "commit", "-qam", "candidate"], cwd=tmp_path, check=True)
+    candidate_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+
+    subprocess.run(["git", "switch", "-qc", "result", root_sha], cwd=tmp_path, check=True)
+    unrelated = tmp_path / "unrelated"
+    unrelated.write_text("branch\n")
+    subprocess.run(["git", "add", "unrelated"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "unrelated"], cwd=tmp_path, check=True)
+    unrelated_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+
+    result_path = tmp_path / "research" / "backtests" / "study-test" / "results.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text(json.dumps({"implementation_candidate_sha": root_sha}))
+    subprocess.run(["git", "add", str(result_path.relative_to(tmp_path))], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "result"], cwd=tmp_path, check=True)
+
+    module = load_admission_cli()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    loaded = module.load_committed_strategy_result(str(result_path), candidate_sha)
+    assert loaded["implementation_candidate_sha"] == root_sha
+
+    result_path.write_text(json.dumps({"implementation_candidate_sha": unrelated_sha}))
+    subprocess.run(["git", "commit", "-qam", "unrelated result"], cwd=tmp_path, check=True)
+    with pytest.raises(ValueError, match="not an ancestor"):
+        module.load_committed_strategy_result(str(result_path), candidate_sha)
 
 
 def test_candidate_sha_rejects_hidden_index_flags(tmp_path) -> None:
