@@ -2,12 +2,23 @@ import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import pytest
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROTOCOL = ROOT / "configs" / "RELIABILITY_SOAK_PROTOCOL.md"
 LIVE_READINESS = ROOT / "configs" / "LIVE_READINESS.md"
 RUNNER = ROOT / "scripts" / "reliability-soak"
 MANIFEST = ROOT / "scripts" / "gmaq-runtime-manifest"
+
+
+def load_manifest(name: str):
+    loader = SourceFileLoader(name, str(MANIFEST))
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
@@ -78,11 +89,7 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
 
 
 def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None:
-    loader = SourceFileLoader("gmaq_runtime_manifest_test", str(MANIFEST))
-    spec = importlib.util.spec_from_loader("gmaq_runtime_manifest_test", loader)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
+    module = load_manifest("gmaq_runtime_manifest_test")
     assert module.SAFE_ENV_KEYS == {
         "GMAQ_API_BASE",
         "GMAQ_CONTAINER_NAME",
@@ -96,6 +103,49 @@ def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None
     assert 'EXPECTED_CONTAINER = "gmaq-freqtrade-p0-remediation"' in text
     assert "EXPECTED_HOST_PORT = 8082" in text
     assert "published container port does not match isolated API endpoint" in text
+    assert "container image does not match compose-pinned image" in text
+
+
+def test_runtime_manifest_rejects_container_image_drift(monkeypatch) -> None:
+    module = load_manifest("gmaq_runtime_manifest_image_test")
+    expected_ref = "freqtradeorg/freqtrade:stable@sha256:" + "a" * 64
+    monkeypatch.setattr(module, "compose_service_image", lambda: expected_ref)
+    monkeypatch.setattr(
+        module,
+        "inspect_field",
+        lambda container, template: expected_ref if template == "{{.Config.Image}}" else "sha256:" + "b" * 64,
+    )
+    monkeypatch.setattr(module, "run_text", lambda command, **kwargs: "sha256:" + "c" * 64)
+
+    with pytest.raises(module.ManifestError, match="container image does not match"):
+        module.verified_container_image("gmaq-freqtrade-p0-remediation")
+
+
+def test_runtime_manifest_accepts_compose_pinned_image_and_id(monkeypatch) -> None:
+    module = load_manifest("gmaq_runtime_manifest_image_match_test")
+    expected_ref = "freqtradeorg/freqtrade:stable@sha256:" + "a" * 64
+    expected_id = "sha256:" + "b" * 64
+    monkeypatch.setattr(module, "compose_service_image", lambda: expected_ref)
+    monkeypatch.setattr(
+        module,
+        "inspect_field",
+        lambda container, template: expected_ref if template == "{{.Config.Image}}" else expected_id,
+    )
+    monkeypatch.setattr(module, "run_text", lambda command, **kwargs: expected_id)
+
+    assert module.verified_container_image("gmaq-freqtrade-p0-remediation") == (
+        expected_ref,
+        expected_id,
+    )
+
+
+def test_runtime_manifest_reads_freqtrade_image_from_tracked_compose() -> None:
+    module = load_manifest("gmaq_runtime_manifest_compose_image_test")
+
+    assert module.compose_service_image() == (
+        "freqtradeorg/freqtrade:stable@sha256:"
+        "50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486"
+    )
 
 
 def test_live_readiness_stays_planning_only_and_lists_blockers() -> None:
