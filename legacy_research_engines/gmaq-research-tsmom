@@ -1,0 +1,570 @@
+#!/usr/bin/env python3
+"""Run and score the preregistered BTC/ETH weekly TSMOM study.
+
+The runner is offline after public data acquisition. It models next-open
+execution, drifting holdings between weekly rebalances, actual funding,
+turnover costs, delayed execution, parameter neighbors, and block bootstrap.
+It cannot authorize trading.
+"""
+
+import argparse
+import hashlib
+import json
+import math
+import pathlib
+import random
+import statistics
+import subprocess
+import sys
+import time
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+STUDY = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-weekly-tsmom"
+DEFAULT_DATA = ROOT / "user_data" / "data" / "tsmom"
+COST_MODEL = ROOT / "configs" / "execution-costs.json"
+SYMBOLS = ("BTCUSDT", "ETHUSDT")
+DAY_MS = 86_400_000
+INITIAL_EQUITY = 1_000.0
+TRAIN_START = 1609459200000  # 2021-01-01
+TRAIN_END = 1704067200000  # 2024-01-01
+OOS_START = TRAIN_END
+OOS_MID = 1745625600000  # 2025-04-26
+SAMPLE_END = 1787184000000  # 2026-08-20, exclusive
+PRIMARY_LOOKBACK = 180
+NEIGHBOR_LOOKBACKS = (126, 252)
+BOOTSTRAP_SEED = 20260820
+BOOTSTRAP_SAMPLES = 2_000
+BOOTSTRAP_BLOCK_DAYS = 28
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def git_head() -> str:
+    process = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return process.stdout.strip()
+
+
+def load_costs(path: pathlib.Path = COST_MODEL) -> dict:
+    model = json.loads(path.read_text())
+    fee_bps = float(model["taker_fee_rate"]) * 10_000
+    slippage_bps = float(model["baseline_slippage_bps_per_side"])
+    return {
+        "baseline_rate_per_side": (fee_bps + slippage_bps) / 10_000,
+        "stress_rate_per_side": (
+            fee_bps * float(model["stress_fee_multiplier"])
+            + slippage_bps * float(model["stress_slippage_multiplier"])
+        )
+        / 10_000,
+        "sha256": sha256_file(path),
+        "source": model,
+    }
+
+
+def load_dataset(data_dir: pathlib.Path) -> dict:
+    manifest_path = data_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if tuple(manifest.get("symbols", {}).keys()) != SYMBOLS:
+        raise ValueError("dataset symbol order/scope mismatch")
+    if manifest.get("start_inclusive") != "2020-01-01" or manifest.get("end_exclusive") != "2026-08-20":
+        raise ValueError("dataset window mismatch")
+    if manifest.get("interval") != "1d":
+        raise ValueError("dataset interval mismatch")
+    if manifest.get("preregistration_sha256") != sha256_file(STUDY / "preregistration.md"):
+        raise ValueError("dataset was not fetched against this preregistration")
+
+    bars = {}
+    funding = {}
+    for symbol in SYMBOLS:
+        details = manifest["symbols"][symbol]
+        kline_path = ROOT / details["klines_path"]
+        funding_path = ROOT / details["funding_path"]
+        if sha256_file(kline_path) != details["klines_sha256"]:
+            raise ValueError(f"{symbol} kline hash mismatch")
+        if sha256_file(funding_path) != details["funding_sha256"]:
+            raise ValueError(f"{symbol} funding hash mismatch")
+        if details.get("funding_request_window_complete") is not True:
+            raise ValueError(f"{symbol} funding request window incomplete")
+
+        symbol_bars = {}
+        for line in kline_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            ts = int(item["open_time_utc_ms"])
+            if ts in symbol_bars:
+                raise ValueError(f"{symbol} duplicate bar {ts}")
+            values = {key: float(item[key]) for key in ("open", "high", "low", "close")}
+            if min(values.values()) <= 0 or values["high"] < max(values["open"], values["close"]) or values["low"] > min(values["open"], values["close"]):
+                raise ValueError(f"{symbol} invalid OHLC {ts}")
+            symbol_bars[ts] = values
+        ordered = sorted(symbol_bars)
+        if any(right - left != DAY_MS for left, right in zip(ordered, ordered[1:])):
+            raise ValueError(f"{symbol} daily bar gap")
+        if details.get("end_boundary_utc_ms") != SAMPLE_END or details.get("end_boundary_source") != "excluded_incomplete_candle_open_only":
+            raise ValueError(f"{symbol} end valuation boundary mismatch")
+        boundary_open = float(details["end_boundary_open"])
+        if boundary_open <= 0 or SAMPLE_END in symbol_bars:
+            raise ValueError(f"{symbol} end valuation boundary invalid")
+        symbol_bars[SAMPLE_END] = {"open": boundary_open}
+        bars[symbol] = symbol_bars
+
+        records = []
+        for line in funding_path.read_text().splitlines():
+            if line.strip():
+                item = json.loads(line)
+                mark_price = float(item["markPrice"])
+                if mark_price <= 0:
+                    raise ValueError(f"{symbol} funding mark price invalid")
+                records.append((int(item["fundingTime"]), float(item["fundingRate"]), mark_price))
+        if [ts for ts, _, _ in records] != sorted({ts for ts, _, _ in records}):
+            raise ValueError(f"{symbol} funding timestamps invalid")
+        funding[symbol] = records
+
+    common = sorted(set(bars[SYMBOLS[0]]) & set(bars[SYMBOLS[1]]))
+    if not common or common[0] > TRAIN_START - 365 * DAY_MS or common[-1] < SAMPLE_END - DAY_MS:
+        raise ValueError("common daily coverage does not span warm-up and sample")
+    return {
+        "manifest": manifest,
+        "manifest_path": manifest_path,
+        "bars": bars,
+        "funding": funding,
+    }
+
+
+def is_monday(ts_ms: int) -> bool:
+    return time.gmtime(ts_ms / 1000).tm_wday == 0
+
+
+def target_at(data: dict, ts_ms: int, lookback_days: int) -> dict[str, float]:
+    active = []
+    latest = ts_ms - DAY_MS
+    base = latest - lookback_days * DAY_MS
+    for symbol in SYMBOLS:
+        symbol_bars = data["bars"][symbol]
+        if latest not in symbol_bars or base not in symbol_bars:
+            raise ValueError(f"missing signal bar for {symbol} at {ts_ms}")
+        if symbol_bars[latest]["close"] / symbol_bars[base]["close"] - 1 > 0:
+            active.append(symbol)
+    weight = 1.0 / len(active) if active else 0.0
+    return {symbol: weight if symbol in active else 0.0 for symbol in SYMBOLS}
+
+
+def build_target_events(
+    data: dict,
+    start_ms: int,
+    end_ms: int,
+    lookback_days: int,
+    delay_days: int = 0,
+) -> tuple[dict[int, dict[str, float]], int]:
+    events = {}
+    observations = 0
+    for ts_ms in range(start_ms, end_ms, DAY_MS):
+        if not is_monday(ts_ms):
+            continue
+        target = target_at(data, ts_ms, lookback_days)
+        apply_at = ts_ms + delay_days * DAY_MS
+        if apply_at < end_ms:
+            events[apply_at] = target
+        observations += 1
+    return events, observations
+
+
+def funding_payment_for_interval(
+    units: float,
+    records: list[tuple[int, float, float]],
+    start_ms: int,
+    end_ms: int,
+    multiplier: float,
+) -> float:
+    """Published funding rate times the event's published mark-price notional."""
+    return sum(
+        units * mark_price * rate * multiplier
+        for ts, rate, mark_price in records
+        if start_ms < ts <= end_ms
+    )
+
+
+def simulate_portfolio(
+    data: dict,
+    start_ms: int,
+    end_ms: int,
+    target_events: dict[int, dict[str, float]],
+    scheduled_observations: int,
+    cost_rate_per_side: float,
+    funding_multiplier: float,
+) -> dict:
+    units = {symbol: 0.0 for symbol in SYMBOLS}
+    cash = INITIAL_EQUITY
+    equity_curve = [INITIAL_EQUITY]
+    daily_returns = []
+    daily_timestamps = []
+    turnover = 0.0
+    executed_orders = 0
+    position_entries = 0
+    holding_start = {symbol: None for symbol in SYMBOLS}
+    holding_days = []
+    active_symbol_days = 0
+    contributions = {symbol: 0.0 for symbol in SYMBOLS}
+
+    for ts_ms in range(start_ms, end_ms, DAY_MS):
+        next_ts = ts_ms + DAY_MS
+        opens = {symbol: data["bars"][symbol][ts_ms]["open"] for symbol in SYMBOLS}
+        next_opens = {symbol: data["bars"][symbol][next_ts]["open"] for symbol in SYMBOLS}
+        equity_before = cash + sum(units[symbol] * opens[symbol] for symbol in SYMBOLS)
+        if equity_before <= 0:
+            raise ValueError("portfolio equity became non-positive")
+
+        if ts_ms in target_events:
+            target = target_events[ts_ms]
+            current_values = {symbol: units[symbol] * opens[symbol] for symbol in SYMBOLS}
+            current_weights = {symbol: current_values[symbol] / equity_before for symbol in SYMBOLS}
+            symbol_turnover = {
+                symbol: abs(float(target[symbol]) - current_weights[symbol])
+                for symbol in SYMBOLS
+            }
+            event_turnover = sum(symbol_turnover.values())
+            event_cost = equity_before * event_turnover * cost_rate_per_side
+            equity_after_cost = equity_before - event_cost
+            if equity_after_cost <= 0:
+                raise ValueError("rebalance cost exhausted equity")
+            for symbol in SYMBOLS:
+                old_units = units[symbol]
+                target_value = equity_after_cost * float(target[symbol])
+                units[symbol] = target_value / opens[symbol]
+                contribution_cost = equity_before * symbol_turnover[symbol] * cost_rate_per_side
+                contributions[symbol] -= contribution_cost
+                if abs(units[symbol] - old_units) > 1e-12:
+                    executed_orders += 1
+                if old_units <= 1e-12 < units[symbol]:
+                    position_entries += 1
+                    holding_start[symbol] = ts_ms
+                elif old_units > 1e-12 and units[symbol] <= 1e-12:
+                    assert holding_start[symbol] is not None
+                    holding_days.append((ts_ms - int(holding_start[symbol])) / DAY_MS)
+                    holding_start[symbol] = None
+            cash = equity_after_cost - sum(units[symbol] * opens[symbol] for symbol in SYMBOLS)
+            turnover += event_turnover
+
+        if any(units[symbol] > 1e-12 for symbol in SYMBOLS):
+            active_symbol_days += sum(units[symbol] > 1e-12 for symbol in SYMBOLS)
+
+        for symbol in SYMBOLS:
+            price_pnl = units[symbol] * (next_opens[symbol] - opens[symbol])
+            funding_payment = funding_payment_for_interval(
+                units[symbol],
+                data["funding"][symbol],
+                ts_ms,
+                next_ts,
+                funding_multiplier,
+            )
+            cash -= funding_payment
+            contributions[symbol] += price_pnl - funding_payment
+
+        equity_after = cash + sum(units[symbol] * next_opens[symbol] for symbol in SYMBOLS)
+        if next_ts == end_ms:
+            liquidation_equity = equity_after
+            if liquidation_equity <= 0:
+                raise ValueError("portfolio equity became non-positive before liquidation")
+            for symbol in SYMBOLS:
+                value = units[symbol] * next_opens[symbol]
+                liquidation_cost = abs(value) * cost_rate_per_side
+                cash += value - liquidation_cost
+                contributions[symbol] -= liquidation_cost
+                if abs(value) > 1e-12:
+                    executed_orders += 1
+                    turnover += abs(value) / liquidation_equity
+                if units[symbol] > 1e-12 and holding_start[symbol] is not None:
+                    holding_days.append((next_ts - int(holding_start[symbol])) / DAY_MS)
+                    holding_start[symbol] = None
+                units[symbol] = 0.0
+            equity_after = cash
+
+        daily_returns.append(equity_after / equity_before - 1)
+        daily_timestamps.append(next_ts)
+        equity_curve.append(equity_after)
+
+    return {
+        "equity_curve": equity_curve,
+        "daily_returns": daily_returns,
+        "daily_timestamps": daily_timestamps,
+        "turnover": turnover,
+        "executed_orders": executed_orders,
+        "position_entries": position_entries,
+        "holding_days": holding_days,
+        "active_symbol_days": active_symbol_days,
+        "scheduled_observations": scheduled_observations,
+        "symbol_contribution": contributions,
+    }
+
+
+def max_drawdown(equity: list[float]) -> tuple[float, int]:
+    peak = equity[0]
+    peak_index = 0
+    worst = 0.0
+    worst_duration = 0
+    for index, value in enumerate(equity):
+        if value >= peak:
+            peak = value
+            peak_index = index
+        drawdown = 1 - value / peak if peak > 0 else 1.0
+        if drawdown > worst:
+            worst = drawdown
+            worst_duration = index - peak_index
+    return worst, worst_duration
+
+
+def metrics(simulation: dict) -> dict:
+    returns = simulation["daily_returns"]
+    equity = simulation["equity_curve"]
+    count = len(returns)
+    total_return = equity[-1] / equity[0] - 1
+    annualized_return = (equity[-1] / equity[0]) ** (365 / count) - 1 if count and equity[-1] > 0 else -1.0
+    volatility = statistics.stdev(returns) * math.sqrt(365) if len(returns) > 1 else 0.0
+    sharpe = statistics.mean(returns) / statistics.stdev(returns) * math.sqrt(365) if len(returns) > 1 and statistics.stdev(returns) > 0 else 0.0
+    drawdown, duration = max_drawdown(equity)
+    positive = sum(value for value in returns if value > 0)
+    negative = -sum(value for value in returns if value < 0)
+    consecutive = 0
+    max_consecutive = 0
+    for value in returns:
+        consecutive = consecutive + 1 if value < 0 else 0
+        max_consecutive = max(max_consecutive, consecutive)
+    contributions = simulation["symbol_contribution"]
+    absolute_contribution = sum(abs(value) for value in contributions.values())
+    largest_share = max((abs(value) for value in contributions.values()), default=0.0) / absolute_contribution if absolute_contribution else 0.0
+    holding_days = simulation["holding_days"]
+    return {
+        "start_equity": round(equity[0], 8),
+        "end_equity": round(equity[-1], 8),
+        "net_total_return": total_return,
+        "annualized_return": annualized_return,
+        "annualized_volatility": volatility,
+        "annualized_sharpe": sharpe,
+        "max_drawdown": drawdown,
+        "max_drawdown_duration_days": duration,
+        "calmar": annualized_return / drawdown if drawdown > 0 else None,
+        "daily_win_rate": sum(value > 0 for value in returns) / count if count else 0.0,
+        "daily_profit_factor": positive / negative if negative > 0 else None,
+        "daily_observations": count,
+        "scheduled_rebalances": simulation["scheduled_observations"],
+        "executed_symbol_orders": simulation["executed_orders"],
+        "position_entries": simulation["position_entries"],
+        "total_turnover": simulation["turnover"],
+        "average_holding_days": statistics.mean(holding_days) if holding_days else 0.0,
+        "max_consecutive_losing_days": max_consecutive,
+        "active_symbol_days": simulation["active_symbol_days"],
+        "symbol_net_pnl_contribution": {key: round(value, 8) for key, value in contributions.items()},
+        "largest_absolute_symbol_contribution_share": largest_share,
+    }
+
+
+def run_strategy(
+    data: dict,
+    start_ms: int,
+    end_ms: int,
+    lookback_days: int,
+    cost_rate: float,
+    funding_multiplier: float,
+    delay_days: int = 0,
+) -> tuple[dict, dict]:
+    events, observations = build_target_events(data, start_ms, end_ms, lookback_days, delay_days)
+    simulation = simulate_portfolio(
+        data,
+        start_ms,
+        end_ms,
+        events,
+        observations,
+        cost_rate,
+        funding_multiplier,
+    )
+    return metrics(simulation), simulation
+
+
+def run_benchmark(data: dict, start_ms: int, end_ms: int, cost_rate: float) -> dict:
+    simulation = simulate_portfolio(
+        data,
+        start_ms,
+        end_ms,
+        {start_ms: {symbol: 0.5 for symbol in SYMBOLS}},
+        1,
+        cost_rate,
+        1.0,
+    )
+    return metrics(simulation)
+
+
+def bootstrap_positive_probability(returns: list[float]) -> float:
+    if not returns:
+        return 0.0
+    generator = random.Random(BOOTSTRAP_SEED)
+    positive = 0
+    n = len(returns)
+    for _ in range(BOOTSTRAP_SAMPLES):
+        sample = []
+        while len(sample) < n:
+            start = generator.randrange(n)
+            sample.extend(returns[(start + offset) % n] for offset in range(BOOTSTRAP_BLOCK_DAYS))
+        compounded = math.prod(1 + value for value in sample[:n]) - 1
+        positive += compounded > 0
+    return positive / BOOTSTRAP_SAMPLES
+
+
+def score(results: dict) -> tuple[str, dict]:
+    oos = results["oos"]["baseline"]
+    checks = {
+        "oos_sharpe_gte_0_5": oos["annualized_sharpe"] >= 0.5,
+        "oos_return_positive": oos["net_total_return"] > 0,
+        "oos_stress_positive": results["oos"]["stress"]["net_total_return"] > 0,
+        "oos_max_drawdown_lte_25pct": oos["max_drawdown"] <= 0.25,
+        "train_return_positive": results["train"]["baseline"]["net_total_return"] > 0,
+        "both_oos_halves_positive": all(item["net_total_return"] > 0 for item in results["walk_forward_halves"]),
+        "neighbor_stress_returns_positive": all(item["net_total_return"] > 0 for item in results["neighbor_stress"].values()),
+        "delayed_stress_positive": results["oos"]["delayed_stress"]["net_total_return"] > 0,
+        "oos_rebalances_gte_100": oos["scheduled_rebalances"] >= 100,
+        "bootstrap_positive_probability_gte_70pct": results["bootstrap_positive_probability"] >= 0.70,
+        "symbol_contribution_share_lte_75pct": oos["largest_absolute_symbol_contribution_share"] <= 0.75,
+        "data_integrity_complete": results["data_integrity"] == "PASS",
+        "benchmark_reported": "benchmark_50_50" in results["oos"],
+    }
+    return ("PASS" if all(checks.values()) else "REJECT"), checks
+
+
+def write_evidence(results: dict, candidate_sha: str, data: dict, costs: dict) -> None:
+    results_path = STUDY / "results.json"
+    results_path.write_text(json.dumps(results, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+    manifest = f"""# Run Manifest: BTC/ETH weekly TSMOM
+
+- study id: `{STUDY.name}`
+- implementation candidate SHA: `{candidate_sha}`
+- preregistration SHA-256: `{sha256_file(STUDY / 'preregistration.md')}`
+- runner SHA-256: `{sha256_file(ROOT / 'scripts' / 'gmaq-research-tsmom')}`
+- data manifest: `{data['manifest_path'].relative_to(ROOT)}`
+- data manifest SHA-256: `{sha256_file(data['manifest_path'])}`
+- execution-cost model SHA-256: `{costs['sha256']}`
+- formal run UTC: `{results['run_at_utc']}`
+- public data only: `TRUE`
+- private API calls / credentials / orders: `NONE`
+- train window: `2021-01-01..2023-12-31 UTC`
+- OOS window: `2024-01-01..2026-08-19 UTC`
+- primary rule: `180d own return sign, weekly next-open, equal active BTC/ETH, long-or-cash, gross <= 1x`
+- baseline cost per side: `{costs['baseline_rate_per_side'] * 10_000:.1f} bps`
+- stress cost per side: `{costs['stress_rate_per_side'] * 10_000:.1f} bps`; funding `5x`
+- verdict: `{results['verdict']}`
+"""
+    (STUDY / "manifest.md").write_text(manifest)
+
+    failed = [name for name, passed in results["gate_checks"].items() if not passed]
+    verdict = f"""# Verdict: {results['verdict']}
+
+The preregistered BTC/ETH weekly time-series momentum study is **{results['verdict']}**.
+
+- OOS net return: `{results['oos']['baseline']['net_total_return']:.2%}`
+- OOS annualized Sharpe: `{results['oos']['baseline']['annualized_sharpe']:.3f}`
+- OOS max drawdown: `{results['oos']['baseline']['max_drawdown']:.2%}`
+- OOS stressed net return: `{results['oos']['stress']['net_total_return']:.2%}`
+- delayed stressed net return: `{results['oos']['delayed_stress']['net_total_return']:.2%}`
+- 50/50 buy-and-hold OOS return: `{results['oos']['benchmark_50_50']['net_total_return']:.2%}`
+- failed gates: `{failed}`
+
+This verdict is research evidence for the frozen scope only. It does not
+authorize Demo promotion, credentials, account changes, or live trading.
+"""
+    (STUDY / "verdict.md").write_text(verdict)
+
+    checklist = f"""# Data Availability Checklist: BTC/ETH weekly TSMOM
+
+Status after acquisition and formal run: `PASS_COMPLETE_PUBLIC_DATA`.
+
+- [x] BTCUSDT daily USD-M klines for the complete declared window
+- [x] ETHUSDT daily USD-M klines for the complete declared window
+- [x] unique, strictly increasing timestamps and valid OHLC values
+- [x] BTCUSDT funding pagination complete
+- [x] ETHUSDT funding pagination complete
+- [x] source, fetch timestamp, counts, edge timestamps, and SHA-256 pinned
+- [x] preregistration and execution-cost-model SHA-256 pinned
+- [x] no private endpoint, API key, account value, or real order used
+
+Data manifest SHA-256: `{sha256_file(data['manifest_path'])}`.
+Statistical verdict: `{results['verdict']}`. Data completeness does not alter a
+failed statistical gate.
+"""
+    (STUDY / "data-checklist.md").write_text(checklist)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-research-tsmom")
+    parser.add_argument("--data-dir", default=str(DEFAULT_DATA))
+    parser.add_argument("--no-write", action="store_true", help="print results without tracked evidence files")
+    args = parser.parse_args(argv)
+
+    data = load_dataset(pathlib.Path(args.data_dir))
+    costs = load_costs()
+    train_baseline, _ = run_strategy(data, TRAIN_START, TRAIN_END, PRIMARY_LOOKBACK, costs["baseline_rate_per_side"], 1.0)
+    oos_baseline, oos_simulation = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_LOOKBACK, costs["baseline_rate_per_side"], 1.0)
+    oos_stress, _ = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_LOOKBACK, costs["stress_rate_per_side"], 5.0)
+    delayed_stress, _ = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_LOOKBACK, costs["stress_rate_per_side"], 5.0, delay_days=1)
+    halves = [
+        run_strategy(data, OOS_START, OOS_MID, PRIMARY_LOOKBACK, costs["baseline_rate_per_side"], 1.0)[0],
+        run_strategy(data, OOS_MID, SAMPLE_END, PRIMARY_LOOKBACK, costs["baseline_rate_per_side"], 1.0)[0],
+    ]
+    neighbors = {
+        str(lookback): run_strategy(data, OOS_START, SAMPLE_END, lookback, costs["stress_rate_per_side"], 5.0)[0]
+        for lookback in NEIGHBOR_LOOKBACKS
+    }
+    candidate_sha = git_head()
+    results = {
+        "schema_version": 1,
+        "study_id": STUDY.name,
+        "run_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "implementation_candidate_sha": candidate_sha,
+        "data_integrity": "PASS",
+        "cost_model": {
+            "sha256": costs["sha256"],
+            "baseline_bps_per_side": costs["baseline_rate_per_side"] * 10_000,
+            "stress_bps_per_side": costs["stress_rate_per_side"] * 10_000,
+            "funding_stress_multiplier": 5.0,
+        },
+        "parameters": {
+            "lookback_days": PRIMARY_LOOKBACK,
+            "neighbor_lookbacks": list(NEIGHBOR_LOOKBACKS),
+            "rebalance": "Monday 00:00 UTC",
+            "gross_cap": 1.0,
+            "direction": "long_or_cash",
+        },
+        "train": {"baseline": train_baseline},
+        "oos": {
+            "baseline": oos_baseline,
+            "stress": oos_stress,
+            "delayed_stress": delayed_stress,
+            "benchmark_50_50": run_benchmark(data, OOS_START, SAMPLE_END, costs["baseline_rate_per_side"]),
+            "cash_benchmark_return": 0.0,
+        },
+        "walk_forward_halves": halves,
+        "neighbor_stress": neighbors,
+        "bootstrap": {
+            "seed": BOOTSTRAP_SEED,
+            "samples": BOOTSTRAP_SAMPLES,
+            "block_days": BOOTSTRAP_BLOCK_DAYS,
+        },
+        "bootstrap_positive_probability": bootstrap_positive_probability(oos_simulation["daily_returns"]),
+    }
+    verdict, checks = score(results)
+    results["gate_checks"] = checks
+    results["verdict"] = verdict
+    if not args.no_write:
+        write_evidence(results, candidate_sha, data, costs)
+    print(json.dumps(results, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if verdict == "PASS" else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

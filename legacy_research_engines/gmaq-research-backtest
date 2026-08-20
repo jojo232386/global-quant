@@ -1,0 +1,552 @@
+#!/usr/bin/env python3
+"""Run the preregistered momentum study and score it through the gate.
+
+Reads the JSONL klines produced by scripts/gmaq-fetch-klines, executes the
+strategy from research/backtests/study-2026-08-16-eth15m-momentum/
+preregistration.md, and writes results.json with the PASS/REJECT verdict
+computed from the predeclared rule. Credential-free; offline after data
+fetch. This script does not authorize live trading.
+"""
+
+import argparse
+import hashlib
+import json
+import math
+import pathlib
+import statistics
+import sys
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+STUDY = ROOT / "research" / "backtests" / "study-2026-08-16-eth15m-momentum"
+SPLIT_UTC_MS = 1781568000000  # 2026-06-16T00:00:00Z
+COST_MODEL_PATH = ROOT / "configs" / "execution-costs.json"
+
+
+def load_research_costs(path: pathlib.Path = COST_MODEL_PATH) -> dict:
+    model = json.loads(path.read_text())
+    fee_bps = float(model["taker_fee_rate"]) * 10_000
+    slippage_bps = float(model["baseline_slippage_bps_per_side"])
+    return {
+        "cost_bps_per_side": fee_bps + slippage_bps,
+        "stress_cost_bps_per_side": (
+            fee_bps * float(model["stress_fee_multiplier"])
+            + slippage_bps * float(model["stress_slippage_multiplier"])
+        ),
+        "source": model,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+RESEARCH_COSTS = load_research_costs()
+
+PARAMS = {
+    "lookback_bars": 4,
+    "hold_bars": 4,
+    "stoploss_bps": 100.0,
+    "notional": 100.0,
+    "initial_equity": 1000.0,
+    "cost_bps_per_side": RESEARCH_COSTS["cost_bps_per_side"],
+    "stress_cost_bps_per_side": RESEARCH_COSTS["stress_cost_bps_per_side"],
+    "stress_funding_buffer_bps": 1.0,  # flat round-trip buffer per data checklist
+    "breakout_lookback": 24,
+    "session_start_hour": 0,
+    "session_end_hour": 8,
+    "vol_window": 24,
+    "vol_median_window": 96,
+}
+
+
+def load_bars(path: pathlib.Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def to_floats(bars: list[dict]) -> dict:
+    return {
+        "ts": [bar["open_time_utc_ms"] for bar in bars],
+        "open": [float(bar["open"]) for bar in bars],
+        "high": [float(bar["high"]) for bar in bars],
+        "low": [float(bar["low"]) for bar in bars],
+        "close": [float(bar["close"]) for bar in bars],
+    }
+
+
+def load_funding(path: pathlib.Path | None) -> list[tuple[int, float]]:
+    if path is None or not path.is_file():
+        return []
+    records = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        records.append((int(item["fundingTime"]), float(item["fundingRate"])))
+    return sorted(records)
+
+
+def funding_return_between(
+    records: list[tuple[int, float]], entry_ts_ms: int, exit_ts_ms: int, multiplier: float = 1.0
+) -> float:
+    """Funding paid by a long held across published funding timestamps.
+
+    A timestamp exactly at entry is excluded because OHLC data cannot prove
+    the position existed before that charge. Exit is inclusive: the position
+    is still held until the modeled exit at that bar.
+    """
+    return sum(rate for ts, rate in records if entry_ts_ms < ts <= exit_ts_ms) * multiplier
+
+
+def run_rule(
+    bars: dict,
+    cost_per_side: float,
+    funding_buffer: float = 0.0,
+    params: dict = PARAMS,
+    funding_multiplier: float = 1.0,
+) -> list[dict]:
+    """Long-only 15m momentum. Signal on close[T] from candles T-4..T;
+    entry at open[T+1]; exit at close[T+1+hold] or stoploss, whichever is
+    worse. No future function."""
+    lookback = params["lookback_bars"]
+    hold = params["hold_bars"]
+    stoploss = params["stoploss_bps"] / 10_000
+    notional = params["notional"]
+    n = len(bars["ts"])
+    trades = []
+    in_position_until = -1
+    index = lookback
+    while index + hold + 1 < n:
+        if index <= in_position_until:
+            index += 1
+            continue
+        signal_close = bars["close"][index]
+        signal_base = bars["close"][index - lookback]
+        if signal_base <= 0 or signal_close <= signal_base:
+            index += 1
+            continue
+        trade = long_trade(
+            bars,
+            index + 1,
+            hold,
+            stoploss,
+            notional,
+            cost_per_side,
+            funding_buffer,
+            funding_multiplier,
+        )
+        if trade is None:
+            index += 1
+            continue
+        trades.append(trade)
+        in_position_until = trade["exit_index"]
+        index = in_position_until + 1
+    return trades
+
+
+def long_trade(
+    bars: dict,
+    entry_index: int,
+    hold: int,
+    stoploss: float,
+    notional: float,
+    cost_per_side: float,
+    funding_buffer: float,
+    funding_multiplier: float = 1.0,
+) -> dict | None:
+    entry = bars["open"][entry_index]
+    if entry <= 0:
+        return None
+    planned_exit_bar = entry_index + hold
+    stop_price = entry * (1 - stoploss)
+    exit_bar = planned_exit_bar
+    exit_price = bars["close"][planned_exit_bar]
+    stop_triggered = False
+    for bar_index in range(entry_index, planned_exit_bar + 1):
+        if bars["low"][bar_index] <= stop_price:
+            exit_bar = bar_index
+            # A bar opening below the stop is a gap and must not receive the
+            # more favorable stop price.
+            exit_price = min(stop_price, bars["open"][bar_index])
+            stop_triggered = True
+            break
+    funding_return = funding_return_between(
+        bars.get("funding", []),
+        bars["ts"][entry_index],
+        bars["ts"][exit_bar],
+        funding_multiplier,
+    )
+    gross = exit_price / entry
+    net = (
+        gross * (1 - cost_per_side) / (1 + cost_per_side)
+        - 1
+        - funding_return
+        - funding_buffer
+    )
+    return {
+        "entry_ts_ms": bars["ts"][entry_index],
+        "exit_ts_ms": bars["ts"][exit_bar],
+        "entry": round(entry, 8),
+        "exit": round(exit_price, 8),
+        "net_return": net,
+        "notional": notional,
+        "funding_return": funding_return,
+        "stop_triggered": stop_triggered,
+        "exit_index": exit_bar,
+    }
+
+
+def advance(
+    bars: dict,
+    i: int,
+    in_position_until: int,
+    lookback: int,
+    hold: int,
+    cost: float,
+    buffer: float,
+    params: dict,
+    allow_entry,
+    funding_multiplier: float = 1.0,
+) -> tuple[int, int, dict | None]:
+    """Shared loop step: skip while in position; ask allow_entry(index);
+    enter at open[i+1] and hold `hold` bars."""
+    n = len(bars["ts"])
+    if i <= in_position_until:
+        return i + 1, in_position_until, None
+    if i + hold + 1 >= n:
+        return n, in_position_until, None
+    if not allow_entry(i):
+        return i + 1, in_position_until, None
+    trade = long_trade(
+        bars,
+        i + 1,
+        hold,
+        params["stoploss_bps"] / 10_000,
+        params["notional"],
+        cost,
+        buffer,
+        funding_multiplier,
+    )
+    if trade is None:
+        return i + 1, in_position_until, None
+    return trade["exit_index"] + 1, trade["exit_index"], trade
+
+
+def run_mean_reversion(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS, funding_multiplier: float = 1.0) -> list[dict]:
+    lookback = params["lookback_bars"]
+    trades = []
+    in_position_until = -1
+    i = lookback
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return bars["close"][index] < bars["close"][index - lookback]
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow, funding_multiplier)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def run_breakout(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS, funding_multiplier: float = 1.0) -> list[dict]:
+    lookback = params["breakout_lookback"]
+    trades = []
+    in_position_until = -1
+    i = lookback
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return bars["close"][index] > max(bars["high"][index - lookback : index], default=0.0)
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow, funding_multiplier)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def run_session(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS, funding_multiplier: float = 1.0) -> list[dict]:
+    start_hour = params["session_start_hour"]
+    end_hour = params["session_end_hour"]
+    trades = []
+    in_position_until = -1
+    i = 1
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            hour = (bars["ts"][index + 1] // 3_600_000) % 24
+            return start_hour <= hour < end_hour
+        i, in_position_until, trade = advance(bars, i, in_position_until, 1, params["hold_bars"], cost_per_side, funding_buffer, params, allow, funding_multiplier)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+def rolling_volatility(returns: list[float], window: int) -> list[float]:
+    vols = [0.0] * len(returns)
+    for i in range(window, len(returns)):
+        sample = returns[i - window : i]
+        mean = statistics.mean(sample)
+        variance = statistics.mean((r - mean) ** 2 for r in sample)
+        vols[i] = math.sqrt(variance)
+    return vols
+
+
+def vol_below_median(vols: list[float], index: int, window: int) -> bool:
+    if index < window:
+        return False
+    sample = [v for v in vols[index - window : index]]
+    return vols[index] < statistics.median(sample)
+
+
+def run_volfiltered_momentum(bars: dict, cost_per_side: float, funding_buffer: float = 0.0, params: dict = PARAMS, funding_multiplier: float = 1.0) -> list[dict]:
+    lookback = params["lookback_bars"]
+    closes = bars["close"]
+    returns = [0.0] + [closes[i] / closes[i - 1] - 1 if closes[i - 1] > 0 else 0.0 for i in range(1, len(closes))]
+    vols = rolling_volatility(returns, params["vol_window"])
+    trades = []
+    in_position_until = -1
+    i = max(lookback, params["vol_median_window"])
+    n = len(bars["ts"])
+    while i < n:
+        def allow(index):
+            return closes[index] > closes[index - lookback] and vol_below_median(vols, index, params["vol_median_window"])
+        i, in_position_until, trade = advance(bars, i, in_position_until, lookback, params["hold_bars"], cost_per_side, funding_buffer, params, allow, funding_multiplier)
+        if trade:
+            trades.append(trade)
+    return trades
+
+
+RULE_FUNCTIONS = {
+    "momentum": None,  # run_rule below (kept for backward compatibility)
+    "mean_reversion": run_mean_reversion,
+    "breakout": run_breakout,
+    "session": run_session,
+    "volfiltered_momentum": run_volfiltered_momentum,
+}
+
+RULE_STUDY = {
+    "momentum": "study-2026-08-16-eth15m-momentum",
+    "mean_reversion": "study-2026-08-16-eth15m-mean-reversion",
+    "breakout": "study-2026-08-16-eth15m-breakout",
+    "session": "study-2026-08-16-eth15m-session",
+    "volfiltered_momentum": "study-2026-08-16-eth15m-volfiltered-momentum",
+}
+
+
+def daily_equity(
+    trades: list[dict],
+    initial: float,
+    window_start_ms: int | None = None,
+    window_end_ms: int | None = None,
+) -> tuple[list[int], list[float]]:
+    """Chronological equity by UTC day after each trade completes."""
+    by_day: dict[int, float] = {}
+    equity = initial
+    for trade in sorted(trades, key=lambda item: item["exit_ts_ms"]):
+        equity += trade["notional"] * trade["net_return"]
+        day = trade["exit_ts_ms"] // 86_400_000
+        by_day[day] = equity
+    if window_start_ms is not None and window_end_ms is not None:
+        start_day = window_start_ms // 86_400_000
+        end_day = window_end_ms // 86_400_000
+    elif by_day:
+        start_day = min(by_day)
+        end_day = max(by_day)
+    else:
+        return [], []
+    if end_day < start_day:
+        return [], []
+    # Include the initial boundary so the first trading day's return and a
+    # first-day drawdown are not silently discarded.
+    days = list(range(start_day - 1, end_day + 1))
+    values = [initial]
+    last = initial
+    for day in days[1:]:
+        last = by_day.get(day, last)
+        values.append(last)
+    return days, values
+
+
+def daily_returns(days: list[int], equity: list[float]) -> list[float]:
+    if len(equity) < 2:
+        return []
+    returns = []
+    prev = equity[0]
+    for value in equity[1:]:
+        returns.append(value / prev - 1 if prev > 0 else 0.0)
+        prev = value
+    return returns
+
+
+def max_drawdown(equity: list[float]) -> float:
+    peak = -math.inf
+    worst = 0.0
+    for value in equity:
+        peak = max(peak, value)
+        if peak > 0:
+            worst = max(worst, (peak - value) / peak)
+    return worst
+
+
+def metrics(
+    trades: list[dict],
+    initial: float,
+    window_start_ms: int | None = None,
+    window_end_ms: int | None = None,
+) -> dict:
+    days, equity = daily_equity(trades, initial, window_start_ms, window_end_ms)
+    returns = daily_returns(days, equity)
+    net_returns = [t["net_return"] for t in trades]
+    total_return = (equity[-1] / initial - 1) if equity else 0.0
+    span_days = (days[-1] - days[0]) if days else 0
+    annualized_return = ((1 + total_return) ** (365.0 / span_days) - 1) if span_days > 0 and total_return > -1 else None
+    annualized_vol = statistics.pstdev(returns) * math.sqrt(365) if len(returns) > 1 else None
+    sharpe = (statistics.mean(returns) / statistics.pstdev(returns) * math.sqrt(365)) if len(returns) > 1 and statistics.pstdev(returns) > 0 else None
+    downside = [r for r in returns if r < 0]
+    sortino = (statistics.mean(returns) / statistics.pstdev(downside) * math.sqrt(365)) if len(downside) > 1 and statistics.pstdev(downside) > 0 else None
+    drawdown = max_drawdown(equity)
+    calmar = (annualized_return / drawdown) if drawdown > 0 and annualized_return is not None else None
+    wins = [r for r in net_returns if r > 0]
+    losses = [r for r in net_returns if r < 0]
+    win_rate = len(wins) / len(net_returns) if net_returns else None
+    profit_factor = (sum(wins) / abs(sum(losses))) if losses and sum(losses) != 0 else None
+    max_consecutive_losses = 0
+    run = 0
+    for r in net_returns:
+        if r < 0:
+            run += 1
+            max_consecutive_losses = max(max_consecutive_losses, run)
+        else:
+            run = 0
+    turnover = sum(t["notional"] for t in trades) / initial if initial > 0 else None
+    holding = statistics.mean([(t["exit_ts_ms"] - t["entry_ts_ms"]) / 900_000 for t in trades]) if trades else None
+    return {
+        "trade_count": len(trades),
+        "total_return": round(total_return, 6),
+        "annualized_return": round(annualized_return, 6) if annualized_return is not None else None,
+        "annualized_volatility": round(annualized_vol, 6) if annualized_vol is not None else None,
+        "max_drawdown": round(drawdown, 6),
+        "sharpe": round(sharpe, 4) if sharpe is not None else None,
+        "sortino": round(sortino, 4) if sortino is not None else None,
+        "calmar": round(calmar, 4) if calmar is not None else None,
+        "win_rate": round(win_rate, 4) if win_rate is not None else None,
+        "profit_factor": round(profit_factor, 4) if profit_factor is not None else None,
+        "turnover_notional_per_initial_equity": round(turnover, 4) if turnover is not None else None,
+        "avg_holding_bars": round(holding, 2) if holding is not None else None,
+        "max_consecutive_losses": max_consecutive_losses,
+        "span_days": span_days,
+    }
+
+
+def benchmark_buy_hold(bars: dict, window_start_ms: int, window_end_ms: int) -> dict:
+    first = next((i for i, ts in enumerate(bars["ts"]) if ts >= window_start_ms), None)
+    last = next((i for i in range(len(bars["ts"]) - 1, -1, -1) if bars["ts"][i] <= window_end_ms), None)
+    if first is None or last is None or last <= first:
+        return {"gross_return": None, "net_return": None, "window_start_ms": window_start_ms, "window_end_ms": window_end_ms}
+    entry = bars["open"][first]
+    exit_price = bars["close"][last]
+    gross = exit_price / entry - 1
+    c = PARAMS["cost_bps_per_side"] / 10_000
+    net = (1 + gross) * (1 - c) / (1 + c) - 1
+    return {"gross_return": round(gross, 6), "net_return": round(net, 6), "window_start_ms": window_start_ms, "window_end_ms": window_end_ms, "entry": entry, "exit": exit_price}
+
+
+def split_trades(trades: list[dict], split_ms: int) -> tuple[list[dict], list[dict]]:
+    train = [t for t in trades if t["entry_ts_ms"] < split_ms]
+    oos = [t for t in trades if t["entry_ts_ms"] >= split_ms]
+    return train, oos
+
+
+def verdict(
+    oos_metrics: dict, oos_stress_metrics: dict, train_metrics: dict
+) -> tuple[str, dict]:
+    conditions = {
+        "oos_sharpe_ge_0.5": (oos_metrics["sharpe"] or 0) >= 0.5,
+        "oos_stress_net_positive": (oos_stress_metrics["total_return"] or 0) > 0,
+        "oos_min_30_trades": (oos_metrics["trade_count"] or 0) >= 30,
+        "train_oos_same_sign": (train_metrics["total_return"] or 0) * (oos_metrics["total_return"] or 0) > 0,
+    }
+    return "PASS" if all(conditions.values()) else "REJECT", conditions
+
+
+def enforce_data_gate(
+    verdict_name: str, conditions: dict, funding_complete: bool
+) -> tuple[str, dict]:
+    """Prevent a statistical PASS when required funding evidence is absent.
+
+    A failed strategy remains REJECT; missing data must not turn a genuine
+    rejection into the softer INCONCLUSIVE outcome.
+    """
+    gated_conditions = dict(conditions)
+    gated_conditions["funding_data_complete"] = funding_complete
+    if verdict_name == "PASS" and not funding_complete:
+        return "INCONCLUSIVE", gated_conditions
+    return verdict_name, gated_conditions
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-research-backtest", description="Run a preregistered study through the gate")
+    parser.add_argument("--data", default=str(ROOT / "user_data" / "data" / "ethusdt-15m-2026-02-01-2026-08-16.jsonl"))
+    parser.add_argument("--rule", default="momentum", choices=sorted(RULE_FUNCTIONS.keys()))
+    parser.add_argument("--funding-data", default=None, help="Binance funding-rate JSONL for the same symbol/window")
+    args = parser.parse_args(argv)
+
+    rule_fn = run_rule if args.rule == "momentum" else RULE_FUNCTIONS[args.rule]
+    study_dir = ROOT / "research" / "backtests" / RULE_STUDY[args.rule]
+
+    bars = to_floats(load_bars(pathlib.Path(args.data)))
+    funding_path = pathlib.Path(args.funding_data) if args.funding_data else None
+    bars["funding"] = load_funding(funding_path)
+    c = PARAMS["cost_bps_per_side"] / 10_000
+    stress_c = PARAMS["stress_cost_bps_per_side"] / 10_000
+    stress_buffer = PARAMS["stress_funding_buffer_bps"] / 10_000
+
+    baseline_trades = rule_fn(bars, c)
+    stress_trades = rule_fn(
+        bars,
+        stress_c,
+        funding_buffer=stress_buffer,
+        funding_multiplier=5.0,
+    )
+
+    train_base, oos_base = split_trades(baseline_trades, SPLIT_UTC_MS)
+    train_stress, oos_stress = split_trades(stress_trades, SPLIT_UTC_MS)
+
+    train_window = (bars["ts"][0], SPLIT_UTC_MS - 1)
+    oos_window = (SPLIT_UTC_MS, bars["ts"][-1])
+    train_metrics = metrics(train_base, PARAMS["initial_equity"], *train_window)
+    oos_metrics = metrics(oos_base, PARAMS["initial_equity"], *oos_window)
+    oos_stress_metrics = metrics(oos_stress, PARAMS["initial_equity"], *oos_window)
+
+    oos_start = min((t["entry_ts_ms"] for t in oos_base), default=SPLIT_UTC_MS)
+    oos_end = max((t["exit_ts_ms"] for t in oos_base), default=bars["ts"][-1])
+    benchmark = benchmark_buy_hold(bars, oos_start, oos_end)
+
+    verdict_name, conditions = verdict(oos_metrics, oos_stress_metrics, train_metrics)
+    verdict_name, conditions = enforce_data_gate(
+        verdict_name, conditions, bool(bars["funding"])
+    )
+
+    result = {
+        "study_id": RULE_STUDY[args.rule],
+        "params": PARAMS,
+        "split_utc_ms": SPLIT_UTC_MS,
+        "bars": len(bars["ts"]),
+        "funding_records": len(bars["funding"]),
+        "funding_model": "ACTUAL_PUBLISHED_TIMESTAMPS" if bars["funding"] else "UNKNOWN_NO_SERIES",
+        "cost_model_sha256": RESEARCH_COSTS["sha256"],
+        "cost_model_source": "configs/execution-costs.json",
+        "train": {
+            **train_metrics,
+            "stress": metrics(train_stress, PARAMS["initial_equity"], *train_window),
+        },
+        "out_of_sample": {**oos_metrics, "stress": oos_stress_metrics},
+        "benchmark": benchmark,
+        "verdict": verdict_name,
+        "verdict_conditions": conditions,
+        "note": "This study does not authorize live trading. Taker fee is PLACEHOLDER_UNVERIFIED.",
+    }
+    out = study_dir / "results.json"
+    study_dir.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

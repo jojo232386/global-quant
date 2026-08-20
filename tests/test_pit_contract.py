@@ -5,7 +5,7 @@ from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "gmaq-research-pit"
+SCRIPT = ROOT / "legacy_research_engines" / "gmaq-research-pit"
 FETCH_SCRIPT = ROOT / "scripts" / "gmaq-fetch-pit"
 STUDIES = {
     "funding_crosssection": ROOT / "research" / "backtests" / "study-2026-08-17-pit-funding-crosssection",
@@ -44,7 +44,7 @@ def test_pit_and_crosssection_loaders_reject_path_symbols() -> None:
     pit = load("p_symbol_boundary", SCRIPT)
     crosssection = load(
         "cs_symbol_boundary",
-        ROOT / "scripts" / "gmaq-research-crosssection",
+        ROOT / "legacy_research_engines" / "gmaq-research-crosssection",
     )
     for module in (pit, crosssection):
         try:
@@ -127,7 +127,7 @@ def test_funding_fetch_pages_the_exact_historical_window() -> None:
 
 def test_pit_studies_artifacts_and_verdict_consistent() -> None:
     module = load("p", SCRIPT)
-    shared = load("shared", ROOT / "scripts" / "gmaq-research-backtest")
+    shared = load("shared", ROOT / "legacy_research_engines" / "gmaq-research-backtest")
     for study_dir in STUDIES.values():
         for name in ("preregistration.md", "data-checklist.md", "results.json", "manifest.md", "verdict.md"):
             assert (study_dir / name).is_file(), f"{study_dir.name}/{name} missing"
