@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import pathlib
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ from gmaq_live import (
     reconcile_binance_usdm_truth,
     validate_live_config,
 )
+from gmaq_data import DataLayerError, default_data_root, verify_snapshot
 
 MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
 MAX_EVIDENCE_ROWS = 10_000
@@ -44,6 +46,28 @@ def load_list(path: str) -> list[dict]:
     if len(value) > MAX_EVIDENCE_ROWS:
         raise ValueError(f"{path} exceeds evidence row limit")
     return value
+
+
+def load_committed_strategy_result(path: str) -> dict:
+    resolved = pathlib.Path(path).resolve()
+    try:
+        relative = resolved.relative_to(ROOT)
+    except ValueError as error:
+        raise ValueError("strategy result must be inside the candidate repository") from error
+    if (
+        len(relative.parts) != 4
+        or relative.parts[:2] != ("research", "backtests")
+        or relative.name != "results.json"
+    ):
+        raise ValueError("strategy result must be research/backtests/<study>/results.json")
+    subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", str(relative)],
+        cwd=ROOT,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return load_object(str(resolved))
 
 
 def current_sha() -> str:
@@ -79,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--account-evidence", required=True)
     evaluate.add_argument("--broker-evidence", required=True)
     evaluate.add_argument("--readiness", required=True)
+    evaluate.add_argument("--strategy-result", required=True, help="committed V1-bound research results.json")
+    evaluate.add_argument("--data-root", help="existing Data Layer V1 root")
     evaluate.add_argument("--config", required=True, help="proposed non-secret live config")
 
     args = parser.parse_args(argv)
@@ -100,15 +126,39 @@ def main(argv: list[str] | None = None) -> int:
             if args.output:
                 pathlib.Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
         else:
+            strategy_result = load_committed_strategy_result(args.strategy_result)
+            binding = strategy_result.get("dataset_binding")
+            if not isinstance(binding, dict):
+                raise ValueError("strategy result lacks dataset binding")
+            data_root = (
+                pathlib.Path(args.data_root).expanduser().resolve()
+                if args.data_root
+                else default_data_root(ROOT)
+            )
+            verified_dataset = verify_snapshot(
+                data_root,
+                str(binding.get("dataset_id", "")),
+                expected_dataset=str(binding.get("dataset", "")),
+                minimum_stage="curated",
+            )
             result = evaluate_live_candidate(
                 account_evidence=load_object(args.account_evidence),
                 broker_evidence=load_object(args.broker_evidence),
                 readiness=load_object(args.readiness),
+                strategy_result=strategy_result,
+                verified_dataset=verified_dataset,
                 candidate_sha=candidate_sha,
                 config_sha256=config_sha256,
                 now_epoch=int(now.timestamp()),
             )
-    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+    except (
+        DataLayerError,
+        OSError,
+        RuntimeError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+    ) as error:
         result = {
             "schema_version": 1,
             "verdict": "BLOCKED",

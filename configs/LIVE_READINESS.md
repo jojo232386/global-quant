@@ -46,7 +46,9 @@ without credentials:
 - Fail-closed, non-ordering live-candidate evidence aggregation and Binance
   REST/user-stream reconciliation contract: `scripts/gmaq-live-admission`,
   `gmaq_live/admission.py`. Synthetic evidence remains `BLOCKED`; it can never
-  arm or submit an order. Authenticated capture, submission, and
+  arm or submit an order. Strategy PASS must come from a committed result whose
+  dataset binding replays through the existing Data Layer V1 registry as
+  `VERIFIED / curated / PASS`. Authenticated capture, submission, and
   credential/account-binding adapters remain absent.
 
 Tooling presence does not remove any blocker; only completed, recorded

@@ -161,6 +161,10 @@ must be refused by the control plane.
   broker truth, credential presence, dedicated-account/sole-operator evidence,
   approved risk limits, verified alert/secret handling, a strategy PASS, and a
   completed soak PASS.
+- Strategy PASS is read from a committed `research/backtests/<study>/results.json`;
+  its dataset ID, manifest/schema/file SHAs, stage, quality, and integrity must
+  match `verify_snapshot(..., minimum_stage="curated")` against the existing
+  Data Layer V1 registry.
 - Caller-authored fixtures can validate only the contract and remain
   `BLOCKED`. `CANDIDATE_ELIGIBLE` is unreachable until reviewed authenticated
   capture, exchange-bound submission, and live-credential/account binding are

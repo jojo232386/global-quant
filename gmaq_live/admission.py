@@ -131,6 +131,61 @@ def _identity_errors(evidence: dict, candidate_sha: str, config_sha256: str) -> 
     return errors
 
 
+def _strategy_evidence_errors(
+    strategy_result: object,
+    verified_dataset: object,
+    expected_artifact_sha256: object,
+) -> list[str]:
+    if not isinstance(strategy_result, dict) or not isinstance(verified_dataset, dict):
+        return ["strategy_evidence_invalid"]
+    errors = []
+    if strategy_result.get("verdict") != "PASS":
+        errors.append("strategy_verdict_invalid")
+    if expected_artifact_sha256 != _canonical_sha256(strategy_result):
+        errors.append("strategy_artifact_digest_mismatch")
+    binding = strategy_result.get("dataset_binding")
+    if not isinstance(binding, dict):
+        return errors + ["strategy_dataset_binding_invalid"]
+    files = binding.get("files")
+    binding_files_valid = (
+        isinstance(files, dict)
+        and bool(files)
+        and all(
+            isinstance(role, str)
+            and role
+            and SHA256_RE.fullmatch(str(digest))
+            for role, digest in files.items()
+        )
+    )
+    if (
+        binding.get("data_layer_version") != 1
+        or binding.get("integrity_verdict") != "VERIFIED"
+        or binding.get("stage") != "curated"
+        or binding.get("quality_verdict") != "PASS"
+        or not SHA256_RE.fullmatch(str(binding.get("dataset_id", "")))
+        or not SHA256_RE.fullmatch(str(binding.get("snapshot_manifest_sha256", "")))
+        or not binding_files_valid
+    ):
+        errors.append("strategy_dataset_binding_invalid")
+    registry_files = {
+        item.get("role"): item.get("sha256")
+        for item in verified_dataset.get("files", [])
+        if isinstance(item, dict)
+    }
+    if (
+        verified_dataset.get("integrity_verdict") != "VERIFIED"
+        or verified_dataset.get("stage") != "curated"
+        or verified_dataset.get("quality_verdict") != "PASS"
+        or binding.get("dataset_id") != verified_dataset.get("snapshot_id")
+        or binding.get("dataset") != verified_dataset.get("dataset")
+        or binding.get("schema_id") != verified_dataset.get("schema_id")
+        or binding.get("snapshot_manifest_sha256") != verified_dataset.get("manifest_sha256")
+        or files != registry_files
+    ):
+        errors.append("strategy_dataset_registry_mismatch")
+    return errors
+
+
 def reconcile_binance_usdm_truth(
     *,
     intent: dict,
@@ -402,6 +457,8 @@ def evaluate_live_candidate(
     account_evidence: dict,
     broker_evidence: dict,
     readiness: dict,
+    strategy_result: dict,
+    verified_dataset: dict,
     candidate_sha: str,
     config_sha256: str,
     now_epoch: int,
@@ -477,7 +534,6 @@ def evaluate_live_candidate(
         "risk_limits_approved": True,
         "alert_route_verified": True,
         "secret_storage_approved": True,
-        "strategy_verdict": "PASS",
         "soak_verdict": "PASS",
     }
     for field, expected in required_readiness.items():
@@ -486,6 +542,13 @@ def evaluate_live_candidate(
     for field in ("strategy_artifact_sha256", "soak_evidence_sha256", "alert_evidence_sha256"):
         if not SHA256_RE.fullmatch(str(readiness.get(field, ""))):
             blockers.append(f"readiness_{field}_invalid")
+    blockers.extend(
+        _strategy_evidence_errors(
+            strategy_result,
+            verified_dataset,
+            readiness.get("strategy_artifact_sha256"),
+        )
+    )
     for field in ("risk_approval_id", "operator_attestation_id", "secret_storage_approval_id"):
         if not IDENTIFIER_RE.fullmatch(str(readiness.get(field, ""))):
             blockers.append(f"readiness_{field}_invalid")

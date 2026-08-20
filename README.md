@@ -113,12 +113,17 @@ captured broker truth, and operational evidence can then be evaluated with:
   --account-evidence /path/to/account-evidence.json \
   --broker-evidence /path/to/broker-evidence.json \
   --readiness /path/to/readiness.json \
+  --strategy-result research/backtests/<study>/results.json \
+  --data-root /path/to/existing/gmaq-data \
   --config /path/to/non-secret-live-config.json
 ```
 
 Missing or stale evidence returns `BLOCKED`. Complete synthetic fixtures also
 remain `BLOCKED`: they cannot prove authenticated capture, an exchange-bound
 submission adapter, or that live credentials belong to the verified account.
+The strategy result must be committed under `research/backtests/`; its dataset
+binding is replayed against the existing Data Layer V1 registry as
+`VERIFIED / curated / PASS`. A caller-authored PASS string is never accepted.
 Entry authorization and order submission are always false. The repository
 still has no live configuration, live arm, or order command.
 Both candidate commands also require a clean, committed worktree; uncommitted

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -136,8 +137,39 @@ def account_evidence() -> dict:
     }
 
 
-def readiness() -> dict:
+def strategy_result() -> dict:
     return {
+        "study_id": "study-pass",
+        "verdict": "PASS",
+        "dataset_binding": {
+            "data_layer_version": 1,
+            "integrity_verdict": "VERIFIED",
+            "stage": "curated",
+            "quality_verdict": "PASS",
+            "dataset": "btceth-test",
+            "dataset_id": "1" * 64,
+            "schema_id": "2" * 64,
+            "snapshot_manifest_sha256": "3" * 64,
+            "files": {"bars": "4" * 64},
+        },
+    }
+
+
+def verified_dataset() -> dict:
+    return {
+        "integrity_verdict": "VERIFIED",
+        "stage": "curated",
+        "quality_verdict": "PASS",
+        "dataset": "btceth-test",
+        "snapshot_id": "1" * 64,
+        "schema_id": "2" * 64,
+        "manifest_sha256": "3" * 64,
+        "files": [{"role": "bars", "sha256": "4" * 64}],
+    }
+
+
+def readiness() -> dict:
+    value = {
         "schema_version": 1,
         "captured_at_utc": CAPTURED,
         "candidate_sha": CANDIDATE,
@@ -147,15 +179,18 @@ def readiness() -> dict:
         "risk_limits_approved": True,
         "alert_route_verified": True,
         "secret_storage_approved": True,
-        "strategy_verdict": "PASS",
         "soak_verdict": "PASS",
-        "strategy_artifact_sha256": "d" * 64,
+        "strategy_artifact_sha256": "",
         "soak_evidence_sha256": "e" * 64,
         "alert_evidence_sha256": "f" * 64,
         "risk_approval_id": "risk-approval-0001",
         "operator_attestation_id": "operator-attestation-0001",
         "secret_storage_approval_id": "secret-storage-0001",
     }
+    value["strategy_artifact_sha256"] = hashlib.sha256(
+        json.dumps(strategy_result(), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return value
 
 
 def evaluate(**overrides) -> dict:
@@ -163,6 +198,8 @@ def evaluate(**overrides) -> dict:
         "account_evidence": account_evidence(),
         "broker_evidence": matched_broker_evidence(),
         "readiness": readiness(),
+        "strategy_result": strategy_result(),
+        "verified_dataset": verified_dataset(),
         "candidate_sha": CANDIDATE,
         "config_sha256": CONFIG_SHA,
         "now_epoch": NOW,
@@ -312,14 +349,16 @@ def test_failed_account_and_operational_predicates_block() -> None:
     account["facts"]["canWithdraw"] = True
     account["facts"]["apiRestrictions"]["enableWithdrawals"] = True
     operations = readiness()
-    operations["strategy_verdict"] = "REJECT"
     operations["soak_verdict"] = "RUNNING"
-    result = evaluate(account_evidence=account, readiness=operations)
+    failed_strategy = strategy_result()
+    failed_strategy["verdict"] = "REJECT"
+    result = evaluate(account_evidence=account, readiness=operations, strategy_result=failed_strategy)
     assert result["verdict"] == "BLOCKED"
     assert "account_dualSidePosition_invalid" in result["blockers"]
     assert "account_canWithdraw_invalid" in result["blockers"]
     assert "account_enableWithdrawals_invalid" in result["blockers"]
-    assert "readiness_strategy_verdict_invalid" in result["blockers"]
+    assert "strategy_verdict_invalid" in result["blockers"]
+    assert "strategy_artifact_digest_mismatch" in result["blockers"]
     assert "readiness_soak_verdict_invalid" in result["blockers"]
 
 
@@ -335,16 +374,41 @@ def test_cli_is_non_ordering_and_does_not_print_credentials() -> None:
     assert "--config-sha256" not in script
     assert "validated_config_sha256(args.config)" in script
     assert "committed_candidate_sha(ROOT)" in script
+    assert "load_committed_strategy_result(args.strategy_result)" in script
+    assert 'minimum_stage="curated"' in script
     assert "--max-age-seconds" not in script
 
 
 def test_dry_run_authorization_cannot_satisfy_live_candidate() -> None:
     operations = readiness()
     operations["authorization_scope"] = "DEMO_DRY_RUN_ENTRY"
-    operations["strategy_verdict"] = "NOT_PROVEN_ALPHA"
-    result = evaluate(readiness=operations)
+    failed_strategy = strategy_result()
+    failed_strategy["verdict"] = "NOT_PROVEN_ALPHA"
+    result = evaluate(readiness=operations, strategy_result=failed_strategy)
     assert result["verdict"] == "BLOCKED"
-    assert "readiness_strategy_verdict_invalid" in result["blockers"]
+    assert "strategy_verdict_invalid" in result["blockers"]
+
+
+def test_strategy_pass_requires_verified_curated_v1_registry_binding() -> None:
+    unbound = strategy_result()
+    unbound.pop("dataset_binding")
+    result = evaluate(strategy_result=unbound)
+    assert "strategy_dataset_binding_invalid" in result["blockers"]
+
+    mismatched = verified_dataset()
+    mismatched["manifest_sha256"] = "9" * 64
+    result = evaluate(verified_dataset=mismatched)
+    assert "strategy_dataset_registry_mismatch" in result["blockers"]
+
+
+def test_current_rejected_v1_result_cannot_satisfy_admission() -> None:
+    path = (
+        pathlib.Path(__file__).parents[1]
+        / "research/backtests/study-2026-08-20-btceth-spot-perp-carry/results.json"
+    )
+    rejected = json.loads(path.read_text())
+    result = evaluate(strategy_result=rejected)
+    assert "strategy_verdict_invalid" in result["blockers"]
 
 
 def test_proposed_live_config_is_non_secret_and_minimal() -> None:
