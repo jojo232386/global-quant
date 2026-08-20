@@ -1,8 +1,10 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+import importlib.util
 import json
 import pathlib
 import subprocess
+from importlib.machinery import SourceFileLoader
 
 import pytest
 
@@ -14,6 +16,16 @@ CANDIDATE = "a" * 40
 CONFIG_SHA = "b" * 64
 NOW = 1_800_000_000
 CAPTURED = datetime.fromtimestamp(NOW - 30, timezone.utc).isoformat()
+
+
+def load_admission_cli() -> object:
+    script = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "gmaq-live-admission"
+    loader = SourceFileLoader("gmaq_live_admission_cli", str(script))
+    spec = importlib.util.spec_from_loader("gmaq_live_admission_cli", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 def truth_inputs() -> dict:
@@ -385,6 +397,22 @@ def test_oversized_evidence_age_cannot_relax_freshness() -> None:
     result = evaluate(now_epoch=NOW + 3600, max_evidence_age_seconds=86_400)
     assert "evidence_age_limit_invalid" in result["blockers"]
     assert "account_evidence_stale_or_invalid" in result["blockers"]
+
+
+def test_admission_cli_bounds_evidence_bytes_and_rows(tmp_path, monkeypatch) -> None:
+    module = load_admission_cli()
+    oversized = tmp_path / "oversized.json"
+    oversized.write_text('{"value":"too-large"}')
+    monkeypatch.setattr(module, "MAX_EVIDENCE_FILE_BYTES", 8)
+    with pytest.raises(ValueError, match="evidence size limit"):
+        module.load_object(str(oversized))
+
+    rows = tmp_path / "rows.json"
+    rows.write_text('[{"id":1},{"id":2}]')
+    monkeypatch.setattr(module, "MAX_EVIDENCE_FILE_BYTES", 1024)
+    monkeypatch.setattr(module, "MAX_EVIDENCE_ROWS", 1)
+    with pytest.raises(ValueError, match="evidence row limit"):
+        module.load_list(str(rows))
 
 
 def test_candidate_sha_rejects_hidden_index_flags(tmp_path) -> None:

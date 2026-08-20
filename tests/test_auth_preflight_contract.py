@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import os
 import pathlib
 import stat
@@ -158,6 +159,36 @@ def test_request_query_is_sent_in_the_same_sorted_order_as_signing() -> None:
     # string received; signing sorts, so sending must sort identically.
     text = SCRIPT.read_text()
     assert "urllib.parse.urlencode(sorted(stamped.items()))" in text
+
+
+def test_signed_requests_never_follow_redirects() -> None:
+    module = load_auth()
+    handler = module._NoRedirectHandler()
+    request = module.urllib.request.Request(
+        "https://fapi.binance.com/fapi/v2/account",
+        headers={"X-MBX-APIKEY": "test-key"},
+    )
+    assert handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://example.invalid/collect",
+    ) is None
+    assert any(isinstance(item, module._NoRedirectHandler) for item in module.HTTP_OPENER.handlers)
+
+
+def test_exchange_response_body_is_bounded(monkeypatch) -> None:
+    module = load_auth()
+    monkeypatch.setattr(module, "MAX_RESPONSE_BYTES", 8)
+    assert module._read_json_response(io.BytesIO(b'{"a":1}')) == {"a": 1}
+    try:
+        module._read_json_response(io.BytesIO(b"123456789"))
+    except ValueError as error:
+        assert "safety limit" in str(error)
+    else:
+        raise AssertionError("oversized exchange response was accepted")
 
 
 def test_live_readiness_fields_are_reported() -> None:

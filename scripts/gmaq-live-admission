@@ -18,18 +18,31 @@ from gmaq_live import (
     validate_live_config,
 )
 
+MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
+MAX_EVIDENCE_ROWS = 10_000
+
+
+def read_json(path: str) -> object:
+    with pathlib.Path(path).open("rb") as handle:
+        payload = handle.read(MAX_EVIDENCE_FILE_BYTES + 1)
+    if len(payload) > MAX_EVIDENCE_FILE_BYTES:
+        raise ValueError(f"{path} exceeds evidence size limit")
+    return json.loads(payload.decode())
+
 
 def load_object(path: str) -> dict:
-    value = json.loads(pathlib.Path(path).read_text())
+    value = read_json(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain one JSON object")
     return value
 
 
 def load_list(path: str) -> list[dict]:
-    value = json.loads(pathlib.Path(path).read_text())
+    value = read_json(path)
     if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
         raise ValueError(f"{path} must contain one JSON object list")
+    if len(value) > MAX_EVIDENCE_ROWS:
+        raise ValueError(f"{path} exceeds evidence row limit")
     return value
 
 
