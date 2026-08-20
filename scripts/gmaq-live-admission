@@ -48,12 +48,16 @@ SOAK_REQUIRED_FILES = {
 }
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
 def read_json(path: str) -> object:
     with pathlib.Path(path).open("rb") as handle:
         payload = handle.read(MAX_EVIDENCE_FILE_BYTES + 1)
     if len(payload) > MAX_EVIDENCE_FILE_BYTES:
         raise ValueError(f"{path} exceeds evidence size limit")
-    return json.loads(payload.decode())
+    return json.loads(payload.decode(), parse_constant=_reject_json_constant)
 
 
 def load_object(path: str) -> dict:
@@ -73,7 +77,7 @@ def load_list(path: str) -> list[dict]:
 
 
 def _json_object(payload: bytes, label: str) -> dict:
-    value = json.loads(payload.decode())
+    value = json.loads(payload.decode(), parse_constant=_reject_json_constant)
     if not isinstance(value, dict):
         raise ValueError(f"{label} must contain one JSON object")
     return value
@@ -81,7 +85,7 @@ def _json_object(payload: bytes, label: str) -> dict:
 
 def _json_lines(payload: bytes, label: str) -> list[dict]:
     rows: list[dict] = []
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(parse_constant=_reject_json_constant)
     text = payload.decode()
     offset = 0
     while offset < len(text):
@@ -153,8 +157,33 @@ def pinned_sha(value: object) -> bool:
 
 
 def _git_file(candidate_sha: str, path: str) -> bytes:
+    object_id = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{candidate_sha}:{path}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    object_type = subprocess.run(
+        ["git", "cat-file", "-t", object_id],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    size = int(
+        subprocess.run(
+            ["git", "cat-file", "-s", object_id],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    if object_type != "blob" or size > MAX_EVIDENCE_FILE_BYTES:
+        raise ValueError(f"{path} is not a bounded evidence file")
     return subprocess.run(
-        ["git", "show", f"{candidate_sha}:{path}"],
+        ["git", "cat-file", "blob", object_id],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -391,10 +420,7 @@ def load_committed_strategy_result(path: str, candidate_sha: str) -> dict:
         or relative.name != "results.json"
     ):
         raise ValueError("strategy result must be research/backtests/<study>/results.json")
-    payload = _git_file(candidate_sha, str(relative))
-    if len(payload) > MAX_EVIDENCE_FILE_BYTES:
-        raise ValueError(f"{relative} exceeds evidence size limit")
-    result = _json_object(payload, str(relative))
+    result = _json_object(_git_file(candidate_sha, str(relative)), str(relative))
     implementation_sha = result.get("implementation_candidate_sha")
     if (
         not isinstance(implementation_sha, str)
