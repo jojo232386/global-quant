@@ -459,6 +459,7 @@ def evaluate_live_candidate(
     readiness: object,
     strategy_result: object,
     verified_dataset: object,
+    verified_soak: object,
     candidate_sha: object,
     config_sha256: object,
     now_epoch: object,
@@ -477,6 +478,9 @@ def evaluate_live_candidate(
     account_evidence = account_evidence if isinstance(account_evidence, dict) else {}
     broker_evidence = broker_evidence if isinstance(broker_evidence, dict) else {}
     readiness = readiness if isinstance(readiness, dict) else {}
+    if not isinstance(verified_soak, dict):
+        blockers.append("soak_evidence_invalid")
+    verified_soak = verified_soak if isinstance(verified_soak, dict) else {}
     if not isinstance(now_epoch, int) or isinstance(now_epoch, bool) or now_epoch < 0:
         blockers.append("evaluation_time_invalid")
         now_epoch = 0
@@ -555,6 +559,24 @@ def evaluate_live_candidate(
     for field in ("strategy_artifact_sha256", "soak_evidence_sha256", "alert_evidence_sha256"):
         if not SHA256_RE.fullmatch(str(readiness.get(field, ""))):
             blockers.append(f"readiness_{field}_invalid")
+    if verified_soak.get("schema_version") != 1 or verified_soak.get("verdict") != "VERIFIED":
+        blockers.append("soak_evidence_not_verified")
+    if verified_soak.get("candidate_sha") != candidate_sha:
+        blockers.append("soak_candidate_sha_mismatch")
+    if verified_soak.get("config_sha256") != config_sha256:
+        blockers.append("soak_config_sha_mismatch")
+    if not GIT_SHA_RE.fullmatch(str(verified_soak.get("tree_sha", ""))):
+        blockers.append("soak_tree_sha_invalid")
+    for field in ("compose_sha256", "image_digest"):
+        if not SHA256_RE.fullmatch(str(verified_soak.get(field, "")).removeprefix("sha256:")):
+            blockers.append(f"soak_{field}_invalid")
+    if not IDENTIFIER_RE.fullmatch(str(verified_soak.get("run_id", ""))):
+        blockers.append("soak_run_id_invalid")
+    if verified_soak.get("package_sha256") != readiness.get("soak_evidence_sha256"):
+        blockers.append("soak_evidence_digest_mismatch")
+    duration = verified_soak.get("duration_seconds")
+    if not isinstance(duration, int) or isinstance(duration, bool) or not 48 * 3600 <= duration <= 72 * 3600 + 10 * 60:
+        blockers.append("soak_duration_invalid")
     blockers.extend(
         _strategy_evidence_errors(
             strategy_result,

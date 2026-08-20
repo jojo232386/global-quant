@@ -165,6 +165,9 @@ must be refused by the control plane.
   its dataset ID, manifest/schema/file SHAs, stage, quality, and integrity must
   match `verify_snapshot(..., minimum_stage="curated")` against the existing
   Data Layer V1 registry.
+- The readiness soak hash is replayed from the complete bounded evidence
+  directory. Exact candidate identity, 48–72h duration and exercise coverage,
+  audit continuity, canary lifecycle, and final zero state are mandatory.
 - Caller-authored fixtures can validate only the contract and remain
   `BLOCKED`. `CANDIDATE_ELIGIBLE` is unreachable until reviewed authenticated
   capture, exchange-bound submission, and live-credential/account binding are

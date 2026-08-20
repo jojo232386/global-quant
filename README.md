@@ -113,6 +113,7 @@ captured broker truth, and operational evidence can then be evaluated with:
   --account-evidence /path/to/account-evidence.json \
   --broker-evidence /path/to/broker-evidence.json \
   --readiness /path/to/readiness.json \
+  --soak-evidence /path/to/completed-soak-evidence-dir \
   --strategy-result research/backtests/<study>/results.json \
   --data-root /path/to/existing/gmaq-data \
   --config /path/to/non-secret-live-config.json
@@ -126,6 +127,9 @@ binding is replayed against the existing Data Layer V1 registry as
 `VERIFIED / curated / PASS`. A caller-authored PASS string is never accepted.
 The result's recorded implementation commit must also be an ancestor of the
 candidate commit; unrelated or missing research-engine provenance is blocked.
+The declared soak digest is replayed from the complete 48–72h evidence package;
+missing files, symlinks, wrong candidate identity, incomplete exercise coverage,
+non-zero final state, broken audit continuity, or modified package bytes block.
 Entry authorization and order submission are always false. The repository
 still has no live configuration, live arm, or order command.
 Both candidate commands also require a clean, committed worktree; uncommitted
@@ -173,7 +177,7 @@ docker-compose run --rm freqtrade list-strategies \
 The next bounded reliability run is:
 
 ```sh
-./scripts/reliability-soak 72
+./scripts/reliability-soak 72 --authorization-id <dry-run-authorization-id>
 ```
 
 It accepts 48–72 hours and exercises runtime controls, restart, a short network

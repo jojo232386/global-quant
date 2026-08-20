@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib.util
 import json
@@ -27,6 +27,121 @@ def load_admission_cli() -> object:
     assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
+
+
+def write_valid_soak_package(
+    path: pathlib.Path,
+    *,
+    candidate: str = CANDIDATE,
+    contract: dict | None = None,
+    hours: int = 48,
+) -> None:
+    path.mkdir()
+    contract = contract or {
+        "tree_sha": "1" * 40,
+        "config_sha256": CONFIG_SHA,
+        "compose_sha256": "2" * 64,
+        "image_ref": "example.invalid/freqtrade@sha256:" + "3" * 64,
+    }
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = [
+        {"ts_utc": start.isoformat(), "event": "E0", "verdict": "EXACT_MATCH"},
+        {"ts_utc": start.isoformat(), "event": "E0", "verdict": "PASS"},
+    ]
+    schedule = {
+        "E1": [(hour, "HEALTHY") for hour in range(0, hours, 6)],
+        "E2": [(hour, "MATCH") for hour in range(0, hours, 6)],
+        "E3": [(hour, "PASS") for hour in range(6, hours, 12)],
+        "E4": [(hour, "PASS") for hour in range(12, hours, 24)],
+        "E5": [(1, "PASS")],
+        "E6": [(2, "PASS")],
+        "E7": [(1, "PASS"), (12, "PASS")],
+        "E8": [(hour, "PASS") for hour in range(0, hours, 12)],
+    }
+    for name, rows in schedule.items():
+        for hour, verdict in rows:
+            events.append(
+                {"ts_utc": (start + timedelta(hours=hour)).isoformat(), "event": name, "verdict": verdict}
+            )
+    events.sort(key=lambda row: row["ts_utc"])
+
+    audit_refs = {
+        "candidate_sha": candidate,
+        "tree_sha": contract["tree_sha"],
+        "config_sha256": contract["config_sha256"],
+        "run_id": "dryrun-test-0001",
+        "image_digest": contract["image_ref"].split("@", 1)[-1],
+    }
+    anchor_sha = "0" * 64
+    first_audit = {"seq": 11, "event": "start", "prev_sha": anchor_sha, "refs": audit_refs}
+    previous = json.dumps(first_audit, sort_keys=True, ensure_ascii=False)
+    audit = [
+        first_audit,
+        {
+            "seq": 12,
+            "event": "finish",
+            "prev_sha": hashlib.sha256(previous.encode()).hexdigest(),
+            "refs": audit_refs,
+        },
+    ]
+    objects = {
+        "manifest.json": {
+            "schema_version": 1,
+            "candidate_sha": candidate,
+            "tree_sha": contract["tree_sha"],
+            "config_sha256": contract["config_sha256"],
+            "compose_sha256": contract["compose_sha256"],
+            "run_id": "dryrun-test-0001",
+            "container": {
+                "image_ref": contract["image_ref"],
+                "image_id": contract["image_ref"].split("@", 1)[-1],
+            },
+            "environment": "dry_run",
+            "identity_verdict": "EXACT_MATCH",
+            "contains_secrets": False,
+        },
+        "preflight.json": {"verdict": "PASS"},
+        "preflight-after-kill.json": {"verdict": "PASS"},
+        "exchange-preflight.json": {"verdict": "PASS_PUBLIC"},
+        "liquidity.json": {"verdict": "PASS"},
+        "trade-baseline.json": {"open_trades": 0, "open_orders": 0},
+        "trade-lifecycle.json": {"verdict": "PASS", "complete_canary_trade_count": 1},
+        "audit-start-anchor.json": {"seq": 10, "record_sha256": anchor_sha},
+        "initial-audit-verify.json": {"verdict": "VERIFIED", "records": 10},
+        "final-audit-verify.json": {"verdict": "VERIFIED", "records": 12},
+        "final-exit.json": {
+            "verdict": "ZERO_POSITIONS_AND_ORDERS",
+            "open_trades": 0,
+            "open_orders": 0,
+            "partial_orders": 0,
+            "unknown_outcomes": [],
+            "matches_database": True,
+        },
+    }
+    for name, value in objects.items():
+        (path / name).write_text(json.dumps(value))
+    lines = {
+        "events.jsonl": events,
+        "audit-journal.jsonl": audit,
+        "health-samples.jsonl": [
+            {"verdict": "HEALTHY", "captured_at_utc": (start + timedelta(hours=hour)).isoformat()}
+            for hour in range(0, hours, 6)
+        ],
+        "reconcile-records.jsonl": [
+            {"verdict": "MATCH", "captured_at_utc": (start + timedelta(hours=hour)).isoformat()}
+            for hour in range(0, hours, 6)
+        ],
+    }
+    for name, rows in lines.items():
+        (path / name).write_text("".join(json.dumps(row) + "\n" for row in rows))
+    (path / "backup-restore.md").write_text("DB_BACKUP_RESTORE=PASS\n")
+    (path / "verdict.md").write_text(
+        "# Reliability verdict\n\n"
+        "- verdict: `PASS`\n"
+        "- reason: complete\n"
+        "- mode: `soak`\n"
+        f"- ended_utc: `{(start + timedelta(hours=hours)).isoformat()}`\n"
+    )
 
 
 def truth_inputs() -> dict:
@@ -193,6 +308,21 @@ def readiness() -> dict:
     return value
 
 
+def verified_soak() -> dict:
+    return {
+        "schema_version": 1,
+        "verdict": "VERIFIED",
+        "candidate_sha": CANDIDATE,
+        "tree_sha": "1" * 40,
+        "config_sha256": CONFIG_SHA,
+        "compose_sha256": "2" * 64,
+        "image_digest": "sha256:" + "3" * 64,
+        "run_id": "dryrun-test-0001",
+        "package_sha256": "e" * 64,
+        "duration_seconds": 48 * 3600,
+    }
+
+
 def evaluate(**overrides) -> dict:
     inputs = {
         "account_evidence": account_evidence(),
@@ -200,6 +330,7 @@ def evaluate(**overrides) -> dict:
         "readiness": readiness(),
         "strategy_result": strategy_result(),
         "verified_dataset": verified_dataset(),
+        "verified_soak": verified_soak(),
         "candidate_sha": CANDIDATE,
         "config_sha256": CONFIG_SHA,
         "now_epoch": NOW,
@@ -335,6 +466,7 @@ def test_complete_fixture_contract_remains_structurally_blocked() -> None:
         ("account_evidence", None, "account_evidence_invalid"),
         ("broker_evidence", [], "broker_evidence_invalid"),
         ("readiness", "invalid", "readiness_evidence_invalid"),
+        ("verified_soak", None, "soak_evidence_invalid"),
         ("candidate_sha", None, "candidate_sha_invalid"),
         ("config_sha256", [], "config_sha256_invalid"),
         ("now_epoch", True, "evaluation_time_invalid"),
@@ -381,6 +513,120 @@ def test_failed_account_and_operational_predicates_block() -> None:
     assert "readiness_soak_verdict_invalid" in result["blockers"]
 
 
+def test_soak_evidence_digest_and_candidate_must_match() -> None:
+    wrong_digest = verified_soak()
+    wrong_digest["package_sha256"] = "0" * 64
+    result = evaluate(verified_soak=wrong_digest)
+    assert "soak_evidence_digest_mismatch" in result["blockers"]
+
+    wrong_candidate = verified_soak()
+    wrong_candidate["candidate_sha"] = "c" * 40
+    result = evaluate(verified_soak=wrong_candidate)
+    assert "soak_candidate_sha_mismatch" in result["blockers"]
+
+
+def test_completed_soak_package_is_replayed_and_tampering_fails(tmp_path) -> None:
+    module = load_admission_cli()
+    candidate = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True, cwd=pathlib.Path(__file__).parents[1]
+    ).strip()
+    package = tmp_path / "soak"
+    write_valid_soak_package(
+        package,
+        candidate=candidate,
+        contract=module._candidate_runtime_contract(candidate),
+    )
+
+    verified = module.load_verified_soak_evidence(str(package), candidate)
+    assert verified["verdict"] == "VERIFIED"
+    assert verified["duration_seconds"] == 48 * 3600
+    assert verified["event_counts"]["E1"] == 8
+
+    extended = tmp_path / "soak-49h"
+    write_valid_soak_package(
+        extended,
+        candidate=candidate,
+        contract=module._candidate_runtime_contract(candidate),
+        hours=49,
+    )
+    assert module.load_verified_soak_evidence(str(extended), candidate)["event_counts"]["E1"] == 9
+
+    final_exit = json.loads((package / "final-exit.json").read_text())
+    final_exit["open_orders"] = 1
+    (package / "final-exit.json").write_text(json.dumps(final_exit))
+    with pytest.raises(ValueError, match="did not satisfy"):
+        module.load_verified_soak_evidence(str(package), candidate)
+
+
+def test_soak_package_rejects_wrong_candidate_and_symlink(tmp_path) -> None:
+    module = load_admission_cli()
+    candidate = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True, cwd=pathlib.Path(__file__).parents[1]
+    ).strip()
+    package = tmp_path / "soak"
+    write_valid_soak_package(
+        package,
+        candidate=candidate,
+        contract=module._candidate_runtime_contract(candidate),
+    )
+    manifest = json.loads((package / "manifest.json").read_text())
+    manifest["candidate_sha"] = "c" * 40
+    (package / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="did not satisfy"):
+        module.load_verified_soak_evidence(str(package), candidate)
+
+    link = tmp_path / "soak-link"
+    link.symlink_to(package, target_is_directory=True)
+    with pytest.raises(ValueError, match="cannot be a symlink"):
+        module.load_verified_soak_evidence(str(link), candidate)
+
+    unsafe = tmp_path / "unsafe"
+    write_valid_soak_package(
+        unsafe,
+        candidate=candidate,
+        contract=module._candidate_runtime_contract(candidate),
+    )
+    (unsafe / "manifest.json").unlink()
+    (unsafe / "manifest.json").symlink_to(package / "manifest.json")
+    with pytest.raises(OSError):
+        module.load_verified_soak_evidence(str(unsafe), candidate)
+
+
+def test_soak_package_binds_cadence_audit_anchor_and_committed_config(tmp_path) -> None:
+    module = load_admission_cli()
+    repo = pathlib.Path(__file__).parents[1]
+    candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, cwd=repo).strip()
+    contract = module._candidate_runtime_contract(candidate)
+
+    cadence = tmp_path / "cadence"
+    write_valid_soak_package(cadence, candidate=candidate, contract=contract)
+    events = [json.loads(line) for line in (cadence / "events.jsonl").read_text().splitlines()]
+    first_e1 = next(row["ts_utc"] for row in events if row["event"] == "E1")
+    for row in events:
+        if row["event"] == "E1":
+            row["ts_utc"] = first_e1
+    events.sort(key=lambda row: row["ts_utc"])
+    (cadence / "events.jsonl").write_text("".join(json.dumps(row) + "\n" for row in events))
+    with pytest.raises(ValueError, match="did not satisfy"):
+        module.load_verified_soak_evidence(str(cadence), candidate)
+
+    anchor = tmp_path / "anchor"
+    write_valid_soak_package(anchor, candidate=candidate, contract=contract)
+    (anchor / "audit-start-anchor.json").write_text(
+        json.dumps({"seq": 10, "record_sha256": "9" * 64})
+    )
+    with pytest.raises(ValueError, match="did not satisfy"):
+        module.load_verified_soak_evidence(str(anchor), candidate)
+
+    config = tmp_path / "config"
+    write_valid_soak_package(config, candidate=candidate, contract=contract)
+    manifest = json.loads((config / "manifest.json").read_text())
+    manifest["config_sha256"] = "8" * 64
+    (config / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="did not satisfy"):
+        module.load_verified_soak_evidence(str(config), candidate)
+
+
 def test_cli_is_non_ordering_and_does_not_print_credentials() -> None:
     script = (pathlib.Path(__file__).parents[1] / "scripts" / "gmaq-live-admission").read_text()
     assert "urllib" not in script
@@ -396,6 +642,8 @@ def test_cli_is_non_ordering_and_does_not_print_credentials() -> None:
     assert "load_committed_strategy_result(args.strategy_result, candidate_sha)" in script
     assert '"merge-base", "--is-ancestor", implementation_sha, candidate_sha' in script
     assert 'minimum_stage="curated"' in script
+    assert 'evaluate.add_argument("--soak-evidence", required=True' in script
+    assert "load_verified_soak_evidence(args.soak_evidence, candidate_sha)" in script
     assert "--max-age-seconds" not in script
 
 
