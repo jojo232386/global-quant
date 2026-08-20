@@ -72,18 +72,22 @@ Each exercise appends an audit record and is listed in the evidence table.
 Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 
 - `manifest.json`: run id, repo/tree/config/compose SHA, image digest, exact
-  container and volume bindings, and a statement that it contains no secrets.
+  container and volume bindings, and a statement that it contains no secrets;
+  admission re-derives the committed tree/config/compose/image contract.
 - `events.jsonl`: entry gates and exercise table with per-exercise verdicts.
 - Supporting entry-gate records include start/end UTC and the explicit dry-run
   authorization id only in the append-only audit journal.
 - `audit-journal.jsonl`: the exact journal segment for the run window.
-- `health-samples.jsonl`: E1 verdict records.
-- `reconcile-records.jsonl`: E2 verdict records.
+- `audit-start-anchor.json` and `initial-audit-verify.json`: the verified
+  predecessor hash and record count anchoring that segment to the pre-soak chain.
+- `health-samples.jsonl`: timestamped E1 verdict records at the six-hour cadence.
+- `reconcile-records.jsonl`: timestamped E2 verdict records at the six-hour cadence.
 - `trade-baseline.json` and `trade-lifecycle.json`: the pre-E0 database
   identity boundary and proof of a complete post-baseline canary round trip.
 - `backup-restore.md`: E6 steps and comparison result.
 - `final-exit.json`: the final reconcile record proving zero positions and
   zero open orders.
+- `final-audit-verify.json`: the final append-only audit-chain verification.
 - `verdict.md`: PASS / FAIL with the exact failing criterion when failed.
 
 ## Acceptance

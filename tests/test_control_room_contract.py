@@ -111,7 +111,8 @@ def test_safe_config_snapshot_never_returns_exchange_credentials(monkeypatch):
     assert result["credential_free"] is False
 
 
-def test_research_snapshot_reads_verified_curated_v1_results() -> None:
+def test_research_snapshot_reads_verified_curated_v1_results(monkeypatch) -> None:
+    monkeypatch.setattr(server, "replayed_curated_v1", server.verified_curated_v1)
     snapshot = server.research_snapshot()
     studies = {item["study_id"]: item for item in snapshot["studies"]}
     carry = studies["study-2026-08-20-btceth-spot-perp-carry"]
@@ -133,7 +134,9 @@ def test_research_binding_requires_all_v1_sha_pins() -> None:
             "integrity_verdict": "VERIFIED",
             "stage": "curated",
             "quality_verdict": "PASS",
+            "dataset": "btceth-test",
             "dataset_id": "a" * 64,
+            "schema_id": "d" * 64,
             "snapshot_manifest_sha256": "b" * 64,
             "files": {"bars": "c" * 64},
         }
@@ -143,7 +146,59 @@ def test_research_binding_requires_all_v1_sha_pins() -> None:
     assert server.verified_curated_v1(valid) is False
 
 
-def test_verified_research_pass_is_shadow_only(monkeypatch, tmp_path: pathlib.Path) -> None:
+def test_research_binding_requires_real_registry_replay(monkeypatch) -> None:
+    result = {
+        "dataset_binding": {
+            "data_layer_version": 1,
+            "dataset": "btceth-test",
+            "integrity_verdict": "VERIFIED",
+            "stage": "curated",
+            "quality_verdict": "PASS",
+            "dataset_id": "a" * 64,
+            "schema_id": "b" * 64,
+            "snapshot_manifest_sha256": "c" * 64,
+            "files": {"bars": "d" * 64},
+        }
+    }
+    replay = {
+        "integrity_verdict": "VERIFIED",
+        "stage": "curated",
+        "quality_verdict": "PASS",
+        "snapshot_id": "a" * 64,
+        "schema_id": "b" * 64,
+        "manifest_sha256": "c" * 64,
+        "files": [{"role": "bars", "sha256": "d" * 64}],
+    }
+    calls = []
+
+    def verify(data_root, dataset_id, **kwargs):
+        calls.append((data_root, dataset_id, kwargs))
+        return replay
+
+    monkeypatch.setattr(server, "verify_snapshot", verify)
+    assert server.replayed_curated_v1(result) is True
+    assert calls == [
+        (
+            server.DATA_ROOT,
+            "a" * 64,
+            {"expected_dataset": "btceth-test", "minimum_stage": "curated"},
+        )
+    ]
+
+    replay["manifest_sha256"] = "0" * 64
+    assert server.replayed_curated_v1(result) is False
+
+    def unavailable(*args, **kwargs):
+        raise server.DataLayerError("registry absent")
+
+    monkeypatch.setattr(server, "verify_snapshot", unavailable)
+    assert server.replayed_curated_v1(result) is False
+
+    monkeypatch.setattr(server, "verify_snapshot", lambda *_args, **_kwargs: {"files": [{}]})
+    assert server.replayed_curated_v1(result) is False
+
+
+def test_self_declared_research_pass_is_blocked_without_registry(monkeypatch, tmp_path: pathlib.Path) -> None:
     study = tmp_path / "study-pass"
     study.mkdir()
     (study / "results.json").write_text(
@@ -157,7 +212,9 @@ def test_verified_research_pass_is_shadow_only(monkeypatch, tmp_path: pathlib.Pa
                     "integrity_verdict": "VERIFIED",
                     "stage": "curated",
                     "quality_verdict": "PASS",
+                    "dataset": "btceth-test",
                     "dataset_id": "a" * 64,
+                    "schema_id": "e" * 64,
                     "snapshot_manifest_sha256": "b" * 64,
                     "files": {"bars": "c" * 64},
                 },
@@ -166,6 +223,29 @@ def test_verified_research_pass_is_shadow_only(monkeypatch, tmp_path: pathlib.Pa
         )
     )
     monkeypatch.setattr(server, "RESEARCH_DIR", tmp_path)
+    monkeypatch.setattr(
+        server,
+        "verify_snapshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(server.DataLayerError("registry absent")),
+    )
+    snapshot = server.research_snapshot()
+    assert snapshot["studies"][0]["evidence_generation"] == "COST_MODEL_MATCH_ONLY"
+    assert snapshot["current_pass_count"] == 0
+    assert snapshot["promotion_verdict"] == "BLOCKED_NO_CURRENT_PASS"
+
+    monkeypatch.setattr(
+        server,
+        "verify_snapshot",
+        lambda *args, **kwargs: {
+            "integrity_verdict": "VERIFIED",
+            "stage": "curated",
+            "quality_verdict": "PASS",
+            "snapshot_id": "a" * 64,
+            "schema_id": "e" * 64,
+            "manifest_sha256": "b" * 64,
+            "files": [{"role": "bars", "sha256": "c" * 64}],
+        },
+    )
     snapshot = server.research_snapshot()
     assert snapshot["current_pass_count"] == 1
     assert snapshot["promotion_verdict"] == "RESEARCH_PASS_SHADOW_ONLY"

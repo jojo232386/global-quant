@@ -80,12 +80,14 @@ record_command() {
 import json
 import pathlib
 import sys
+import datetime
 
 path = pathlib.Path(sys.argv[1])
 try:
     record = json.loads(sys.argv[2])
 except json.JSONDecodeError:
     record = {"ok": False, "verdict": "INVALID_OUTPUT", "command_exit_code": int(sys.argv[3])}
+record["captured_at_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 with path.open("a") as handle:
     handle.write(json.dumps(record, sort_keys=True) + "\n")
 PY
@@ -166,6 +168,25 @@ target.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in re
 PY
 }
 
+capture_audit_anchor() {
+  python3 - "$AUDIT" "$EVIDENCE_DIR/audit-start-anchor.json" "$START_SEQ" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+source, target, start = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), int(sys.argv[3])
+records = [json.loads(line) for line in source.read_text().splitlines() if line.strip()] if source.exists() else []
+if len(records) != start:
+    raise SystemExit("STOP: audit journal moved before soak anchor capture")
+record_sha = ""
+if records:
+    serialized = json.dumps(records[-1], sort_keys=True, ensure_ascii=False)
+    record_sha = hashlib.sha256(serialized.encode()).hexdigest()
+target.write_text(json.dumps({"seq": start, "record_sha256": record_sha}, sort_keys=True) + "\n")
+PY
+}
+
 write_verdict() {
   local verdict=$1 reason=$2
   capture_audit_segment || true
@@ -213,6 +234,7 @@ PY
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 EVIDENCE_DIR="$ROOT_DIR/user_data/audit/soak-${STAMP}-${RUN_ID}"
 mkdir -p "$EVIDENCE_DIR"
+capture_audit_anchor
 ./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
 append_event E0 EXACT_MATCH "isolated runtime manifest bound"
 
@@ -255,6 +277,11 @@ RUNTIME_STARTED=1
 wait_ping
 ./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
 record_command "$EVIDENCE_DIR/preflight-after-kill.json" ./scripts/gmaq-control preflight
+# The accepted audit segment begins only after kill recovery establishes the
+# fresh run identity recorded in the final manifest.
+START_SEQ=$(audit_count)
+record_command "$EVIDENCE_DIR/initial-audit-verify.json" ./scripts/gmaq-control audit verify >/dev/null
+capture_audit_anchor
 CONTAINER_NAME=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
 docker exec "$CONTAINER_NAME" python -c '
 import json, sqlite3
@@ -425,8 +452,8 @@ while true; do
     break
   fi
   if (( NOW >= NEXT_HEALTH )); then
-    ./scripts/gmaq-control health >>"$EVIDENCE_DIR/health-samples.jsonl"
-    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    record_command "$EVIDENCE_DIR/health-samples.jsonl" ./scripts/gmaq-control health >/dev/null
+    record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
     append_event E1 HEALTHY "six-hour health sample"
     append_event E2 MATCH "six-hour REST/database reconciliation"
     NEXT_HEALTH=$((NEXT_HEALTH + 6 * 3600))
@@ -448,7 +475,7 @@ while true; do
     wait_ping
     ./scripts/gmaq-runtime-manifest --expected-state DISARMED >/dev/null
     refresh_arm soak_restart_complete "restart-$NOW"
-    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
     append_event E4 PASS "same-binding clean restart and reconciliation"
     append_event E7 PASS "API reconnected after restart"
     NEXT_RESTART=$((NEXT_RESTART + 24 * 3600))
@@ -462,7 +489,7 @@ while true; do
     docker network connect "$NETWORK" "$CONTAINER_NAME"
     wait_ping
     ./scripts/gmaq-control preflight >/dev/null
-    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
     ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-network" --ttl-seconds 3600 >/dev/null
     append_event E5 PASS "network interruption recovered with reconciliation"
     append_event E7 PASS "API reconnected after network interruption"

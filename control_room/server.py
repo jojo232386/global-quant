@@ -13,6 +13,7 @@ import importlib.util
 import json
 import pathlib
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -22,13 +23,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.machinery import SourceFileLoader
 from urllib.parse import urlsplit
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from gmaq_data import DataLayerError, default_data_root, verify_snapshot
+
+
 STATIC_DIR = ROOT / "control_room" / "static"
 RESEARCH_DIR = ROOT / "research" / "backtests"
 AUDIT_DIR = ROOT / "user_data" / "audit"
 CONFIG_PATH = ROOT / "user_data" / "config.json"
 COST_MODEL_PATH = ROOT / "configs" / "execution-costs.json"
+DATA_ROOT = default_data_root(ROOT)
 LIVE_READINESS_PATH = ROOT / "configs" / "LIVE_READINESS.md"
 CONTROL_PATH = ROOT / "scripts" / "gmaq-control"
 DEFAULT_HOST = "127.0.0.1"
@@ -244,11 +250,39 @@ def verified_curated_v1(result: dict) -> bool:
         and binding.get("integrity_verdict") == "VERIFIED"
         and binding.get("stage") == "curated"
         and binding.get("quality_verdict") == "PASS"
+        and isinstance(binding.get("dataset"), str)
+        and bool(binding["dataset"])
         and pinned_sha(binding.get("dataset_id"))
+        and pinned_sha(binding.get("schema_id"))
         and pinned_sha(binding.get("snapshot_manifest_sha256"))
         and isinstance(files, dict)
         and bool(files)
         and all(isinstance(role, str) and role and pinned_sha(digest) for role, digest in files.items())
+    )
+
+
+def replayed_curated_v1(result: dict) -> bool:
+    if not verified_curated_v1(result):
+        return False
+    binding = result["dataset_binding"]
+    try:
+        snapshot = verify_snapshot(
+            DATA_ROOT,
+            binding["dataset_id"],
+            expected_dataset=binding.get("dataset"),
+            minimum_stage="curated",
+        )
+        files = {item["role"]: item["sha256"] for item in snapshot.get("files", [])}
+    except (DataLayerError, KeyError, OSError, TypeError, ValueError):
+        return False
+    return (
+        snapshot.get("integrity_verdict") == "VERIFIED"
+        and snapshot.get("stage") == binding["stage"]
+        and snapshot.get("quality_verdict") == binding["quality_verdict"]
+        and snapshot.get("snapshot_id") == binding["dataset_id"]
+        and snapshot.get("schema_id") == binding.get("schema_id")
+        and snapshot.get("manifest_sha256") == binding["snapshot_manifest_sha256"]
+        and files == binding["files"]
     )
 
 
@@ -291,7 +325,7 @@ def research_snapshot() -> dict:
             result_cost_sha = cost.get("sha256") if isinstance(cost, dict) else None
             if not result_cost_sha:
                 result_cost_sha = result.get("cost_model_sha256")
-            if verified_curated_v1(result) and current_cost_sha == result_cost_sha:
+            if replayed_curated_v1(result) and current_cost_sha == result_cost_sha:
                 evidence_generation = "VERIFIED_CURATED_V1"
             elif current_cost_sha and current_cost_sha == result_cost_sha:
                 evidence_generation = "COST_MODEL_MATCH_ONLY"

@@ -5,7 +5,10 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import pathlib
+import re
+import stat
 import subprocess
 import sys
 
@@ -22,6 +25,27 @@ from gmaq_data import DataLayerError, default_data_root, verify_snapshot
 
 MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
 MAX_EVIDENCE_ROWS = 10_000
+MAX_SOAK_PACKAGE_BYTES = 64 * 1024 * 1024
+MAX_SOAK_PACKAGE_FILES = 32
+SOAK_REQUIRED_FILES = {
+    "audit-journal.jsonl",
+    "audit-start-anchor.json",
+    "backup-restore.md",
+    "events.jsonl",
+    "exchange-preflight.json",
+    "final-audit-verify.json",
+    "final-exit.json",
+    "health-samples.jsonl",
+    "initial-audit-verify.json",
+    "liquidity.json",
+    "manifest.json",
+    "preflight-after-kill.json",
+    "preflight.json",
+    "reconcile-records.jsonl",
+    "trade-baseline.json",
+    "trade-lifecycle.json",
+    "verdict.md",
+}
 
 
 def read_json(path: str) -> object:
@@ -46,6 +70,313 @@ def load_list(path: str) -> list[dict]:
     if len(value) > MAX_EVIDENCE_ROWS:
         raise ValueError(f"{path} exceeds evidence row limit")
     return value
+
+
+def _json_object(payload: bytes, label: str) -> dict:
+    value = json.loads(payload.decode())
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain one JSON object")
+    return value
+
+
+def _json_lines(payload: bytes, label: str) -> list[dict]:
+    rows: list[dict] = []
+    decoder = json.JSONDecoder()
+    text = payload.decode()
+    offset = 0
+    while offset < len(text):
+        while offset < len(text) and text[offset].isspace():
+            offset += 1
+        if offset == len(text):
+            break
+        value, offset = decoder.raw_decode(text, offset)
+        if not isinstance(value, dict):
+            raise ValueError(f"{label} contains a non-object row")
+        rows.append(value)
+    if not rows or len(rows) > MAX_EVIDENCE_ROWS:
+        raise ValueError(f"{label} has an invalid row count")
+    return rows
+
+
+def _event_epoch(value: object) -> float:
+    if not isinstance(value, str):
+        raise ValueError("soak event time is invalid")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("soak event time has no timezone")
+    return parsed.timestamp()
+
+
+def _audit_segment_valid(records: list[dict], anchor: dict, manifest: dict, final_audit: dict) -> bool:
+    container = manifest.get("container")
+    if not isinstance(container, dict):
+        return False
+    expected_refs = {
+        "candidate_sha": manifest.get("candidate_sha"),
+        "tree_sha": manifest.get("tree_sha"),
+        "config_sha256": manifest.get("config_sha256"),
+        "run_id": manifest.get("run_id"),
+        "image_digest": container.get("image_id"),
+    }
+    anchor_seq = anchor.get("seq")
+    anchor_sha = anchor.get("record_sha256")
+    if (
+        not isinstance(anchor_seq, int)
+        or not ((anchor_seq == 0 and anchor_sha == "") or (anchor_seq > 0 and pinned_sha(anchor_sha)))
+        or final_audit.get("records") != anchor_seq + len(records)
+    ):
+        return False
+    for index, record in enumerate(records):
+        if not isinstance(record.get("seq"), int):
+            return False
+        expected_seq = anchor_seq + index + 1
+        refs = record.get("refs")
+        if not isinstance(refs, dict):
+            return False
+        if record["seq"] != expected_seq or refs | expected_refs != refs:
+            return False
+        previous_sha = anchor_sha
+        if index:
+            previous = json.dumps(records[index - 1], sort_keys=True, ensure_ascii=False)
+            previous_sha = hashlib.sha256(previous.encode()).hexdigest()
+        if record.get("prev_sha") != previous_sha:
+            return False
+    return True
+
+
+def pinned_sha(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _git_file(candidate_sha: str, path: str) -> bytes:
+    return subprocess.run(
+        ["git", "show", f"{candidate_sha}:{path}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def _candidate_runtime_contract(candidate_sha: str) -> dict:
+    tree_sha = subprocess.run(
+        ["git", "rev-parse", f"{candidate_sha}^{{tree}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    config = _git_file(candidate_sha, "user_data/config.json")
+    compose = _git_file(candidate_sha, "docker-compose.yml")
+    service = re.search(
+        rb"(?ms)^  freqtrade:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_.-]+:\s*(?:#.*)?$|\Z)",
+        compose,
+    )
+    image = re.search(rb"(?m)^    image:\s*(?P<image>\S.*?)\s*$", service.group("body")) if service else None
+    if image is None:
+        raise ValueError("candidate compose image is invalid")
+    return {
+        "tree_sha": tree_sha,
+        "config_sha256": hashlib.sha256(config).hexdigest(),
+        "compose_sha256": hashlib.sha256(compose).hexdigest(),
+        "image_ref": image.group("image").decode().strip("'\""),
+    }
+
+
+def _read_soak_package(path: str) -> dict[str, bytes]:
+    source = pathlib.Path(path).expanduser()
+    if source.is_symlink():
+        raise ValueError("soak evidence directory cannot be a symlink")
+    resolved = source.resolve(strict=True)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    directory_fd = os.open(resolved, flags)
+    try:
+        entries = sorted(os.listdir(directory_fd))
+        if not entries or len(entries) > MAX_SOAK_PACKAGE_FILES:
+            raise ValueError("soak evidence package has an invalid file count")
+        payloads: dict[str, bytes] = {}
+        total_bytes = 0
+        file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        for name in entries:
+            descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise ValueError("soak evidence package contains an unsafe entry")
+                chunks = []
+                file_bytes = 0
+                while True:
+                    chunk = os.read(descriptor, min(65536, MAX_EVIDENCE_FILE_BYTES + 1 - file_bytes))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    file_bytes += len(chunk)
+                    if file_bytes > MAX_EVIDENCE_FILE_BYTES:
+                        raise ValueError(f"{name} exceeds evidence size limit")
+                payload = b"".join(chunks)
+            finally:
+                os.close(descriptor)
+            total_bytes += len(payload)
+            if total_bytes > MAX_SOAK_PACKAGE_BYTES:
+                raise ValueError("soak evidence package exceeds size limit")
+            payloads[name] = payload
+        return payloads
+    finally:
+        os.close(directory_fd)
+
+
+def load_verified_soak_evidence(path: str, candidate_sha: str) -> dict:
+    payloads = _read_soak_package(path)
+    missing = SOAK_REQUIRED_FILES - payloads.keys()
+    if missing:
+        raise ValueError(f"soak evidence package is incomplete: {sorted(missing)}")
+
+    manifest = _json_object(payloads["manifest.json"], "manifest.json")
+    anchor = _json_object(payloads["audit-start-anchor.json"], "audit-start-anchor.json")
+    initial_audit = _json_object(payloads["initial-audit-verify.json"], "initial-audit-verify.json")
+    final_exit = _json_object(payloads["final-exit.json"], "final-exit.json")
+    final_audit = _json_object(payloads["final-audit-verify.json"], "final-audit-verify.json")
+    lifecycle = _json_object(payloads["trade-lifecycle.json"], "trade-lifecycle.json")
+    baseline = _json_object(payloads["trade-baseline.json"], "trade-baseline.json")
+    preflight = _json_object(payloads["preflight.json"], "preflight.json")
+    recovered = _json_object(payloads["preflight-after-kill.json"], "preflight-after-kill.json")
+    exchange = _json_object(payloads["exchange-preflight.json"], "exchange-preflight.json")
+    liquidity = _json_object(payloads["liquidity.json"], "liquidity.json")
+    events = _json_lines(payloads["events.jsonl"], "events.jsonl")
+    audit = _json_lines(payloads["audit-journal.jsonl"], "audit-journal.jsonl")
+    health = _json_lines(payloads["health-samples.jsonl"], "health-samples.jsonl")
+    reconciliations = _json_lines(payloads["reconcile-records.jsonl"], "reconcile-records.jsonl")
+
+    verdict_text = payloads["verdict.md"].decode()
+    verdict_match = re.search(r"(?m)^- verdict: `([^`]+)`$", verdict_text)
+    mode_match = re.search(r"(?m)^- mode: `([^`]+)`$", verdict_text)
+    ended_match = re.search(r"(?m)^- ended_utc: `([^`]+)`$", verdict_text)
+    if not verdict_match or not mode_match or not ended_match:
+        raise ValueError("soak verdict is malformed")
+    start_events = [event for event in events if event.get("event") == "E0" and event.get("verdict") == "PASS"]
+    if len(start_events) != 1:
+        raise ValueError("soak start event is invalid")
+    event_epochs = [_event_epoch(event.get("ts_utc")) for event in events]
+    start_epoch = _event_epoch(start_events[0].get("ts_utc"))
+    end_epoch = _event_epoch(ended_match.group(1))
+    duration_seconds = end_epoch - start_epoch
+    if not 48 * 3600 <= duration_seconds <= 72 * 3600 + 10 * 60:
+        raise ValueError("soak duration is outside the 48-72h contract")
+    if event_epochs != sorted(event_epochs) or any(epoch > end_epoch for epoch in event_epochs):
+        raise ValueError("soak event timeline is invalid")
+
+    counts: dict[str, int] = {}
+    accepted = {
+        "E0": {"EXACT_MATCH", "PASS"},
+        "E1": {"HEALTHY"},
+        "E2": {"MATCH"},
+        "E3": {"PASS"},
+        "E4": {"PASS"},
+        "E5": {"PASS"},
+        "E6": {"PASS"},
+        "E7": {"PASS"},
+        "E8": {"PASS"},
+    }
+    for event in events:
+        name = str(event.get("event"))
+        if name not in accepted or event.get("verdict") not in accepted[name]:
+            raise ValueError("soak event has a failed or unknown verdict")
+        counts[name] = counts.get(name, 0) + 1
+    # The runner accepts an integer 48..72 hour contract. Final zero/audit
+    # capture may add seconds, so recover that contract by flooring duration.
+    hours = int(duration_seconds // 3600)
+    required_counts = {
+        "E0": 2,
+        "E1": (hours + 5) // 6,
+        "E2": (hours + 5) // 6,
+        "E3": ((hours - 7) // 12) + 1,
+        "E4": ((hours - 13) // 24) + 1,
+        "E5": 1,
+        "E6": 1,
+        "E7": 2,
+        "E8": (hours + 11) // 12,
+    }
+    missing_events = {name: count for name, count in required_counts.items() if counts.get(name, 0) < count}
+    cadence_ok = True
+    for name in ("E1", "E2"):
+        observed = [_event_epoch(row.get("ts_utc")) for row in events if row.get("event") == name]
+        scheduled = [start_epoch + offset * 6 * 3600 for offset in range(required_counts[name])]
+        cadence_ok = cadence_ok and len(observed) == len(scheduled) and all(
+            expected <= actual <= expected + 5 * 60 for actual, expected in zip(observed, scheduled)
+        )
+        support = health if name == "E1" else reconciliations
+        support_times = [_event_epoch(row.get("captured_at_utc")) for row in support]
+        cadence_ok = cadence_ok and all(
+            any(abs(support_time - event_time) <= 2 * 60 for support_time in support_times)
+            for event_time in observed
+        )
+
+    contract = _candidate_runtime_contract(candidate_sha)
+    container = manifest.get("container", {})
+
+    valid = (
+        verdict_match.group(1) == "PASS"
+        and mode_match.group(1) == "soak"
+        and manifest.get("schema_version") == 1
+        and manifest.get("candidate_sha") == candidate_sha
+        and manifest.get("tree_sha") == contract["tree_sha"]
+        and manifest.get("config_sha256") == contract["config_sha256"]
+        and manifest.get("compose_sha256") == contract["compose_sha256"]
+        and isinstance(manifest.get("run_id"), str)
+        and bool(manifest["run_id"])
+        and isinstance(container, dict)
+        and container.get("image_ref") == contract["image_ref"]
+        and container.get("image_id") == contract["image_ref"].split("@", 1)[-1]
+        and manifest.get("environment") == "dry_run"
+        and manifest.get("identity_verdict") == "EXACT_MATCH"
+        and manifest.get("contains_secrets") is False
+        and counts.get("E0") == 2
+        and not missing_events
+        and cadence_ok
+        and all(row.get("verdict") == "HEALTHY" for row in health)
+        and all(row.get("verdict") == "MATCH" for row in reconciliations)
+        and initial_audit.get("verdict") == "VERIFIED"
+        and initial_audit.get("records") == anchor.get("seq")
+        and _audit_segment_valid(audit, anchor, manifest, final_audit)
+        and final_audit.get("verdict") == "VERIFIED"
+        and final_exit.get("verdict") == "ZERO_POSITIONS_AND_ORDERS"
+        and final_exit.get("open_trades") == 0
+        and final_exit.get("open_orders") == 0
+        and final_exit.get("partial_orders") == 0
+        and final_exit.get("unknown_outcomes") == []
+        and final_exit.get("matches_database") is True
+        and baseline.get("open_trades") == 0
+        and baseline.get("open_orders") == 0
+        and lifecycle.get("verdict") == "PASS"
+        and isinstance(lifecycle.get("complete_canary_trade_count"), int)
+        and lifecycle["complete_canary_trade_count"] >= 1
+        and preflight.get("verdict") == "PASS"
+        and recovered.get("verdict") == "PASS"
+        and exchange.get("verdict") == "PASS_PUBLIC"
+        and liquidity.get("verdict") == "PASS"
+        and "DB_BACKUP_RESTORE=PASS" in payloads["backup-restore.md"].decode()
+    )
+    if not valid:
+        raise ValueError("soak evidence package did not satisfy the reliability contract")
+
+    digest = hashlib.sha256()
+    for name, payload in payloads.items():
+        digest.update(name.encode() + b"\0" + hashlib.sha256(payload).digest())
+    return {
+        "schema_version": 1,
+        "verdict": "VERIFIED",
+        "candidate_sha": candidate_sha,
+        "tree_sha": manifest["tree_sha"],
+        "config_sha256": manifest["config_sha256"],
+        "compose_sha256": manifest["compose_sha256"],
+        "image_digest": container["image_id"],
+        "run_id": manifest["run_id"],
+        "package_sha256": digest.hexdigest(),
+        "duration_seconds": int(duration_seconds),
+        "event_counts": counts,
+    }
 
 
 def load_committed_strategy_result(path: str, candidate_sha: str) -> dict:
@@ -121,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--account-evidence", required=True)
     evaluate.add_argument("--broker-evidence", required=True)
     evaluate.add_argument("--readiness", required=True)
+    evaluate.add_argument("--soak-evidence", required=True, help="completed 48-72h reliability evidence directory")
     evaluate.add_argument("--strategy-result", required=True, help="committed V1-bound research results.json")
     evaluate.add_argument("--data-root", help="existing Data Layer V1 root")
     evaluate.add_argument("--config", required=True, help="proposed non-secret live config")
@@ -159,12 +491,14 @@ def main(argv: list[str] | None = None) -> int:
                 expected_dataset=str(binding.get("dataset", "")),
                 minimum_stage="curated",
             )
+            verified_soak = load_verified_soak_evidence(args.soak_evidence, candidate_sha)
             result = evaluate_live_candidate(
                 account_evidence=load_object(args.account_evidence),
                 broker_evidence=load_object(args.broker_evidence),
                 readiness=load_object(args.readiness),
                 strategy_result=strategy_result,
                 verified_dataset=verified_dataset,
+                verified_soak=verified_soak,
                 candidate_sha=candidate_sha,
                 config_sha256=config_sha256,
                 now_epoch=int(now.timestamp()),
