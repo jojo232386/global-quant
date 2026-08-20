@@ -173,6 +173,28 @@ def test_live_readiness_fields_are_reported() -> None:
         assert field in text, f"missing live-readiness field: {field}"
 
 
+def test_account_evidence_is_candidate_and_config_bound() -> None:
+    module = load_auth()
+    module.OUTPUT_PATH = pathlib.Path("/dev/null")
+    # No credentials means no request, but the failed evidence still preserves
+    # the exact proposed candidate identity for fail-closed admission.
+    module.read_creds = lambda: ("", "")
+    result = module.run_preflight("a" * 40, "b" * 64)
+    assert result["schema_version"] == 2
+    assert result["candidate_sha"] == "a" * 40
+    assert result["config_sha256"] == "b" * 64
+    assert result["verdict"] == "FAIL"
+
+
+def test_cli_computes_identity_instead_of_accepting_claimed_digests() -> None:
+    text = SCRIPT.read_text()
+    assert 'parser.add_argument("--config", required=True' in text
+    assert 'parser.add_argument("--candidate-sha"' not in text
+    assert 'parser.add_argument("--config-sha256"' not in text
+    assert "run_preflight(candidate_sha, config_sha256)" in text
+    assert "committed_candidate_sha(ROOT)" in text
+
+
 def test_unreachable_account_never_claims_portfolio_margin_or_verified_fees(
     tmp_path, monkeypatch
 ) -> None:

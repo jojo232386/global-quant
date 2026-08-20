@@ -22,7 +22,6 @@ import math
 import os
 import pathlib
 import re
-import secrets
 import subprocess
 import sys
 import threading
@@ -97,14 +96,6 @@ def fail(message: str, **extra) -> dict:
 
 def ok(verdict: str, **extra) -> dict:
     return {"ok": True, "verdict": verdict, **extra}
-
-
-def client_order_id(pair: str, env: str = "dryrun") -> str:
-    """Unique client-order identity: gmaq-<env>-<pair>-<utc-micros>-<8 b32>."""
-    sanitized = "".join(c if c.isalnum() else "-" for c in pair).strip("-").lower()
-    stamp = f"{int(time.time() * 1_000_000):016d}"
-    suffix = secrets.token_urlsafe(6).rstrip("=").lower()
-    return f"gmaq-{env}-{sanitized}-{stamp}-{suffix}"
 
 
 def allowed_transition(current: str, target: str) -> bool:

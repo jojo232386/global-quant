@@ -93,17 +93,6 @@ def test_status_is_open_trades_and_orders_are_nested() -> None:
     assert 'raw_trade.get("orders", [])' in text
 
 
-def test_client_order_id_format_and_uniqueness() -> None:
-    control = load_control()
-    seen = set()
-    for _ in range(5000):
-        ident = control.client_order_id("ETH/USDT:USDT")
-        assert ident.startswith("gmaq-dryrun-eth-usdt-usdt-")
-        assert ident not in seen
-        seen.add(ident)
-    assert len(seen) == 5000
-
-
 def test_armed_state_transitions_are_strict() -> None:
     control = load_control()
     allowed = [

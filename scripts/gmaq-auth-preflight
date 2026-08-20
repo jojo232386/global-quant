@@ -20,6 +20,10 @@ import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from gmaq_live import committed_candidate_sha, validate_live_config
+
 ENV_FILE = ROOT / ".env.readonly"
 AUDIT_DIR = ROOT / "user_data" / "audit"
 OUTPUT_PATH = AUDIT_DIR / "account-preflight.json"
@@ -28,6 +32,22 @@ FAPI = "https://fapi.binance.com"
 PAPI = "https://papi.binance.com"
 SAPI = "https://api.binance.com"
 TIMEOUT_S = 10
+
+
+def current_sha() -> str:
+    return committed_candidate_sha(ROOT)
+
+
+def validated_config_sha256(path: pathlib.Path) -> str:
+    config = json.loads(path.read_text())
+    errors = validate_live_config(config)
+    if errors:
+        raise ValueError("invalid proposed live config: " + ",".join(errors))
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def read_creds() -> tuple[str, str]:
@@ -122,14 +142,21 @@ def describe(code: int, body: object) -> str:
     return f"HTTP {code}"
 
 
-def run_preflight() -> dict:
+def run_preflight(candidate_sha: str | None = None, config_sha256: str | None = None) -> dict:
     key, secret = read_creds()
     checks: list[dict] = []
     facts: dict = {}
 
     checks.append(check("credentials present", bool(key) and bool(secret), "read from .env.readonly"))
     if not key or not secret:
-        manifest = {"verdict": "FAIL", "checks": checks, "note": "missing credentials; nothing was queried"}
+        manifest = {
+            "schema_version": 2,
+            "candidate_sha": candidate_sha,
+            "config_sha256": config_sha256,
+            "verdict": "FAIL",
+            "checks": checks,
+            "note": "missing credentials; nothing was queried",
+        }
         OUTPUT_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
         return manifest
 
@@ -305,8 +332,11 @@ def run_preflight() -> dict:
 
     read_failures = [item["name"] for item in checks if not item["passed"] and item.get("kind", "read") == "read"]
     manifest = {
+        "schema_version": 2,
         "scope": "authorized read-only session; GET requests only",
         "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "candidate_sha": candidate_sha,
+        "config_sha256": config_sha256,
         "verdict": "PASS_READONLY" if not read_failures else "PARTIAL",
         "checks": checks,
         "facts": facts,
@@ -328,8 +358,23 @@ def run_preflight() -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gmaq-auth-preflight", description="Authorized read-only account preflight (GET only)")
+    parser.add_argument("--config", required=True, help="proposed non-secret live config")
     args = parser.parse_args(argv)
-    manifest = run_preflight()
+    try:
+        candidate_sha = current_sha()
+        config_sha256 = validated_config_sha256(pathlib.Path(args.config))
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+        manifest = {
+            "schema_version": 2,
+            "candidate_sha": None,
+            "config_sha256": None,
+            "verdict": "FAIL",
+            "checks": [],
+            "note": f"invalid proposed live config: {error}",
+        }
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return 1
+    manifest = run_preflight(candidate_sha, config_sha256)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0 if manifest["verdict"] == "PASS_READONLY" else 1
 

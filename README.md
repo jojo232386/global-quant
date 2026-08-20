@@ -65,9 +65,12 @@ does not replace explicit authorization or the control-plane commands.
 - the strategy carries inner protections (StoplossGuard, MaxDrawdown,
   CooldownPeriod);
 - the control plane (`configs/CONTROL_PLANE.md`, `scripts/gmaq-control`)
-  provides armed states, an order state machine, unique client-order
-  identity, reconciliation, an append-only audit manifest, health metrics,
-  alerts, and an independent kill switch — all dry-run scope;
+  provides armed states, an order state machine, dry-run reconciliation, an
+  append-only audit manifest, health metrics, alerts, and an independent kill
+  switch — all dry-run scope;
+- `scripts/gmaq-live-admission` provides a non-ordering candidate gate and a
+  keyless Binance REST/user-stream truth contract. It cannot arm or submit;
+  exchange-bound client identity remains blocked on a reviewed adapter;
 - live deployment requires a separate configuration and explicit review;
 - no active SQLite database should be copied or queried directly.
 
@@ -98,6 +101,30 @@ filters, minimum notional, implied leverage headroom, funding, spread, and
 depth. Account-mode, permission, and fee items are reported as
 `UNVERIFIED_REQUIRES_AUTH` and keep live readiness BLOCKED until a separately
 authorized read-only session verifies them.
+
+## Live-candidate admission (no order capability)
+
+`scripts/gmaq-auth-preflight` can bind a separately authorized GET-only account
+snapshot to an exact candidate and proposed configuration digest. The snapshot,
+captured broker truth, and operational evidence can then be evaluated with:
+
+```sh
+./scripts/gmaq-live-admission evaluate \
+  --account-evidence /path/to/account-evidence.json \
+  --broker-evidence /path/to/broker-evidence.json \
+  --readiness /path/to/readiness.json \
+  --config /path/to/non-secret-live-config.json
+```
+
+Missing or stale evidence returns `BLOCKED`. Complete synthetic fixtures also
+remain `BLOCKED`: they cannot prove authenticated capture, an exchange-bound
+submission adapter, or that live credentials belong to the verified account.
+Entry authorization and order submission are always false. The repository
+still has no live configuration, live arm, or order command.
+Both candidate commands also require a clean, committed worktree; uncommitted
+code cannot reuse the same Git SHA evidence. Proposed configs are hashed from
+local bytes and recursively reject embedded keys, secrets, passwords, tokens,
+private material, and passphrases.
 
 ## Execution cost and liquidity
 
@@ -160,6 +187,7 @@ identity checks, and a final dry-run `forceexit all`.
 - `tests/`: focused configuration and custom-behavior contracts
 - `scripts/`: safe product, reliability, and control-plane commands
 - `control_room/`: localhost-only read-only operator UI and status API
+- `gmaq_live/`: credential-free candidate-admission and broker-truth contracts
 
 Earlier architecture remains recoverable from Git history and the published
 historical tag; it is not part of the active runtime.

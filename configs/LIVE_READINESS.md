@@ -31,8 +31,8 @@ Minimum external requirements for a future, separately authorized canary:
 The repository now owns dry-run-scope tooling for every check it can perform
 without credentials:
 
-- Control plane and armed states, order state machine, unique client-order
-  identity, reconciliation, audit manifest, health, alerts, and an
+- Control plane and armed states, order state machine, dry-run reconciliation,
+  audit manifest, health, alerts, and an
   independent kill switch: `configs/CONTROL_PLANE.md`,
   `scripts/gmaq-control`.
 - Same-day read-only exchange preflight (contract, precision/filters,
@@ -43,6 +43,11 @@ without credentials:
   `scripts/gmaq-liquidity`.
 - 48–72h promoted-layout soak protocol and evidence package:
   `configs/RELIABILITY_SOAK_PROTOCOL.md`, `scripts/reliability-soak`.
+- Fail-closed, non-ordering live-candidate evidence aggregation and Binance
+  REST/user-stream reconciliation contract: `scripts/gmaq-live-admission`,
+  `gmaq_live/admission.py`. Synthetic evidence remains `BLOCKED`; it can never
+  arm or submit an order. Authenticated capture, submission, and
+  credential/account-binding adapters remain absent.
 
 Tooling presence does not remove any blocker; only completed, recorded
 evidence does.
@@ -70,6 +75,10 @@ evidence does.
   explicitly `NOT_PROVEN_ALPHA`; see `configs/RESEARCH_REMEDIATION.md`.
 - Real fill/slippage, funding, liquidation, and live restart behavior remain
   untested and cannot be inferred from dry-run or from public snapshots.
+- The pinned Freqtrade create-order path has no reviewed
+  `newClientOrderId` injection point. The keyless broker-truth contract exists,
+  but authenticated REST/user-stream capture and the exchange-bound submission
+  adapter remain unimplemented blockers.
 
 Any one of these remains a `LIVE_READINESS_BLOCKER`; none should be repaired by
 placing a real order during readiness review.
