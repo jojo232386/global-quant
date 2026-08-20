@@ -282,6 +282,8 @@ NEXT_RESTART=$((START_EPOCH + 12 * 3600))
 NEXT_REFRESH=$((START_EPOCH + 45 * 60))
 NETWORK_DONE=0
 BACKUP_DONE=0
+MAX_LOOP_GAP_SECONDS=300
+LAST_LOOP_EPOCH=$START_EPOCH
 
 refresh_arm() {
   local reason=$1 suffix=$2
@@ -410,8 +412,18 @@ print(f"DB_BACKUP_RESTORE=PASS sha256={before} backup={backup}")
   refresh_arm soak_backup_complete backup
 }
 
-while (( $(date +%s) < END_EPOCH )); do
+while true; do
   NOW=$(date +%s)
+  LOOP_GAP_SECONDS=$((NOW - LAST_LOOP_EPOCH))
+  if (( LOOP_GAP_SECONDS < 0 || LOOP_GAP_SECONDS > MAX_LOOP_GAP_SECONDS )); then
+    append_event E10 FAIL "monitor loop gap ${LOOP_GAP_SECONDS}s; limit ${MAX_LOOP_GAP_SECONDS}s"
+    echo "STOP: continuous soak monitor gap is invalid" >&2
+    exit 1
+  fi
+  LAST_LOOP_EPOCH=$NOW
+  if (( NOW >= END_EPOCH )); then
+    break
+  fi
   if (( NOW >= NEXT_HEALTH )); then
     ./scripts/gmaq-control health >>"$EVIDENCE_DIR/health-samples.jsonl"
     ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
