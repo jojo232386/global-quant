@@ -12,8 +12,10 @@ All secrets stay inside environment variables and are never printed.
 """
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import fcntl
+import functools
 import hashlib
 import json
 import math
@@ -23,6 +25,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -54,6 +57,7 @@ MAX_ARM_TTL_S = 60 * 60
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:-]{8,96}$")
+_TRANSITION_THREAD_LOCK = threading.RLock()
 
 ALLOWED_TRANSITIONS = {
     "DISARMED": {"PREFLIGHTING"},
@@ -63,6 +67,28 @@ ALLOWED_TRANSITIONS = {
     "PAUSED": {"ARMED", "KILLED"},
     "KILLED": {"DISARMED"},
 }
+
+
+@contextmanager
+def transition_lock():
+    """Serialize authorization state transitions across threads and processes."""
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    with _TRANSITION_THREAD_LOCK:
+        with (AUDIT_DIR / ".state-transition.lock").open("a+") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+def serialized_transition(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with transition_lock():
+            return function(*args, **kwargs)
+
+    return wrapped
 
 
 def fail(message: str, **extra) -> dict:
@@ -376,6 +402,7 @@ def validated_runtime_binding() -> tuple[dict | None, str | None]:
     return binding, None
 
 
+@serialized_transition
 def bind_runtime(
     run_id: str,
     candidate_sha: str,
@@ -429,6 +456,7 @@ def bind_runtime(
     return ok("BOUND_DISARMED", **binding_fields(binding))
 
 
+@serialized_transition
 def disarm(reason: str = "operator_disarm") -> dict:
     binding, error = validated_runtime_binding()
     fields = binding_fields(binding) if binding else {}
@@ -439,6 +467,7 @@ def disarm(reason: str = "operator_disarm") -> dict:
     return ok("DISARMED", reason=reason, binding_error=error)
 
 
+@serialized_transition
 def arm(authorization_id: str, ttl_seconds: int) -> dict:
     if not IDENTIFIER_RE.fullmatch(authorization_id):
         return fail("authorization id must be 8-96 safe characters")
@@ -489,6 +518,7 @@ def arm(authorization_id: str, ttl_seconds: int) -> dict:
     return ok("ARMED", expires_at_epoch=expires_at, authorization_scope=DRY_RUN_SCOPE)
 
 
+@serialized_transition
 def pause() -> dict:
     state, error = read_object_strict(STATE_PATH, "state")
     if error:
@@ -508,6 +538,7 @@ def pause() -> dict:
     return ok("PAUSED")
 
 
+@serialized_transition
 def recover() -> dict:
     state, error = read_object_strict(STATE_PATH, "state")
     if error:
@@ -947,6 +978,7 @@ def compose_command() -> list[str] | None:
     return None
 
 
+@serialized_transition
 def preflight() -> dict:
     checks = []
     failures = []
@@ -1179,6 +1211,7 @@ def audit(action: str, event: str | None) -> dict:
     return fail(f"unknown audit action: {action}")
 
 
+@serialized_transition
 def kill() -> dict:
     binding, binding_error = validated_runtime_binding()
     fields = binding_fields(binding) if binding else {}

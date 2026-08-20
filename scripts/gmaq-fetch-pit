@@ -162,7 +162,11 @@ def main(argv: list[str] | None = None) -> int:
 
     universes = build_daily_universes(volumes, start_ms, end_ms, args.top)
     universe_text = json.dumps(universes, ensure_ascii=False, sort_keys=True)
-    needed = sorted({symbol for symbols in universes.values() for symbol in symbols})
+    needed = sorted(
+        universe_script.validate_symbol(symbol)
+        for symbols in universes.values()
+        for symbol in symbols
+    )
     print(f"point-in-time universe spans {len(needed)} symbols")
 
     partials = {}

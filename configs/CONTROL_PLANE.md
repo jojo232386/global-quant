@@ -83,8 +83,10 @@ must be refused by the control plane.
   `sha256` of the previous serialized record, forming a hash chain. The chain
   is verified on every control-plane action; a broken chain is a hard stop.
 - Appends use an exclusive file lock, `O_APPEND`, and `fsync`; state/binding
-  replacement is atomic and fsynced. Concurrent append, truncation, and
-  broken-chain behavior is covered by behavioral tests.
+  replacement is atomic and fsynced. A separate process-and-thread transition
+  lock serializes bind, preflight, arm, disarm, pause, recover, and kill so an
+  older in-flight authorization cannot overwrite an emergency stop. Concurrent
+  append, transition, truncation, and broken-chain behavior is covered by tests.
 
 ## 6. Health metrics
 

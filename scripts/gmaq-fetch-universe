@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
 TIMEOUT_S = 10
 STABLE_BASES = {"USDC", "BUSD", "USDP", "TUSD", "FDUSD", "USDE", "EUR", "AEUR", "USD1", "USDX", "BFUSD"}
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,30}USDT$")
 
 
 def get_json(url: str) -> list | None:
@@ -28,15 +30,27 @@ def get_json(url: str) -> list | None:
         return None
 
 
-def is_eligible(symbol: str) -> bool:
-    return symbol.endswith("USDT") and symbol.removesuffix("USDT") not in STABLE_BASES
+def validate_symbol(symbol: object) -> str:
+    if not isinstance(symbol, str) or not SYMBOL_RE.fullmatch(symbol):
+        raise ValueError("invalid USD-M symbol")
+    return symbol
+
+
+def is_eligible(symbol: object) -> bool:
+    try:
+        validated = validate_symbol(symbol)
+    except ValueError:
+        return False
+    return validated.removesuffix("USDT") not in STABLE_BASES
 
 
 def select_universe(payload: list, top_n: int) -> list[str]:
     eligible = [
         item
         for item in payload or []
-        if is_eligible(item.get("symbol", "")) and float(item.get("quoteVolume") or 0) > 0
+        if isinstance(item, dict)
+        and is_eligible(item.get("symbol", ""))
+        and float(item.get("quoteVolume") or 0) > 0
     ]
     eligible.sort(key=lambda item: float(item.get("quoteVolume") or 0), reverse=True)
     return [item["symbol"] for item in eligible[:top_n]]

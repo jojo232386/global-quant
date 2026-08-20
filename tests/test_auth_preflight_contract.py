@@ -1,15 +1,27 @@
 import importlib.util
+import os
 import pathlib
+import stat
 from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "gmaq-auth-preflight"
+CREDENTIAL_HELPER = ROOT / "scripts" / "gmaq-set-readonly-creds"
 
 
 def load_auth() -> object:
     loader = SourceFileLoader("gmaq_auth_preflight", str(SCRIPT))
     spec = importlib.util.spec_from_loader("gmaq_auth_preflight", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_credential_helper() -> object:
+    loader = SourceFileLoader("gmaq_set_readonly_creds", str(CREDENTIAL_HELPER))
+    spec = importlib.util.spec_from_loader("gmaq_set_readonly_creds", loader)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(module)
@@ -87,12 +99,39 @@ def test_script_is_get_only_and_never_stores_secrets() -> None:
 
 
 def test_credential_helper_hides_both_inputs_and_prints_no_prefix() -> None:
-    helper = (ROOT / "scripts" / "gmaq-set-readonly-creds").read_text()
+    helper = CREDENTIAL_HELPER.read_text()
     assert 'getpass.getpass("API Key (input hidden): ")' in helper
     assert 'getpass.getpass("Secret Key (input hidden): ")' in helper
     assert "key[:" not in helper
     assert "secret[:" not in helper
     assert "starts with" not in helper
+
+
+def test_credential_helper_creates_secret_file_as_0600(tmp_path, monkeypatch) -> None:
+    helper = load_credential_helper()
+    destination = tmp_path / ".env.readonly"
+    observed_modes = []
+    real_mkstemp = helper.tempfile.mkstemp
+
+    def observed_mkstemp(*args, **kwargs):
+        descriptor, name = real_mkstemp(*args, **kwargs)
+        observed_modes.append(stat.S_IMODE(os.fstat(descriptor).st_mode))
+        return descriptor, name
+
+    monkeypatch.setattr(helper.tempfile, "mkstemp", observed_mkstemp)
+    old_umask = os.umask(0o022)
+    try:
+        helper.write_credentials_atomic(
+            destination,
+            "GMAQ_READ_KEY=test-key\nGMAQ_READ_SECRET=test-secret\n",
+        )
+    finally:
+        os.umask(old_umask)
+
+    assert observed_modes == [0o600]
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert destination.read_text().endswith("GMAQ_READ_SECRET=test-secret\n")
+    assert list(tmp_path.glob(".env.readonly.*.tmp")) == []
 
 
 def test_endpoints_are_read_only_contracts() -> None:

@@ -2,6 +2,8 @@ import importlib.util
 import hashlib
 import json
 import pathlib
+import threading
+import time
 from importlib.machinery import SourceFileLoader
 
 
@@ -285,3 +287,61 @@ def test_bind_and_arm_outputs_are_accepted_by_strategy_gate(tmp_path, monkeypatc
     )
     assert decision.allowed is False
     assert decision.reason == "state_not_armed"
+
+
+def test_concurrent_disarm_cannot_be_overwritten_by_inflight_arm(tmp_path, monkeypatch) -> None:
+    control = load_control()
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    fields = {
+        "environment": "dry_run",
+        "candidate_sha": "a" * 40,
+        "config_sha256": "b" * 64,
+        "run_id": "dryrun-race-proof",
+    }
+    monkeypatch.setattr(control, "AUDIT_DIR", audit_dir)
+    monkeypatch.setattr(control, "STATE_PATH", audit_dir / "state.json")
+    monkeypatch.setattr(control, "BINDING_PATH", audit_dir / "runtime-binding.json")
+    monkeypatch.setattr(
+        control,
+        "validated_runtime_binding",
+        lambda: ({"schema_version": 1, **fields}, None),
+    )
+    monkeypatch.setattr(control.time, "time", lambda: 1_900_000_000)
+    control.write_state(
+        "PREFLIGHT_PASS",
+        **fields,
+        preflight_verdict="PASS",
+        preflight_expires_at_epoch=2_000_000_000,
+    )
+
+    arm_inside_audit = threading.Event()
+    release_arm = threading.Event()
+
+    def fake_append(event, actor, refs=None, verdict="OK"):
+        if event == "arm":
+            arm_inside_audit.set()
+            assert release_arm.wait(2)
+            return {"ok": True, "verdict": "APPENDED", "seq": 2, "record_sha": "c" * 64}
+        return {"ok": True, "verdict": "APPENDED", "seq": 1, "record_sha": "d" * 64}
+
+    monkeypatch.setattr(control, "append_audit", fake_append)
+    outcomes = {}
+    arm_thread = threading.Thread(
+        target=lambda: outcomes.setdefault("arm", control.arm("authorization-race-proof", 300))
+    )
+    disarm_thread = threading.Thread(
+        target=lambda: outcomes.setdefault("disarm", control.disarm("operator_emergency"))
+    )
+    arm_thread.start()
+    assert arm_inside_audit.wait(2)
+    disarm_thread.start()
+    time.sleep(0.05)
+    assert disarm_thread.is_alive(), "disarm should wait for the in-flight serialized transition"
+    release_arm.set()
+    arm_thread.join(2)
+    disarm_thread.join(2)
+
+    assert outcomes["arm"]["verdict"] == "ARMED"
+    assert outcomes["disarm"]["verdict"] == "DISARMED"
+    assert json.loads(control.STATE_PATH.read_text())["state"] == "DISARMED"

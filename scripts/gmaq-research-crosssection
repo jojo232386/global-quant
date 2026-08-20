@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import time
 from importlib.machinery import SourceFileLoader
@@ -22,6 +23,7 @@ SPLIT_UTC_MS = 1781568000000  # 2026-06-16T00:00:00Z
 DAY_MS = 86_400_000
 BAR_MS = 900_000
 COST_MODEL_PATH = ROOT / "configs" / "execution-costs.json"
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,30}USDT$")
 
 
 def load_cost_params(path: pathlib.Path = COST_MODEL_PATH) -> dict:
@@ -64,6 +66,8 @@ def load_shared():
 
 
 def load_symbol(symbol: str) -> dict:
+    if not SYMBOL_RE.fullmatch(symbol):
+        raise ValueError("invalid symbol in multi-manifest")
     lines = (MULTI_DIR / f"{symbol}-15m.jsonl").read_text().splitlines()
     ts = []
     open_price = {}

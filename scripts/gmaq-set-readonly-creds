@@ -6,11 +6,40 @@ atomically with 0600 permissions, and never prints any part of either value.
 """
 
 import getpass
+import os
 import pathlib
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / ".env.readonly"
+
+
+def write_credentials_atomic(destination: pathlib.Path, payload: str) -> None:
+    """Create secret content with mode 0600 before the first byte is written."""
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    temporary = pathlib.Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            descriptor = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        directory_descriptor = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -24,10 +53,7 @@ def main() -> int:
         return 1
 
     payload = f"GMAQ_READ_KEY={key}\nGMAQ_READ_SECRET={secret}\n"
-    tmp = ENV_FILE.with_suffix(".readonly.tmp")
-    tmp.write_text(payload)
-    tmp.chmod(0o600)
-    tmp.replace(ENV_FILE)
+    write_credentials_atomic(ENV_FILE, payload)
 
     print("written:", ENV_FILE)
     print("credential values accepted and stored locally; no prefix was displayed")

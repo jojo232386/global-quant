@@ -40,6 +40,21 @@ def test_universe_uses_d2_volume_without_lookahead() -> None:
     assert universes_next[base + DAY] == ["A", "B"]
 
 
+def test_pit_and_crosssection_loaders_reject_path_symbols() -> None:
+    pit = load("p_symbol_boundary", SCRIPT)
+    crosssection = load(
+        "cs_symbol_boundary",
+        ROOT / "scripts" / "gmaq-research-crosssection",
+    )
+    for module in (pit, crosssection):
+        try:
+            module.load_symbol("../../outsideUSDT")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unsafe symbol reached a research filesystem read")
+
+
 def test_pit_runner_executes_open_to_open() -> None:
     module = load("p", SCRIPT)
     assert module.PARAMS["stress_cost_bps_per_side"] == 30.0

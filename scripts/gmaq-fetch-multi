@@ -33,6 +33,22 @@ def load_klines_fetcher():
     return module
 
 
+def load_universe_validator():
+    loader = SourceFileLoader("gmaq_fetch_universe", str(ROOT / "scripts" / "gmaq-fetch-universe"))
+    spec = importlib.util.spec_from_loader("gmaq_fetch_universe", loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_symbols(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("universe symbols must be a list")
+    validator = load_universe_validator()
+    return [validator.validate_symbol(symbol) for symbol in value]
+
+
 def get_json(url: str) -> list | None:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
@@ -97,7 +113,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     universe = json.loads(pathlib.Path(args.universe).read_text())
-    symbols = universe["symbols"]
+    try:
+        symbols = validate_symbols(universe["symbols"])
+    except (KeyError, ValueError) as error:
+        parser.error(str(error))
     fetcher = load_klines_fetcher()
     start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
     end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)

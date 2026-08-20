@@ -33,11 +33,36 @@ def test_universe_excludes_stablecoin_bases() -> None:
         {"symbol": "SOLUSDT", "quoteVolume": "7000"},
         {"symbol": "XRPUSDT", "quoteVolume": "6000"},
         {"symbol": "EURUSDT", "quoteVolume": "5000"},
+        {"symbol": "../../outsideUSDT", "quoteVolume": "999999"},
+        {"symbol": "BTC/USDT", "quoteVolume": "999998"},
         {"symbol": "BAD", "quoteVolume": "1"},
     ]
     # Stablecoin bases (USDC, BUSD, EUR) and non-USDT quotes are excluded;
     # only 4 eligible symbols remain.
     assert module.select_universe(payload, 5) == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+    assert module.validate_symbol("1000PEPEUSDT") == "1000PEPEUSDT"
+    for malicious in ("../../outsideUSDT", "BTC/USDT", "BTC\\USDT", ".USDT"):
+        try:
+            module.validate_symbol(malicious)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe symbol accepted: {malicious}")
+
+
+def test_multi_fetch_rejects_unsafe_manifest_symbols() -> None:
+    module = load("multi_fetch_symbols", MULTI_FETCH_SCRIPT)
+    assert module.validate_symbols(["BTCUSDT", "1000PEPEUSDT"]) == [
+        "BTCUSDT",
+        "1000PEPEUSDT",
+    ]
+    for malicious in ("../../outsideUSDT", "BTC/USDT", "BTC\\USDT"):
+        try:
+            module.validate_symbols([malicious])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe manifest symbol accepted: {malicious}")
 
 
 def test_funding_and_return_signals() -> None:
