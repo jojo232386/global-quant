@@ -1,0 +1,45 @@
+{
+  "authoritative_sources": {
+    "source_funding": "https://fapi.binance.com/fapi/v1/fundingRate",
+    "source_klines": "https://fapi.binance.com/fapi/v1/klines",
+    "source_mark_klines": "https://fapi.binance.com/fapi/v1/markPriceKlines"
+  },
+  "dataset": "btceth-weekly-tsmom",
+  "fields": {
+    "funding": [
+      "fundingRate",
+      "fundingTime",
+      "markPrice",
+      "markPriceSource",
+      "symbol"
+    ],
+    "klines": [
+      "open_time_utc_ms",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "mark_8h": [
+      "open_time_utc_ms",
+      "open",
+      "high",
+      "low",
+      "close"
+    ]
+  },
+  "intervals": {
+    "funding_bucket_ms": 28800000,
+    "klines_ms": 86400000,
+    "mark_8h_ms": 28800000
+  },
+  "market": "crypto_perpetual",
+  "schema_version": 1,
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "time_standard": "UTC",
+  "venue": "Binance USD-M"
+}
