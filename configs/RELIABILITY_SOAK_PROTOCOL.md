@@ -56,6 +56,9 @@ Each exercise appends an audit record and is listed in the evidence table.
 
 - Final controlled exit in dry-run followed by a reconcile with **zero open
   positions and zero open orders**.
+- The flat database identity baseline captured immediately before E0 must be
+  followed by at least one fully closed `LiveExecutionCanaryStrategy` dry-run
+  trade with closed buy and sell orders. A zero-trade soak fails.
 - No duplicate trade/order identities across the whole run.
 - Audit hash chain intact from entry to exit.
 - Every scheduled exercise has a matching evidence record; a missed exercise
@@ -74,6 +77,8 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 - `audit-journal.jsonl`: the exact journal segment for the run window.
 - `health-samples.jsonl`: E1 verdict records.
 - `reconcile-records.jsonl`: E2 verdict records.
+- `trade-baseline.json` and `trade-lifecycle.json`: the pre-E0 database
+  identity boundary and proof of a complete post-baseline canary round trip.
 - `restart-recovery.md`: E4/E5 evidence and any anomalies observed.
 - `backup-restore.md`: E6 steps and comparison result.
 - `final-exit.json`: the final reconcile record proving zero positions and
