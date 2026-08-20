@@ -569,11 +569,11 @@ def test_soak_package_rejects_wrong_candidate_and_symlink(tmp_path) -> None:
         candidate=candidate,
         contract=module._candidate_runtime_contract(candidate),
     )
-    wrong_candidate = subprocess.check_output(
-        ["git", "rev-parse", f"{candidate}^"], text=True, cwd=pathlib.Path(__file__).parents[1]
-    ).strip()
+    manifest = json.loads((package / "manifest.json").read_text())
+    manifest["candidate_sha"] = "c" * 40
+    (package / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="did not satisfy"):
-        module.load_verified_soak_evidence(str(package), wrong_candidate)
+        module.load_verified_soak_evidence(str(package), candidate)
 
     link = tmp_path / "soak-link"
     link.symlink_to(package, target_is_directory=True)
