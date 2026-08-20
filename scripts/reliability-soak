@@ -255,6 +255,21 @@ RUNTIME_STARTED=1
 wait_ping
 ./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
 record_command "$EVIDENCE_DIR/preflight-after-kill.json" ./scripts/gmaq-control preflight
+CONTAINER_NAME=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
+docker exec "$CONTAINER_NAME" python -c '
+import json, sqlite3
+connection = sqlite3.connect("file:/freqtrade/runtime/tradesv3.dryrun.sqlite?mode=ro", uri=True)
+baseline = {
+    "max_trade_id": connection.execute("select coalesce(max(id), 0) from trades").fetchone()[0],
+    "max_order_row_id": connection.execute("select coalesce(max(id), 0) from orders").fetchone()[0],
+    "open_trades": connection.execute("select count(*) from trades where is_open = 1").fetchone()[0],
+    "open_orders": connection.execute("select count(*) from orders where ft_is_open = 1").fetchone()[0],
+}
+connection.close()
+if baseline["open_trades"] or baseline["open_orders"]:
+    raise SystemExit(f"STOP: trade baseline is not flat: {baseline}")
+print(json.dumps(baseline, sort_keys=True))
+' >"$EVIDENCE_DIR/trade-baseline.json"
 ./scripts/gmaq-control arm --authorization-id "$AUTHORIZATION_ID" --ttl-seconds 3600 >"$EVIDENCE_DIR/arm.json"
 append_event E0 PASS "entry gates and kill rehearsal passed; soak clock started"
 
@@ -302,6 +317,68 @@ seq = [item["seq"] for item in records]
 if len(seq) != len(set(seq)):
     raise SystemExit("STOP: duplicate audit sequence")
 PY
+}
+
+verify_trade_lifecycle() {
+  local container_name baseline_trade_id baseline_order_id
+  container_name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
+  baseline_trade_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["max_trade_id"])' "$EVIDENCE_DIR/trade-baseline.json")
+  baseline_order_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["max_order_row_id"])' "$EVIDENCE_DIR/trade-baseline.json")
+  docker exec "$container_name" python -c '
+import json, sqlite3, sys
+
+baseline_trade_id, baseline_order_id = int(sys.argv[1]), int(sys.argv[2])
+connection = sqlite3.connect("file:/freqtrade/runtime/tradesv3.dryrun.sqlite?mode=ro", uri=True)
+trade_rows = connection.execute(
+    "select id, is_open, enter_tag, strategy from trades where id > ? order by id",
+    (baseline_trade_id,),
+).fetchall()
+canary_trade_ids = [
+    row[0]
+    for row in trade_rows
+    if row[1] == 0
+    and row[2] == "live_execution_canary"
+    and row[3] == "LiveExecutionCanaryStrategy"
+]
+order_rows = []
+if canary_trade_ids:
+    placeholders = ",".join("?" for _ in canary_trade_ids)
+    order_rows = connection.execute(
+        f"select ft_trade_id, ft_order_side, ft_is_open, status from orders "
+        f"where id > ? and ft_trade_id in ({placeholders}) order by id",
+        (baseline_order_id, *canary_trade_ids),
+    ).fetchall()
+connection.close()
+closed_sides_by_trade = {
+    trade_id: sorted({
+        row[1]
+        for row in order_rows
+        if row[0] == trade_id and row[2] == 0 and row[3] == "closed"
+    })
+    for trade_id in canary_trade_ids
+}
+complete_canary_trade_ids = sorted(
+    trade_id
+    for trade_id, sides in closed_sides_by_trade.items()
+    if {"buy", "sell"}.issubset(sides)
+)
+passed = bool(complete_canary_trade_ids)
+evidence = {
+    "verdict": "PASS" if passed else "FAIL",
+    "baseline_trade_id": baseline_trade_id,
+    "baseline_order_row_id": baseline_order_id,
+    "new_trade_count": len(trade_rows),
+    "closed_canary_trade_count": len(canary_trade_ids),
+    "complete_canary_trade_count": len(complete_canary_trade_ids),
+    "closed_canary_order_count": sum(
+        1 for row in order_rows if row[2] == 0 and row[3] == "closed"
+    ),
+    "closed_order_sides_by_trade": closed_sides_by_trade,
+}
+print(json.dumps(evidence, sort_keys=True))
+if not passed:
+    raise SystemExit("STOP: no complete post-baseline canary trade lifecycle")
+' "$baseline_trade_id" "$baseline_order_id"
 }
 
 backup_restore_check() {
@@ -418,6 +495,7 @@ PY
 ./scripts/gmaq-control disarm --reason soak_final_exit >/dev/null
 record_command "$EVIDENCE_DIR/final-exit.json" ./scripts/gmaq-control exit
 [[ $(json_verdict <"$EVIDENCE_DIR/final-exit.json") == ZERO_POSITIONS_AND_ORDERS ]]
+verify_trade_lifecycle >"$EVIDENCE_DIR/trade-lifecycle.json"
 record_command "$EVIDENCE_DIR/final-audit-verify.json" ./scripts/gmaq-control audit verify
 [[ $(json_verdict <"$EVIDENCE_DIR/final-audit-verify.json") == VERIFIED ]]
 write_verdict PASS "all mandatory 48-72h dry-run exercises and final zero proof completed"

@@ -20,6 +20,9 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
     assert "48–72 hours" in flat
     assert "zero open positions" in flat
     assert "zero open orders" in flat
+    assert "A zero-trade soak fails" in flat
+    assert "trade-baseline.json" in flat
+    assert "trade-lifecycle.json" in flat
     assert "duplicate" in flat
     assert "does not authorize live trading" in flat
     assert "DRY_RUN_ONLY = TRUE" in text
@@ -49,6 +52,12 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert "gmaq-runtime-manifest --expected-state DISARMED" in text
     assert "gmaq-control reconcile" in text
     assert "gmaq-control exit" in text
+    assert 'trade-baseline.json' in text
+    assert 'trade-lifecycle.json' in text
+    assert 'LiveExecutionCanaryStrategy' in text
+    assert 'complete_canary_trade_ids' in text
+    assert 'closed_sides_by_trade' in text
+    assert 'no complete post-baseline canary trade lifecycle' in text
     assert "runtime-binding.json" in text
     assert "initial-audit-verify.json" in text
     assert text.count("final-audit-verify.json") >= 2
