@@ -6,7 +6,7 @@ from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "gmaq-research-pit-funding-shock-neutral"
+SCRIPT = ROOT / "legacy_research_engines" / "gmaq-research-pit-funding-shock-neutral"
 
 
 def load_script():

@@ -5,7 +5,7 @@ from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "gmaq-research-crosssection"
+SCRIPT = ROOT / "legacy_research_engines" / "gmaq-research-crosssection"
 UNIVERSE_SCRIPT = ROOT / "scripts" / "gmaq-fetch-universe"
 MULTI_FETCH_SCRIPT = ROOT / "scripts" / "gmaq-fetch-multi"
 STUDIES = {
@@ -155,7 +155,7 @@ def test_cross_section_charges_published_funding_during_hold() -> None:
 
 def test_cross_section_studies_artifacts_and_verdict_consistent() -> None:
     module = load("cs", SCRIPT)
-    shared = load("shared", ROOT / "scripts" / "gmaq-research-backtest")
+    shared = load("shared", ROOT / "legacy_research_engines" / "gmaq-research-backtest")
     for study_dir in STUDIES.values():
         for name in ("preregistration.md", "data-checklist.md", "results.json", "manifest.md", "verdict.md"):
             assert (study_dir / name).is_file(), f"{study_dir.name}/{name} missing"

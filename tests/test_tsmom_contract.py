@@ -5,7 +5,7 @@ from importlib.machinery import SourceFileLoader
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FETCH_SCRIPT = ROOT / "scripts" / "gmaq-fetch-tsmom"
-RUNNER = ROOT / "scripts" / "gmaq-research-tsmom"
+RUNNER = ROOT / "legacy_research_engines" / "gmaq-research-tsmom"
 DAY_MS = 86_400_000
 
 

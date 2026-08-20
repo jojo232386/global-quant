@@ -113,18 +113,14 @@ tier-1 MMR 0.4%. Those values are not same-day evidence for a future
 candidate, so committed cost inputs remain marked as placeholders; the
 snapshot itself does not authorize live trading.
 
-## Research commands
+## Research boundary
 
-```sh
-./scripts/gmaq-fetch-klines --start 2026-02-01 --end 2026-08-16 --out user_data/data/x.jsonl
-./scripts/gmaq-research-backtest --rule momentum \
-  --funding-data /path/to/ETHUSDT-funding.jsonl            # formal single-asset study
-./scripts/gmaq-fetch-universe && ./scripts/gmaq-fetch-multi --start ... --end ...
-./scripts/gmaq-research-crosssection --rule funding_crosssection
-./scripts/gmaq-fetch-pit --start ... --end ...             # point-in-time universe
-./scripts/gmaq-research-pit --rule funding_crosssection
-./scripts/gmaq-research-pit-funding-shock-neutral --data-dir /path/to/pit
-```
+Formal research must consume a Data Layer V1 snapshot verified as curated and
+PASS, and bind the dataset ID, snapshot-manifest SHA, and input-file SHAs. The
+old direct-file engines are preserved byte-for-byte under
+`legacy_research_engines/` for historical result replay only. Their former
+`scripts/gmaq-research-*` entrypoints now stop before reading data or writing
+results; they must not be used to create new evidence.
 
 Every study lives under `research/backtests/` with a locked
 preregistration, data checklist, run manifest, results, and an honest
