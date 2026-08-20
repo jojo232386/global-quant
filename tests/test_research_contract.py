@@ -154,7 +154,7 @@ def test_every_active_formal_result_writer_consumes_verified_curated_v1() -> Non
         assert "expected_dataset=" in source
         assert "urllib" not in source
         assert "requests" not in source
-    assert writers == ["gmaq-research-ls-tsmom"]
+    assert writers == ["gmaq-research-ls-tsmom", "gmaq-research-spot-perp-carry"]
 
 
 def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
@@ -173,3 +173,42 @@ def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:
     assert "today's top-100" in text
     assert "not silently overwritten" in text
     assert "does not authorize Demo entries or live trading" in text
+
+
+def test_pending_carry_study_cannot_bypass_data_layer_v1() -> None:
+    path = (
+        RESEARCH
+        / "backtests"
+        / "study-2026-08-20-btceth-spot-perp-carry"
+        / "preregistration.md"
+    )
+    text = path.read_text()
+    for marker in (
+        "WAITING_FOR_VERIFIED_DATASET",
+        "raw -> validated -> curated",
+        'verify_snapshot(..., minimum_stage="curated")',
+        "curated dataset ID",
+        "snapshot-manifest SHA-256",
+        "every input-file SHA-256",
+        "No runner may fetch Binance",
+        "UNASSIGNED",
+        "one formal run",
+        "does not authorize building",
+        "exchange-bound",
+    ):
+        assert marker in text
+    binding = (path.parent / "dataset-binding.md").read_text()
+    for marker in (
+        "DATASET_BOUND_READY_FOR_RUNNER",
+        "9601a8ff1cbfd52b75744d3380bf7b0961d289c11d3ef4641c5c4e42cd38aee8",
+        "d0afd4e8e448859933cedfeb83bf8edc6fb185ed047c3e4439ec312f3e61c01d",
+        "31f35151bd5c9c6135a2ece74937aee0a5caa8f17c7964fea60fc6d4bae6c652",
+        "VERIFIED / curated / PASS",
+        'verify_snapshot(..., minimum_stage="curated")',
+        "contain no exchange network client",
+    ):
+        assert marker in binding
+    readme = (RESEARCH / "README.md").read_text()
+    assert "Latest formal study" in readme
+    assert "spot-perp-carry" in readme
+    assert "REJECT" in readme
