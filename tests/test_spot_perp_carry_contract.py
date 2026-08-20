@@ -1,3 +1,4 @@
+import importlib.util
 from importlib.machinery import SourceFileLoader
 import json
 import pathlib
@@ -10,7 +11,12 @@ SCRIPT = ROOT / "scripts" / "gmaq-research-spot-perp-carry"
 
 
 def load_runner():
-    return SourceFileLoader("gmaq_spot_perp_carry_test", str(SCRIPT)).load_module()
+    loader = SourceFileLoader("gmaq_spot_perp_carry_test", str(SCRIPT))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def synthetic_week(module, decision: int, prior_rate: float, holding_rate: float) -> dict:

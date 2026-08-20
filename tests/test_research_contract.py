@@ -1,3 +1,4 @@
+import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
@@ -22,6 +23,15 @@ LEGACY_RUNNERS = (
     "gmaq-research-pit-funding-shock-neutral",
     "gmaq-research-tsmom",
 )
+
+
+def load_script(name: str, path: pathlib.Path):
+    loader = SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_research_readme_indexes_all_artifacts() -> None:
@@ -136,7 +146,7 @@ def test_research_never_authorizes_live_trading() -> None:
 @pytest.mark.parametrize("name", LEGACY_RUNNERS)
 def test_legacy_direct_file_runners_cannot_write_new_formal_results(name: str) -> None:
     script = ROOT / "scripts" / name
-    module = SourceFileLoader(f"retired_{name.replace('-', '_')}", str(script)).load_module()
+    module = load_script(f"retired_{name.replace('-', '_')}", script)
     with pytest.raises(SystemExit, match="VERIFIED curated Data Layer V1 dataset ID/SHA"):
         module.main([])
 
