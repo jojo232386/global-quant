@@ -391,14 +391,10 @@ def load_committed_strategy_result(path: str, candidate_sha: str) -> dict:
         or relative.name != "results.json"
     ):
         raise ValueError("strategy result must be research/backtests/<study>/results.json")
-    subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", str(relative)],
-        cwd=ROOT,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    result = load_object(str(resolved))
+    payload = _git_file(candidate_sha, str(relative))
+    if len(payload) > MAX_EVIDENCE_FILE_BYTES:
+        raise ValueError(f"{relative} exceeds evidence size limit")
+    result = _json_object(payload, str(relative))
     implementation_sha = result.get("implementation_candidate_sha")
     if (
         not isinstance(implementation_sha, str)
