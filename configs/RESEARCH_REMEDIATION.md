@@ -18,6 +18,7 @@ study id and freshly pinned inputs.
 | latency stress | emitted a note only | moves buy and sell VWAP adversely and recomputes all-in cost |
 | cost provenance | duplicated hard-coded 15/30 bps values | derives fee/slippage assumptions from `configs/execution-costs.json` and pins its SHA |
 | funding history | requested only a recent page | paginates the exact inclusive study window and records coverage |
+| historical funding mark price | trusted an optional response field that is empty in early records | keeps the published rate/time and pins a complete official 8h mark-price series; empty values use the exact UTC bucket open with explicit provenance |
 
 A statistical PASS is downgraded to `INCONCLUSIVE` when the required funding
 series or its complete request-window evidence is missing. A statistical
@@ -41,6 +42,12 @@ Binance at <https://developers.binance.com/en/docs/catalog/core-trading-derivati
   `REJECT`: OOS return -17.20%, Sharpe -1.236, max drawdown 33.92%, and stress
   return -33.29%. All frozen parameter neighbors and the 15-minute delayed
   stress run were negative. This hypothesis is closed, not a tuning target.
+- The 2026-08-20 BTC/ETH weekly long-or-cash TSMOM study ended `REJECT` despite
+  complete public data and positive baseline OOS return: OOS return +9.93%,
+  Sharpe 0.305, max drawdown 48.61%, 2x-cost/5x-funding stress -45.83%, and
+  one-day delayed stress -41.45%. Both frozen lookback neighbors lost money
+  under stress and bootstrap confidence was 54.8%. The train/OOS decay and
+  ETH drag make this a closed hypothesis, not a promotion candidate.
 - A corrected result must be a new preregistration; changing the old study in
   place after seeing its outcome would contaminate the research record.
 
