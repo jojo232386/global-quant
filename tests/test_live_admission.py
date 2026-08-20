@@ -784,33 +784,38 @@ def test_strategy_implementation_must_be_candidate_ancestor(tmp_path, monkeypatc
     subprocess.run(["git", "commit", "-qm", "root"], cwd=tmp_path, check=True)
     root_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
 
-    subprocess.run(["git", "switch", "-qc", "candidate"], cwd=tmp_path, check=True)
-    marker.write_text("candidate\n")
-    subprocess.run(["git", "commit", "-qam", "candidate"], cwd=tmp_path, check=True)
-    candidate_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
-
-    subprocess.run(["git", "switch", "-qc", "result", root_sha], cwd=tmp_path, check=True)
+    subprocess.run(["git", "switch", "-qc", "unrelated", root_sha], cwd=tmp_path, check=True)
     unrelated = tmp_path / "unrelated"
     unrelated.write_text("branch\n")
     subprocess.run(["git", "add", "unrelated"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "unrelated"], cwd=tmp_path, check=True)
     unrelated_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
 
+    subprocess.run(["git", "switch", "-qc", "candidate", root_sha], cwd=tmp_path, check=True)
     result_path = tmp_path / "research" / "backtests" / "study-test" / "results.json"
     result_path.parent.mkdir(parents=True)
     result_path.write_text(json.dumps({"implementation_candidate_sha": root_sha}))
     subprocess.run(["git", "add", str(result_path.relative_to(tmp_path))], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-qm", "result"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "candidate result"], cwd=tmp_path, check=True)
+    candidate_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
 
     module = load_admission_cli()
     monkeypatch.setattr(module, "ROOT", tmp_path)
     loaded = module.load_committed_strategy_result(str(result_path), candidate_sha)
     assert loaded["implementation_candidate_sha"] == root_sha
 
+    # A post-clean-check worktree replacement must not change the candidate's
+    # committed research evidence.
     result_path.write_text(json.dumps({"implementation_candidate_sha": unrelated_sha}))
+    loaded = module.load_committed_strategy_result(str(result_path), candidate_sha)
+    assert loaded["implementation_candidate_sha"] == root_sha
+
     subprocess.run(["git", "commit", "-qam", "unrelated result"], cwd=tmp_path, check=True)
+    bad_candidate_sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
     with pytest.raises(ValueError, match="not an ancestor"):
-        module.load_committed_strategy_result(str(result_path), candidate_sha)
+        module.load_committed_strategy_result(str(result_path), bad_candidate_sha)
 
 
 def test_candidate_sha_rejects_hidden_index_flags(tmp_path) -> None:
