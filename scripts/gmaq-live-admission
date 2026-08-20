@@ -19,7 +19,7 @@ from gmaq_live import (
     committed_candidate_sha,
     evaluate_live_candidate,
     reconcile_binance_usdm_truth,
-    validate_live_config,
+    validated_live_config_sha256,
 )
 from gmaq_data import DataLayerError, default_data_root, verify_snapshot
 
@@ -423,18 +423,6 @@ def current_sha() -> str:
     return committed_candidate_sha(ROOT)
 
 
-def validated_config_sha256(path: str) -> str:
-    config = load_object(path)
-    errors = validate_live_config(config)
-    if errors:
-        raise ValueError("invalid proposed live config: " + ",".join(errors))
-    digest = hashlib.sha256()
-    with pathlib.Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gmaq-live-admission")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -461,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     try:
         candidate_sha = current_sha()
-        config_sha256 = validated_config_sha256(args.config)
+        config_sha256 = validated_live_config_sha256(args.config)
         if args.command == "truth":
             result = reconcile_binance_usdm_truth(
                 intent=load_object(args.intent),

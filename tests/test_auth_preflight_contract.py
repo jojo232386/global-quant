@@ -224,6 +224,8 @@ def test_cli_computes_identity_instead_of_accepting_claimed_digests() -> None:
     assert 'parser.add_argument("--config-sha256"' not in text
     assert "run_preflight(candidate_sha, config_sha256)" in text
     assert "committed_candidate_sha(ROOT)" in text
+    assert "validated_live_config_sha256(args.config)" in text
+    assert "def validated_config_sha256" not in text
 
 
 def test_unreachable_account_never_claims_portfolio_margin_or_verified_fees(
