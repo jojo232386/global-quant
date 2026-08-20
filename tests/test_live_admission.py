@@ -774,6 +774,16 @@ def test_admission_cli_bounds_evidence_bytes_and_rows(tmp_path, monkeypatch) -> 
         module.load_list(str(rows))
 
 
+def test_admission_cli_rejects_nonstandard_json_constants(tmp_path) -> None:
+    module = load_admission_cli()
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"value":NaN}')
+    with pytest.raises(ValueError, match="non-standard JSON constant"):
+        module.load_object(str(evidence))
+    with pytest.raises(ValueError, match="non-standard JSON constant"):
+        module._json_lines(b'{"value":Infinity}\n', "events.jsonl")
+
+
 def test_strategy_implementation_must_be_candidate_ancestor(tmp_path, monkeypatch) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)
@@ -803,6 +813,12 @@ def test_strategy_implementation_must_be_candidate_ancestor(tmp_path, monkeypatc
     monkeypatch.setattr(module, "ROOT", tmp_path)
     loaded = module.load_committed_strategy_result(str(result_path), candidate_sha)
     assert loaded["implementation_candidate_sha"] == root_sha
+
+    original_limit = module.MAX_EVIDENCE_FILE_BYTES
+    monkeypatch.setattr(module, "MAX_EVIDENCE_FILE_BYTES", 8)
+    with pytest.raises(ValueError, match="not a bounded evidence file"):
+        module.load_committed_strategy_result(str(result_path), candidate_sha)
+    monkeypatch.setattr(module, "MAX_EVIDENCE_FILE_BYTES", original_limit)
 
     # A post-clean-check worktree replacement must not change the candidate's
     # committed research evidence.
