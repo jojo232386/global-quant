@@ -13,6 +13,7 @@ import json
 import pathlib
 import sys
 import time
+import urllib.parse
 from importlib.machinery import SourceFileLoader
 
 
@@ -21,6 +22,8 @@ STUDY = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-weekly-tsmom"
 DEFAULT_OUT = ROOT / "user_data" / "data" / "tsmom"
 SYMBOLS = ("BTCUSDT", "ETHUSDT")
 DAY_MS = 86_400_000
+EIGHT_HOURS_MS = 8 * 3_600_000
+MARK_KLINES_URL = "https://fapi.binance.com/fapi/v1/markPriceKlines"
 
 
 def load_script(name: str, path: pathlib.Path):
@@ -57,6 +60,65 @@ def validate_daily_rows(rows: list[list], start_ms: int, end_ms: int) -> list[li
     return filtered
 
 
+def validate_mark_rows(rows: list[list], start_ms: int, end_ms: int) -> list[list]:
+    filtered = [row for row in rows if start_ms <= int(row[0]) < end_ms]
+    timestamps = [int(row[0]) for row in filtered]
+    expected = list(range(start_ms, end_ms, EIGHT_HOURS_MS))
+    if timestamps != expected:
+        raise ValueError(
+            f"8h mark-price coverage mismatch: expected={len(expected)} actual={len(timestamps)}"
+        )
+    for row in filtered:
+        if len(row) < 5 or min(map(float, row[1:5])) <= 0:
+            raise ValueError(f"invalid mark-price kline at {row[0]}")
+    return filtered
+
+
+def fetch_mark_rows(fetch_json, symbol: str, start_ms: int, end_ms: int) -> list[list]:
+    rows = []
+    cursor = start_ms
+    while cursor < end_ms:
+        query = urllib.parse.urlencode(
+            {
+                "symbol": symbol,
+                "interval": "8h",
+                "startTime": cursor,
+                "endTime": end_ms,
+                "limit": 1500,
+            }
+        )
+        batch = fetch_json(f"{MARK_KLINES_URL}?{query}")
+        if not batch:
+            raise RuntimeError(f"mark-price fetch failed at cursor {cursor}")
+        rows.extend(batch)
+        last_open = int(batch[-1][0])
+        if last_open <= cursor:
+            break
+        cursor = last_open + 1
+        time.sleep(0.3)
+    return validate_mark_rows(rows, start_ms, end_ms)
+
+
+def fill_missing_mark_prices(records: list[dict], mark_rows: list[list]) -> tuple[list[dict], int]:
+    marks = {int(row[0]): str(row[1]) for row in mark_rows}
+    completed = []
+    fallback_count = 0
+    for original in records:
+        item = dict(original)
+        value = str(item.get("markPrice") or "")
+        if value and float(value) > 0:
+            item["markPriceSource"] = "fundingRate_response"
+        else:
+            bucket = int(item["fundingTime"]) // EIGHT_HOURS_MS * EIGHT_HOURS_MS
+            if bucket not in marks:
+                raise ValueError(f"no 8h mark-price fallback for funding event {item['fundingTime']}")
+            item["markPrice"] = marks[bucket]
+            item["markPriceSource"] = "fapi_8h_mark_kline_open_fallback"
+            fallback_count += 1
+        completed.append(item)
+    return completed, fallback_count
+
+
 def validate_funding(records: list[dict], start_ms: int, end_ms: int, complete: bool) -> list[dict]:
     if not complete:
         raise ValueError("funding request window incomplete")
@@ -68,7 +130,10 @@ def validate_funding(records: list[dict], start_ms: int, end_ms: int, complete: 
         raise ValueError("funding edge coverage is incomplete")
     for item in filtered:
         float(item["fundingRate"])
-        if float(item["markPrice"]) <= 0:
+        if float(item["markPrice"]) <= 0 or item.get("markPriceSource") not in {
+            "fundingRate_response",
+            "fapi_8h_mark_kline_open_fallback",
+        }:
             raise ValueError("funding event mark price is missing or invalid")
     return filtered
 
@@ -97,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_klines": fetcher.KLINES_URL,
         "source_funding": multi.FUNDING_URL,
+        "source_mark_klines": MARK_KLINES_URL,
         "start_inclusive": args.start,
         "end_exclusive": args.end,
         "interval": "1d",
@@ -113,7 +179,27 @@ def main(argv: list[str] | None = None) -> int:
         kline_path = out_dir / f"{symbol}-1d.jsonl"
         kline_path.write_text(kline_payload)
 
+        mark_rows = fetch_mark_rows(fetcher.get_json, symbol, start_ms, end_ms)
+        mark_payload = "".join(
+            json.dumps(
+                {
+                    "open_time_utc_ms": int(row[0]),
+                    "open": row[1],
+                    "high": row[2],
+                    "low": row[3],
+                    "close": row[4],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n"
+            for row in mark_rows
+        )
+        mark_path = out_dir / f"{symbol}-mark-8h.jsonl"
+        mark_path.write_text(mark_payload)
+
         funding, complete = multi.fetch_funding_history(symbol, start_ms, end_ms - 1)
+        funding, fallback_count = fill_missing_mark_prices(funding, mark_rows)
         funding = validate_funding(funding, start_ms, end_ms, complete)
         funding_payload = "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in funding)
         funding_path = out_dir / f"{symbol}-funding.jsonl"
@@ -126,11 +212,15 @@ def main(argv: list[str] | None = None) -> int:
             "klines_path": str(kline_path.relative_to(ROOT)),
             "klines_sha256": sha256_bytes(kline_payload.encode()),
             "funding_records": len(funding),
+            "funding_mark_price_fallback_records": fallback_count,
             "first_funding_utc_ms": int(funding[0]["fundingTime"]),
             "last_funding_utc_ms": int(funding[-1]["fundingTime"]),
             "funding_path": str(funding_path.relative_to(ROOT)),
             "funding_sha256": sha256_bytes(funding_payload.encode()),
             "funding_request_window_complete": True,
+            "mark_8h_bars": len(mark_rows),
+            "mark_8h_path": str(mark_path.relative_to(ROOT)),
+            "mark_8h_sha256": sha256_bytes(mark_payload.encode()),
         }
         print(f"OK {symbol}: {len(rows)} daily bars, {len(funding)} funding records")
 

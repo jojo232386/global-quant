@@ -41,8 +41,8 @@ def test_funding_validation_rejects_duplicate_or_edge_gap() -> None:
     start = 1_700_000_000_000
     end = start + 2 * DAY_MS
     good = [
-        {"fundingTime": start + 8 * 3_600_000, "fundingRate": "0.001", "markPrice": "100"},
-        {"fundingTime": start + DAY_MS + 16 * 3_600_000, "fundingRate": "-0.001", "markPrice": "101"},
+        {"fundingTime": start + 8 * 3_600_000, "fundingRate": "0.001", "markPrice": "100", "markPriceSource": "fundingRate_response"},
+        {"fundingTime": start + DAY_MS + 16 * 3_600_000, "fundingRate": "-0.001", "markPrice": "101", "markPriceSource": "fundingRate_response"},
     ]
     assert module.validate_funding(good, start, end, True) == good
     for bad in (good + [good[-1]], []):
@@ -52,6 +52,22 @@ def test_funding_validation_rejects_duplicate_or_edge_gap() -> None:
             pass
         else:
             raise AssertionError("invalid funding coverage was accepted")
+
+
+def test_empty_funding_mark_price_uses_pinned_8h_open() -> None:
+    module = load("tsmom_fetch_mark_fallback", FETCH_SCRIPT)
+    bucket = 1_700_006_400_000
+    bucket -= bucket % module.EIGHT_HOURS_MS
+    records = [
+        {"fundingTime": bucket + 7, "fundingRate": "0.0001", "markPrice": ""},
+        {"fundingTime": bucket + module.EIGHT_HOURS_MS, "fundingRate": "0.0002", "markPrice": "123"},
+    ]
+    mark_rows = [row(bucket, 111.0, 112.0), row(bucket + module.EIGHT_HOURS_MS, 120.0, 121.0)]
+    completed, fallback_count = module.fill_missing_mark_prices(records, mark_rows)
+    assert fallback_count == 1
+    assert completed[0]["markPrice"] == "111.0"
+    assert completed[0]["markPriceSource"] == "fapi_8h_mark_kline_open_fallback"
+    assert completed[1]["markPriceSource"] == "fundingRate_response"
 
 
 def synthetic_data(start: int, days: int) -> dict:
