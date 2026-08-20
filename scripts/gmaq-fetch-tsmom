@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Fetch the preregistered BTC/ETH daily TSMOM dataset.
+
+Uses only Binance USD-M public endpoints. The output lives under ignored
+user_data/data and is pinned by SHA-256 in a manifest. No credential is read.
+"""
+
+import argparse
+import calendar
+import hashlib
+import importlib.util
+import json
+import pathlib
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+STUDY = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-weekly-tsmom"
+DEFAULT_OUT = ROOT / "user_data" / "data" / "tsmom"
+SYMBOLS = ("BTCUSDT", "ETHUSDT")
+DAY_MS = 86_400_000
+
+
+def load_script(name: str, path: pathlib.Path):
+    loader = SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def validate_daily_rows(rows: list[list], start_ms: int, end_ms: int) -> list[list]:
+    """Return the exact [start, end) daily window or fail on any gap."""
+    filtered = [row for row in rows if start_ms <= int(row[0]) < end_ms]
+    timestamps = [int(row[0]) for row in filtered]
+    expected = list(range(start_ms, end_ms, DAY_MS))
+    if timestamps != expected:
+        missing = sorted(set(expected) - set(timestamps))
+        duplicates = len(timestamps) - len(set(timestamps))
+        raise ValueError(
+            f"daily kline coverage mismatch: expected={len(expected)} "
+            f"actual={len(timestamps)} missing={missing[:3]} duplicates={duplicates}"
+        )
+    for row in filtered:
+        if len(row) < 6:
+            raise ValueError("daily kline row is incomplete")
+        open_price, high, low, close = map(float, row[1:5])
+        if min(open_price, high, low, close) <= 0 or high < max(open_price, close) or low > min(open_price, close):
+            raise ValueError(f"invalid OHLC at {row[0]}")
+    return filtered
+
+
+def validate_funding(records: list[dict], start_ms: int, end_ms: int, complete: bool) -> list[dict]:
+    if not complete:
+        raise ValueError("funding request window incomplete")
+    filtered = [item for item in records if start_ms <= int(item["fundingTime"]) < end_ms]
+    timestamps = [int(item["fundingTime"]) for item in filtered]
+    if not filtered or timestamps != sorted(set(timestamps)):
+        raise ValueError("funding timestamps are empty, duplicated, or unsorted")
+    if timestamps[0] > start_ms + DAY_MS or timestamps[-1] < end_ms - DAY_MS:
+        raise ValueError("funding edge coverage is incomplete")
+    for item in filtered:
+        float(item["fundingRate"])
+        if float(item["markPrice"]) <= 0:
+            raise ValueError("funding event mark price is missing or invalid")
+    return filtered
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-fetch-tsmom")
+    parser.add_argument("--start", default="2020-01-01", help="inclusive UTC date")
+    parser.add_argument("--end", default="2026-08-20", help="exclusive UTC date")
+    parser.add_argument("--out-dir", default=str(DEFAULT_OUT))
+    args = parser.parse_args(argv)
+
+    start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
+    end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
+    if end_ms <= start_ms:
+        parser.error("end must be later than start")
+
+    fetcher = load_script("gmaq_tsmom_klines", ROOT / "scripts" / "gmaq-fetch-klines")
+    multi = load_script("gmaq_tsmom_funding", ROOT / "scripts" / "gmaq-fetch-multi")
+    universe = load_script("gmaq_tsmom_symbols", ROOT / "scripts" / "gmaq-fetch-universe")
+    out_dir = pathlib.Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "schema_version": 1,
+        "study_id": STUDY.name,
+        "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source_klines": fetcher.KLINES_URL,
+        "source_funding": multi.FUNDING_URL,
+        "start_inclusive": args.start,
+        "end_exclusive": args.end,
+        "interval": "1d",
+        "symbols": {},
+        "preregistration_sha256": sha256_bytes((STUDY / "preregistration.md").read_bytes()),
+        "credential_scope": "public_endpoints_only",
+    }
+
+    for raw_symbol in SYMBOLS:
+        symbol = universe.validate_symbol(raw_symbol)
+        rows = fetcher.fetch_range(symbol, start_ms, end_ms, "1d", strict=True)
+        rows = validate_daily_rows(rows, start_ms, end_ms)
+        kline_payload = "".join(line + "\n" for line in fetcher.serialize(rows))
+        kline_path = out_dir / f"{symbol}-1d.jsonl"
+        kline_path.write_text(kline_payload)
+
+        funding, complete = multi.fetch_funding_history(symbol, start_ms, end_ms - 1)
+        funding = validate_funding(funding, start_ms, end_ms, complete)
+        funding_payload = "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in funding)
+        funding_path = out_dir / f"{symbol}-funding.jsonl"
+        funding_path.write_text(funding_payload)
+
+        manifest["symbols"][symbol] = {
+            "bars": len(rows),
+            "first_bar_utc_ms": int(rows[0][0]),
+            "last_bar_utc_ms": int(rows[-1][0]),
+            "klines_path": str(kline_path.relative_to(ROOT)),
+            "klines_sha256": sha256_bytes(kline_payload.encode()),
+            "funding_records": len(funding),
+            "first_funding_utc_ms": int(funding[0]["fundingTime"]),
+            "last_funding_utc_ms": int(funding[-1]["fundingTime"]),
+            "funding_path": str(funding_path.relative_to(ROOT)),
+            "funding_sha256": sha256_bytes(funding_payload.encode()),
+            "funding_request_window_complete": True,
+        }
+        print(f"OK {symbol}: {len(rows)} daily bars, {len(funding)} funding records")
+
+    canonical = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    manifest["manifest_payload_sha256"] = sha256_bytes(canonical.encode())
+    manifest_path = out_dir / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({"ok": True, "manifest": str(manifest_path), "symbols": list(manifest["symbols"])}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
