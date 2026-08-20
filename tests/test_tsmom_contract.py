@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 from importlib.machinery import SourceFileLoader
 
+import pytest
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FETCH_SCRIPT = ROOT / "scripts" / "gmaq-fetch-tsmom"
@@ -69,6 +71,23 @@ def test_empty_funding_mark_price_uses_pinned_8h_open() -> None:
     assert completed[0]["markPrice"] == "111.0"
     assert completed[0]["markPriceSource"] == "fapi_8h_mark_kline_open_fallback"
     assert completed[1]["markPriceSource"] == "fundingRate_response"
+
+
+def test_fetcher_binds_only_a_regular_preregistration(tmp_path, monkeypatch) -> None:
+    module = load("tsmom_fetch_study_binding", FETCH_SCRIPT)
+    monkeypatch.setattr(module, "BACKTESTS", tmp_path)
+    study = tmp_path / "study-forward"
+    study.mkdir()
+    preregistration = study / "preregistration.md"
+    preregistration.write_text("locked\n")
+    assert module.study_preregistration("study-forward") == preregistration
+
+    with pytest.raises(ValueError, match="flat"):
+        module.study_preregistration("../study-forward")
+    preregistration.unlink()
+    preregistration.symlink_to(tmp_path / "outside.md")
+    with pytest.raises(ValueError, match="regular file"):
+        module.study_preregistration("study-forward")
 
 
 def synthetic_data(start: int, days: int) -> dict:
