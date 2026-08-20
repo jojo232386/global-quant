@@ -18,6 +18,7 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
         assert exercise in text, f"missing exercise: {exercise}"
     flat = " ".join(text.split())
     assert "48–72 hours" in flat
+    assert "suspended host time never counts" in flat
     assert "zero open positions" in flat
     assert "zero open orders" in flat
     assert "A zero-trade soak fails" in flat
@@ -58,6 +59,10 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert 'complete_canary_trade_ids' in text
     assert 'closed_sides_by_trade' in text
     assert 'no complete post-baseline canary trade lifecycle' in text
+    assert 'MAX_LOOP_GAP_SECONDS=300' in text
+    assert 'LOOP_GAP_SECONDS < 0 || LOOP_GAP_SECONDS > MAX_LOOP_GAP_SECONDS' in text
+    assert 'while true; do' in text and 'NOW >= END_EPOCH' in text
+    assert 'continuous soak monitor gap is invalid' in text
     assert "runtime-binding.json" in text
     assert "initial-audit-verify.json" in text
     assert text.count("final-audit-verify.json") >= 2

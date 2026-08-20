@@ -22,6 +22,8 @@ Completion of the soak removes exactly one blocker from
   runtime binding, health, audit chain and zero-state reconciliation while the
   entry gate remains `DISARMED`. It never counts as 48–72h evidence.
 - Duration: 48–72 hours continuous. A run shorter than 48h is not evidence.
+- A monitor-loop gap over five minutes or a backward host-clock jump fails the
+  run; suspended host time never counts toward continuous duration.
 
 ## Entry gates (before starting the clock)
 
