@@ -51,13 +51,14 @@ evidence does.
 
 - Dedicated account/subaccount ownership and sole-operator status are unverified.
 - One-way and Single-Asset account modes are unverified.
-- A 2026-08-16 read-only snapshot reported maker 2 bps, taker 5 bps and
-  tier-1 MMR 0.4%, but the current candidate has no same-day, version-bound
-  account evidence. Committed research values remain placeholders.
-- NEW: the verified account is a Portfolio Margin account (unified margin,
-  hedge position mode). The canary isolated-margin/one-way layout must be
-  adapted, or a classic USD-M futures account used, before any live
-  proposal; hedge mode must be switched to one-way.
+- A 2026-08-16 read-only snapshot reported maker 2 bps, taker 5 bps,
+  tier-1 MMR 0.4%, and a Portfolio Margin layout. None of those historical
+  values is accepted as current, version-bound account evidence; committed
+  research values remain placeholders.
+- The 2026-08-20 read-only preflight reached neither the classic USD-M nor
+  Portfolio Margin account endpoint: both returned Binance `-2015`. The
+  account type, position/margin modes, fee rates, and tier-1 MMR therefore
+  remain `UNVERIFIED`; no account layout may be inferred from those failures.
 - Quantitative-rule headroom, regional eligibility, and API permission
   behavior are unverified.
 - Live stake/loss/notional numbers are not approved.
