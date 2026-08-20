@@ -46,13 +46,13 @@ Each exercise appends an audit record and is listed in the evidence table.
 | # | exercise | frequency | expected evidence |
 |---|---|---|---|
 | E1 | health sample | every 6h | HEALTHY verdict records |
-| E2 | reconcile | every 6h | OK verdicts, unique identities |
+| E2 | reconcile | every 6h | MATCH verdicts, unique identities |
 | E3 | pause / resume | 2x per 24h | state transitions in journal |
 | E4 | clean restart | 1x per 24h | recovery with zero duplicate trades/orders |
 | E5 | short network interruption | 1x | runtime survives, no unaccounted state |
 | E6 | stopped-database backup/restore | 1x | restored runtime equals pre-backup state |
-| E7 | FreqUI reconnection | 2x | UI reachable at 127.0.0.1:8080 after reconnect |
-| E8 | duplicate identity scan | every 12h | no repeated trade/order ids in the journal |
+| E7 | API reconnection | 2x | bound API ping reachable after reconnect |
+| E8 | duplicate identity scan | every 12h | database trade/order ids and audit sequences remain unique |
 
 ## Exit criteria (all mandatory)
 
@@ -81,7 +81,6 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 - `reconcile-records.jsonl`: E2 verdict records.
 - `trade-baseline.json` and `trade-lifecycle.json`: the pre-E0 database
   identity boundary and proof of a complete post-baseline canary round trip.
-- `restart-recovery.md`: E4/E5 evidence and any anomalies observed.
 - `backup-restore.md`: E6 steps and comparison result.
 - `final-exit.json`: the final reconcile record proving zero positions and
   zero open orders.
