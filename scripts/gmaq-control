@@ -1,0 +1,1415 @@
+#!/usr/bin/env python3
+"""GMAQ control plane (dry-run scope).
+
+Subcommands:
+  preflight   Fail-closed readiness check of the whole control surface.
+  health      Heartbeat, clock offset, data freshness, and count verdict.
+  reconcile   Cross-check the bot REST view against the audit journal.
+  audit       Append an audit record or verify the audit hash chain.
+  kill        Independent kill switch; works without bot cooperation.
+
+All secrets stay inside environment variables and are never printed.
+"""
+
+import argparse
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+import fcntl
+import functools
+import hashlib
+import json
+import math
+import os
+import pathlib
+import re
+import secrets
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CONFIG_PATH = ROOT / "user_data" / "config.json"
+COMPOSE_PATH = ROOT / "docker-compose.yml"
+STRATEGY_PATH = ROOT / "user_data" / "strategies" / "LiveExecutionCanaryStrategy.py"
+ENV_PATH = ROOT / ".env"
+AUDIT_DIR = ROOT / "user_data" / "audit"
+AUDIT_PATH = AUDIT_DIR / "manifest.jsonl"
+AUDIT_LOCK_PATH = AUDIT_DIR / ".manifest.lock"
+STATE_PATH = AUDIT_DIR / "state.json"
+BINDING_PATH = AUDIT_DIR / "runtime-binding.json"
+
+API_BASE = os.environ.get("GMAQ_API_BASE", "http://127.0.0.1:8080")
+BINANCE_TIME_URL = "https://fapi.binance.com/fapi/v1/time"
+CLOCK_OFFSET_LIMIT_S = 2.0
+NETWORK_TIMEOUT_S = 5
+TIMEFRAME_SECONDS = 15 * 60
+TELEGRAM_API = "https://api.telegram.org"
+ALERT_FAIL_VERDICTS = {"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH", "TIMEOUT"}
+GATE_SCHEMA_VERSION = 1
+DRY_RUN_ENVIRONMENT = "dry_run"
+DRY_RUN_SCOPE = "DEMO_DRY_RUN_ENTRY"
+PREFLIGHT_TTL_S = 15 * 60
+MAX_ARM_TTL_S = 60 * 60
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._:-]{8,96}$")
+_TRANSITION_THREAD_LOCK = threading.RLock()
+
+ALLOWED_TRANSITIONS = {
+    "DISARMED": {"PREFLIGHTING"},
+    "PREFLIGHTING": {"PREFLIGHT_PASS", "DISARMED"},
+    "PREFLIGHT_PASS": {"ARMED"},
+    "ARMED": {"PAUSED", "KILLED"},
+    "PAUSED": {"ARMED", "KILLED"},
+    "KILLED": {"DISARMED"},
+}
+
+
+@contextmanager
+def transition_lock():
+    """Serialize authorization state transitions across threads and processes."""
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    with _TRANSITION_THREAD_LOCK:
+        with (AUDIT_DIR / ".state-transition.lock").open("a+") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+def serialized_transition(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with transition_lock():
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
+def fail(message: str, **extra) -> dict:
+    return {"ok": False, "verdict": "FAIL", "error": message, **extra}
+
+
+def ok(verdict: str, **extra) -> dict:
+    return {"ok": True, "verdict": verdict, **extra}
+
+
+def client_order_id(pair: str, env: str = "dryrun") -> str:
+    """Unique client-order identity: gmaq-<env>-<pair>-<utc-micros>-<8 b32>."""
+    sanitized = "".join(c if c.isalnum() else "-" for c in pair).strip("-").lower()
+    stamp = f"{int(time.time() * 1_000_000):016d}"
+    suffix = secrets.token_urlsafe(6).rstrip("=").lower()
+    return f"gmaq-{env}-{sanitized}-{stamp}-{suffix}"
+
+
+def allowed_transition(current: str, target: str) -> bool:
+    return target in ALLOWED_TRANSITIONS.get(current, set())
+
+
+def serialize(line: dict) -> str:
+    return json.dumps(line, sort_keys=True, ensure_ascii=False)
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_config() -> dict:
+    return json.loads(CONFIG_PATH.read_text())
+
+
+def config_is_credential_free(config: dict) -> bool:
+    exchange = config.get("exchange", {})
+    return config.get("dry_run") is True and not exchange.get("key") and not exchange.get("secret")
+
+
+def strategy_has_protections() -> tuple[bool, list[str]]:
+    text = STRATEGY_PATH.read_text()
+    missing = [
+        name
+        for name in ("StoplossGuard", "MaxDrawdown", "CooldownPeriod")
+        if f'"{name}"' not in text
+    ]
+    return (not missing), missing
+
+
+def read_env() -> dict:
+    if not ENV_PATH.exists():
+        return {}
+    values = {}
+    for line in ENV_PATH.read_text().splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip()
+    return values
+
+
+def alert_channels(env: dict) -> list[str]:
+    channels = []
+    if env.get("GMAQ_ALERT_WEBHOOK_URL"):
+        channels.append("webhook")
+    if env.get("GMAQ_TELEGRAM_BOT_TOKEN") and env.get("GMAQ_TELEGRAM_CHAT_ID"):
+        channels.append("telegram")
+    return channels
+
+
+def deliver_alert(env: dict, event: str, payload: dict) -> dict:
+    """Deliver an operator alert. The payload never contains credentials."""
+    channels = alert_channels(env)
+    delivered = []
+    if "webhook" in channels:
+        try:
+            request = urllib.request.Request(
+                env["GMAQ_ALERT_WEBHOOK_URL"],
+                data=json.dumps({"event": event, **payload}, ensure_ascii=False).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S):
+                delivered.append("webhook")
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            pass
+    if "telegram" in channels:
+        token = env["GMAQ_TELEGRAM_BOT_TOKEN"]
+        chat = env["GMAQ_TELEGRAM_CHAT_ID"]
+        message = f"GMAQ alert: {event} {json.dumps(payload, ensure_ascii=False)}"
+        url = (
+            f"{TELEGRAM_API}/bot{token}/sendMessage?"
+            + urllib.parse.urlencode({"chat_id": chat, "text": message})
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=NETWORK_TIMEOUT_S):
+                delivered.append("telegram")
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+            pass
+    return {"channels_configured": channels, "delivered": delivered, "sent": bool(delivered)}
+
+
+def dispatch_alert(event: str, verdict: str, **payload) -> dict:
+    """Send an alert through configured channels and record it in the audit
+    journal. Failing to deliver is itself recorded, never silent."""
+    env = read_env()
+    record = deliver_alert(env, event, {"verdict": verdict, **payload})
+    append_audit(
+        "alert",
+        "gmaq-control",
+        refs={
+            "event": event,
+            "verdict": verdict,
+            "channels": record["channels_configured"],
+            "delivered": record["delivered"],
+        },
+        verdict=(
+            "DELIVERED"
+            if record["sent"]
+            else ("NO_CHANNELS" if not record["channels_configured"] else "DELIVERY_FAILED")
+        ),
+    )
+    return record
+
+
+def read_audit_chain() -> list[dict]:
+    if not AUDIT_PATH.exists():
+        return []
+    try:
+        chain = [json.loads(line) for line in AUDIT_PATH.read_text().splitlines() if line.strip()]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("audit journal is corrupt or unreadable") from error
+    if not all(isinstance(record, dict) for record in chain):
+        raise ValueError("audit journal contains a non-object record")
+    return chain
+
+
+def audit_chain_valid(chain: list[dict]) -> tuple[bool, str]:
+    for index, line in enumerate(chain):
+        if line.get("seq") != index + 1:
+            return False, f"invalid sequence at record {line.get('seq')}"
+        expected = "" if index == 0 else sha256_text(serialize(chain[index - 1]))
+        if line.get("prev_sha") != expected:
+            return False, f"chain broken at record {line.get('seq')}"
+    return True, "chain ok"
+
+
+def append_audit(event: str, actor: str, refs: dict | None = None, verdict: str = "OK") -> dict:
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    with AUDIT_LOCK_PATH.open("a+") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                chain = read_audit_chain()
+            except ValueError as error:
+                return fail(f"refusing to append: {error}")
+            valid, reason = audit_chain_valid(chain)
+            if chain and not valid:
+                return fail(f"refusing to append: {reason}")
+            prev_sha = sha256_text(serialize(chain[-1])) if chain else ""
+            line = {
+                "seq": (chain[-1]["seq"] + 1) if chain else 1,
+                "ts_utc": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+                "actor": actor,
+                "event": event,
+                "verdict": verdict,
+                "refs": {**audit_identity_context(), **(refs or {})},
+                "prev_sha": prev_sha,
+            }
+            encoded = (serialize(line) + "\n").encode("utf-8")
+            descriptor = os.open(AUDIT_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(descriptor, encoded)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            return ok("APPENDED", seq=line["seq"], record_sha=sha256_text(serialize(line)))
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+def read_state() -> dict:
+    if not STATE_PATH.exists():
+        return {"state": "DISARMED"}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except json.JSONDecodeError:
+        return {"state": "DISARMED"}
+
+
+def write_json_atomic(path: pathlib.Path, payload: dict) -> None:
+    AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        encoded = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+        os.write(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, path)
+    directory_descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
+def write_state(state: str, **extra) -> None:
+    write_json_atomic(
+        STATE_PATH,
+        {"schema_version": GATE_SCHEMA_VERSION, "state": state, **extra},
+    )
+
+
+def read_object_strict(path: pathlib.Path, label: str) -> tuple[dict | None, str | None]:
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None, f"{label} missing"
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, f"{label} corrupt"
+    if not isinstance(value, dict):
+        return None, f"{label} is not an object"
+    return value, None
+
+
+def audit_identity_context() -> dict:
+    context = {
+        "candidate_sha": None,
+        "tree_sha": None,
+        "config_sha256": None,
+        "image_digest": None,
+        "run_id": None,
+        "environment": None,
+        "gate_state": None,
+    }
+    binding, _ = read_object_strict(BINDING_PATH, "runtime binding")
+    if binding:
+        for key in ("candidate_sha", "config_sha256", "run_id", "environment"):
+            context[key] = binding.get(key)
+    state, _ = read_object_strict(STATE_PATH, "state")
+    if state:
+        context["gate_state"] = state.get("state")
+    context["tree_sha"] = git_text("rev-parse", "HEAD^{tree}")
+    try:
+        compose_text = COMPOSE_PATH.read_text()
+    except (OSError, UnicodeDecodeError):
+        compose_text = ""
+    match = re.search(r"@(?P<digest>sha256:[0-9a-f]{64})", compose_text)
+    if match:
+        context["image_digest"] = match.group("digest")
+    return context
+
+
+def git_text(*args: str) -> str | None:
+    try:
+        process = subprocess.run(
+            ["git", "-C", str(ROOT), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    return process.stdout.strip()
+
+
+def binding_fields(binding: dict) -> dict:
+    return {
+        "environment": binding["environment"],
+        "candidate_sha": binding["candidate_sha"],
+        "config_sha256": binding["config_sha256"],
+        "run_id": binding["run_id"],
+    }
+
+
+def validated_runtime_binding() -> tuple[dict | None, str | None]:
+    binding, error = read_object_strict(BINDING_PATH, "runtime binding")
+    if error:
+        return None, error
+    assert binding is not None
+    if binding.get("schema_version") != GATE_SCHEMA_VERSION:
+        return None, "runtime binding schema mismatch"
+    if binding.get("environment") != DRY_RUN_ENVIRONMENT:
+        return None, "runtime binding is not dry_run"
+    candidate_sha = binding.get("candidate_sha", "")
+    config_sha = binding.get("config_sha256", "")
+    run_id = binding.get("run_id", "")
+    if not GIT_SHA_RE.fullmatch(candidate_sha):
+        return None, "runtime candidate SHA invalid"
+    if not SHA256_RE.fullmatch(config_sha):
+        return None, "runtime config SHA invalid"
+    if not IDENTIFIER_RE.fullmatch(run_id):
+        return None, "runtime run id invalid"
+    current_head = git_text("rev-parse", "HEAD")
+    if current_head is None:
+        return None, "unable to read checkout candidate SHA"
+    if current_head != candidate_sha:
+        return None, "runtime candidate SHA does not match checkout"
+    if sha256_file(CONFIG_PATH) != config_sha:
+        return None, "runtime config SHA does not match config"
+    return binding, None
+
+
+@serialized_transition
+def bind_runtime(
+    run_id: str,
+    candidate_sha: str,
+    config_sha256: str,
+    environment: str,
+) -> dict:
+    if environment != DRY_RUN_ENVIRONMENT:
+        return fail("this control plane binds dry_run runtimes only")
+    if not IDENTIFIER_RE.fullmatch(run_id):
+        return fail("invalid run id")
+    if not GIT_SHA_RE.fullmatch(candidate_sha):
+        return fail("invalid candidate SHA")
+    if not SHA256_RE.fullmatch(config_sha256):
+        return fail("invalid config SHA")
+    current_head = git_text("rev-parse", "HEAD")
+    if current_head is None:
+        return fail("unable to read checkout candidate SHA")
+    if current_head != candidate_sha:
+        return fail("candidate SHA does not match checkout")
+    tracked_status = git_text("status", "--porcelain", "--untracked-files=no")
+    if tracked_status is None:
+        return fail("unable to verify tracked worktree status")
+    if tracked_status:
+        return fail("tracked worktree is dirty")
+    if sha256_file(CONFIG_PATH) != config_sha256:
+        return fail("config SHA does not match config")
+    config = load_config()
+    if not config_is_credential_free(config):
+        return fail("runtime binding requires credential-free dry_run config")
+
+    now = int(time.time())
+    binding = {
+        "schema_version": GATE_SCHEMA_VERSION,
+        "environment": environment,
+        "candidate_sha": candidate_sha,
+        "config_sha256": config_sha256,
+        "run_id": run_id,
+        "bound_at_epoch": now,
+    }
+    write_json_atomic(BINDING_PATH, binding)
+    write_state("DISARMED", **binding_fields(binding), reason="runtime_bound")
+    audit_result = append_audit(
+        "runtime-bind",
+        "gmaq-control",
+        refs=binding_fields(binding),
+        verdict="DISARMED",
+    )
+    if not audit_result.get("ok"):
+        write_state("DISARMED", **binding_fields(binding), reason="audit_append_failed")
+        return fail("runtime bound but audit append failed; entry remains disabled")
+    return ok("BOUND_DISARMED", **binding_fields(binding))
+
+
+@serialized_transition
+def disarm(reason: str = "operator_disarm") -> dict:
+    binding, error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    write_state("DISARMED", **fields, reason=reason)
+    result = append_audit("disarm", "gmaq-control", refs={"reason": reason, **fields}, verdict="DISARMED")
+    if not result.get("ok"):
+        return fail("entry disabled but audit append failed", binding_error=error)
+    return ok("DISARMED", reason=reason, binding_error=error)
+
+
+@serialized_transition
+def arm(authorization_id: str, ttl_seconds: int) -> dict:
+    if not IDENTIFIER_RE.fullmatch(authorization_id):
+        return fail("authorization id must be 8-96 safe characters")
+    if ttl_seconds < 30 or ttl_seconds > MAX_ARM_TTL_S:
+        return fail(f"ttl must be between 30 and {MAX_ARM_TTL_S} seconds")
+    binding, error = validated_runtime_binding()
+    if error:
+        return fail(error)
+    assert binding is not None
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "PREFLIGHT_PASS":
+        return fail("arm requires current state PREFLIGHT_PASS")
+    fields = binding_fields(binding)
+    if any(state.get(key) != value for key, value in fields.items()):
+        return fail("preflight state binding mismatch")
+    if state.get("preflight_verdict") != "PASS":
+        return fail("preflight verdict is not PASS")
+    now = int(time.time())
+    if int(state.get("preflight_expires_at_epoch", 0)) <= now:
+        return fail("preflight expired; run preflight again")
+
+    expires_at = now + ttl_seconds
+    refs = {
+        **fields,
+        "authorization_id": authorization_id,
+        "authorization_scope": DRY_RUN_SCOPE,
+        "issued_at_epoch": now,
+        "expires_at_epoch": expires_at,
+    }
+    audit_result = append_audit("arm", "gmaq-control", refs=refs, verdict="ARMED")
+    if not audit_result.get("ok"):
+        write_state("DISARMED", **fields, reason="arm_audit_failed")
+        return fail("authorization audit append failed; entry remains disabled")
+    write_state(
+        "ARMED",
+        **fields,
+        preflight_verdict="PASS",
+        authorization_id=authorization_id,
+        authorization_scope=DRY_RUN_SCOPE,
+        issued_at_epoch=now,
+        expires_at_epoch=expires_at,
+        authorization_audit_seq=audit_result["seq"],
+        authorization_audit_sha=audit_result["record_sha"],
+    )
+    return ok("ARMED", expires_at_epoch=expires_at, authorization_scope=DRY_RUN_SCOPE)
+
+
+@serialized_transition
+def pause() -> dict:
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "ARMED":
+        return fail("pause requires current state ARMED")
+    binding, error = validated_runtime_binding()
+    if error:
+        return fail(error)
+    assert binding is not None
+    fields = binding_fields(binding)
+    write_state("PAUSED", **fields, reason="operator_pause")
+    append_result = append_audit("pause", "gmaq-control", refs=fields, verdict="PAUSED")
+    if not append_result.get("ok"):
+        return fail("entry paused but audit append failed")
+    return ok("PAUSED")
+
+
+@serialized_transition
+def recover() -> dict:
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error:
+        return fail(error)
+    assert state is not None
+    if state.get("state") != "KILLED":
+        return fail("recover requires current state KILLED")
+    binding, error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    write_state("DISARMED", **fields, reason="recover_requires_new_preflight")
+    append_result = append_audit("recover", "gmaq-control", refs=fields, verdict="DISARMED")
+    if not append_result.get("ok"):
+        return fail("recovered to disabled state but audit append failed", binding_error=error)
+    return ok("RECOVERED_DISARMED", binding_error=error)
+
+
+def exchange_time_offset_s() -> float | None:
+    try:
+        with urllib.request.urlopen(BINANCE_TIME_URL, timeout=NETWORK_TIMEOUT_S) as response:
+            payload = json.loads(response.read().decode())
+        server_ms = int(payload["serverTime"])
+    except (urllib.error.URLError, KeyError, ValueError, OSError):
+        return None
+    return time.time() - server_ms / 1000.0
+
+
+def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, object]:
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Basic {token}"
+    request = urllib.request.Request(f"{API_BASE}{path}", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+            body = response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, None
+    except (urllib.error.URLError, OSError):
+        return 0, None
+    try:
+        return 200, json.loads(body)
+    except json.JSONDecodeError:
+        return 200, body
+
+
+def api_login(env: dict) -> str | None:
+    """HTTP Basic credential header. This deployment's Freqtrade accepts
+    Basic auth for REST endpoints (verified 2026-08-16); the JWT token
+    endpoint returned 401, so we use the working path. Credentials stay in
+    the header and are never printed."""
+    username = env.get("GMAQ_API_USERNAME", "")
+    password = env.get("GMAQ_API_PASSWORD", "")
+    if not username or not password:
+        return None
+    import base64
+
+    return base64.b64encode(f"{username}:{password}".encode()).decode()
+
+
+def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, object]:
+    body = json.dumps(payload or {}).encode()
+    request = urllib.request.Request(
+        f"{API_BASE}{path}",
+        data=body,
+        headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+            return response.status, json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        return error.code, None
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return 0, None
+
+
+def bot_ping(token: str) -> bool:
+    code, body = api_request("/api/v1/ping", {}, token)
+    if code != 200:
+        return False
+    if isinstance(body, dict):
+        return body.get("status") == "pong"
+    return body == "pong"
+
+
+def bot_last_process_age_s(token: str) -> float | None:
+    code, body = api_request("/api/v1/health", {}, token)
+    if code != 200 or not isinstance(body, dict):
+        return None
+    last_ts = body.get("last_process_ts")
+    if not last_ts:
+        return None
+    return max(0.0, time.time() - float(last_ts))
+
+
+def bot_open_trades(token: str) -> list | None:
+    """Freqtrade /status is the open-trades view, with nested orders."""
+    code, body = api_request("/api/v1/status", {}, token)
+    if code != 200 or not isinstance(body, list):
+        return None
+    return body
+
+
+def bot_trades(token: str) -> list | None:
+    code, body = api_request("/api/v1/trades?limit=500", {}, token)
+    if code != 200:
+        return None
+    if isinstance(body, dict):
+        return body.get("trades", [])
+    if isinstance(body, list):
+        return body
+    return None
+
+
+@dataclass(frozen=True)
+class TradeSnapshot:
+    trade_id: int
+    pair: str
+    is_open: bool
+    is_short: bool
+    amount: float
+    open_rate: float
+
+
+@dataclass(frozen=True)
+class OrderSnapshot:
+    order_id: str
+    trade_id: int
+    pair: str
+    side: str
+    status: str
+    is_open: bool
+    amount: float
+    filled: float | None
+    remaining: float | None
+    price: float
+
+
+VALID_ORDER_STATUSES = {
+    "open",
+    "new",
+    "partially_filled",
+    "partial",
+    "closed",
+    "filled",
+    "canceled",
+    "cancelled",
+    "expired",
+    "rejected",
+}
+
+
+def finite_float(value: object, field: str, *, allow_none: bool = False) -> float | None:
+    if value is None and allow_none:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field} is not numeric")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} is not numeric") from error
+    if not math.isfinite(number):
+        raise ValueError(f"{field} is not finite")
+    if number < 0:
+        raise ValueError(f"{field} is negative")
+    return number
+
+
+def normalize_rest_snapshot(payload: object) -> tuple[list[TradeSnapshot], list[OrderSnapshot]]:
+    if not isinstance(payload, list):
+        raise ValueError("REST status payload is not a list")
+    trades: list[TradeSnapshot] = []
+    orders: list[OrderSnapshot] = []
+    trade_ids: set[int] = set()
+    order_ids: set[str] = set()
+    for raw_trade in payload:
+        if not isinstance(raw_trade, dict):
+            raise ValueError("REST trade is not an object")
+        trade_id = raw_trade.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool):
+            raise ValueError("REST trade_id is invalid")
+        if trade_id in trade_ids:
+            raise ValueError(f"duplicate REST trade_id {trade_id}")
+        trade_ids.add(trade_id)
+        if raw_trade.get("is_open") is not True:
+            raise ValueError(f"REST status returned non-open trade {trade_id}")
+        pair = raw_trade.get("pair")
+        if not isinstance(pair, str) or not pair:
+            raise ValueError(f"REST trade {trade_id} pair is invalid")
+        trade = TradeSnapshot(
+            trade_id=trade_id,
+            pair=pair,
+            is_open=True,
+            is_short=bool(raw_trade.get("is_short", False)),
+            amount=float(finite_float(raw_trade.get("amount"), "trade.amount")),
+            open_rate=float(finite_float(raw_trade.get("open_rate"), "trade.open_rate")),
+        )
+        trades.append(trade)
+
+        raw_orders = raw_trade.get("orders", [])
+        if not isinstance(raw_orders, list):
+            raise ValueError(f"REST trade {trade_id} orders is not a list")
+        for raw_order in raw_orders:
+            if not isinstance(raw_order, dict):
+                raise ValueError(f"REST trade {trade_id} order is not an object")
+            order_id = raw_order.get("order_id")
+            if not isinstance(order_id, str) or not order_id:
+                raise ValueError(f"REST trade {trade_id} order_id is invalid")
+            if order_id in order_ids:
+                raise ValueError(f"duplicate REST order_id {order_id}")
+            order_ids.add(order_id)
+            status = str(raw_order.get("status", "")).lower()
+            if status not in VALID_ORDER_STATUSES:
+                raise ValueError(f"REST order {order_id} status is unknown: {status}")
+            side = raw_order.get("ft_order_side")
+            if not isinstance(side, str) or not side:
+                raise ValueError(f"REST order {order_id} side is invalid")
+            is_open = raw_order.get("is_open")
+            if not isinstance(is_open, bool):
+                raise ValueError(f"REST order {order_id} is_open is invalid")
+            orders.append(
+                OrderSnapshot(
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    pair=str(raw_order.get("pair") or pair),
+                    side=side,
+                    status=status,
+                    is_open=is_open,
+                    amount=float(finite_float(raw_order.get("amount"), "order.amount")),
+                    filled=finite_float(raw_order.get("filled"), "order.filled", allow_none=True),
+                    remaining=finite_float(raw_order.get("remaining"), "order.remaining", allow_none=True),
+                    price=float(finite_float(raw_order.get("safe_price"), "order.safe_price")),
+                )
+            )
+    return sorted(trades, key=lambda item: item.trade_id), sorted(orders, key=lambda item: item.order_id)
+
+
+def normalize_db_snapshot(payload: object) -> tuple[list[TradeSnapshot], list[OrderSnapshot]]:
+    if not isinstance(payload, dict):
+        raise ValueError("DB snapshot is not an object")
+    raw_trades = payload.get("trades")
+    raw_orders = payload.get("orders")
+    if not isinstance(raw_trades, list) or not isinstance(raw_orders, list):
+        raise ValueError("DB snapshot trades/orders are invalid")
+    trades: list[TradeSnapshot] = []
+    orders: list[OrderSnapshot] = []
+    trade_ids: set[int] = set()
+    order_ids: set[str] = set()
+    for raw_trade in raw_trades:
+        if not isinstance(raw_trade, dict):
+            raise ValueError("DB trade is not an object")
+        trade_id = raw_trade.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool) or trade_id in trade_ids:
+            raise ValueError("DB trade_id is invalid or duplicate")
+        trade_ids.add(trade_id)
+        is_open = raw_trade.get("is_open")
+        if not isinstance(is_open, bool):
+            raise ValueError(f"DB trade {trade_id} is_open is invalid")
+        trades.append(
+            TradeSnapshot(
+                trade_id=trade_id,
+                pair=str(raw_trade.get("pair", "")),
+                is_open=is_open,
+                is_short=bool(raw_trade.get("is_short", False)),
+                amount=float(finite_float(raw_trade.get("amount"), "db.trade.amount")),
+                open_rate=float(finite_float(raw_trade.get("open_rate"), "db.trade.open_rate")),
+            )
+        )
+    for raw_order in raw_orders:
+        if not isinstance(raw_order, dict):
+            raise ValueError("DB order is not an object")
+        order_id = raw_order.get("order_id")
+        if not isinstance(order_id, str) or not order_id or order_id in order_ids:
+            raise ValueError("DB order_id is invalid or duplicate")
+        order_ids.add(order_id)
+        trade_id = raw_order.get("trade_id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool):
+            raise ValueError(f"DB order {order_id} trade_id is invalid")
+        status = str(raw_order.get("status", "")).lower()
+        if status not in VALID_ORDER_STATUSES:
+            raise ValueError(f"DB order {order_id} status is unknown: {status}")
+        is_open = raw_order.get("is_open")
+        if not isinstance(is_open, bool):
+            raise ValueError(f"DB order {order_id} is_open is invalid")
+        side = raw_order.get("side")
+        if not isinstance(side, str) or not side:
+            raise ValueError(f"DB order {order_id} side is invalid")
+        orders.append(
+            OrderSnapshot(
+                order_id=order_id,
+                trade_id=trade_id,
+                pair=str(raw_order.get("pair", "")),
+                side=side,
+                status=status,
+                is_open=is_open,
+                amount=float(finite_float(raw_order.get("amount"), "db.order.amount")),
+                filled=finite_float(raw_order.get("filled"), "db.order.filled", allow_none=True),
+                remaining=finite_float(raw_order.get("remaining"), "db.order.remaining", allow_none=True),
+                price=float(finite_float(raw_order.get("price"), "db.order.price")),
+            )
+        )
+    return sorted(trades, key=lambda item: item.trade_id), sorted(orders, key=lambda item: item.order_id)
+
+
+DB_SNAPSHOT_PROGRAM = r'''import json
+import sqlite3
+
+connection = sqlite3.connect("file:/freqtrade/runtime/tradesv3.dryrun.sqlite?mode=ro", uri=True)
+connection.row_factory = sqlite3.Row
+trades = [
+    dict(row)
+    for row in connection.execute(
+        "select id as trade_id, pair, is_open, is_short, amount, open_rate "
+        "from trades where is_open = 1 order by id"
+    )
+]
+orders = [
+    dict(row)
+    for row in connection.execute(
+        "select o.order_id, o.ft_trade_id as trade_id, o.ft_pair as pair, "
+        "o.ft_order_side as side, o.status, o.ft_is_open as is_open, "
+        "o.amount, o.filled, o.remaining, coalesce(o.average, o.price, o.ft_price) as price "
+        "from orders o left join trades t on t.id = o.ft_trade_id "
+        "where t.is_open = 1 or o.ft_is_open = 1 order by o.order_id"
+    )
+]
+connection.close()
+for item in trades + orders:
+    item["is_open"] = bool(item["is_open"])
+print(json.dumps({"trades": trades, "orders": orders}, sort_keys=True))
+'''
+
+
+def bot_db_snapshot(env: dict) -> dict | None:
+    container = env.get("GMAQ_CONTAINER_NAME", "")
+    if not container:
+        return None
+    try:
+        process = subprocess.run(
+            ["docker", "exec", container, "python", "-c", DB_SNAPSHOT_PROGRAM],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    try:
+        payload = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def snapshots_equal(left: object, right: object) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, float):
+        return math.isclose(left, right, rel_tol=1e-10, abs_tol=1e-12)
+    if hasattr(left, "__dataclass_fields__"):
+        return all(
+            snapshots_equal(getattr(left, field), getattr(right, field))
+            for field in left.__dataclass_fields__
+        )
+    return left == right
+
+
+def compare_snapshots(rest_payload: object, db_payload: object) -> dict:
+    try:
+        rest_trades, rest_orders = normalize_rest_snapshot(rest_payload)
+        db_trades, db_orders = normalize_db_snapshot(db_payload)
+    except ValueError as error:
+        return {
+            "verdict": "UNKNOWN",
+            "unknown_outcomes": [str(error)],
+            "open_trades": None,
+            "open_orders": None,
+            "partial_orders": None,
+            "matches_database": False,
+        }
+
+    mismatches = []
+    rest_trade_map = {item.trade_id: item for item in rest_trades}
+    db_trade_map = {item.trade_id: item for item in db_trades}
+    for trade_id in sorted(rest_trade_map.keys() | db_trade_map.keys()):
+        if trade_id not in rest_trade_map or trade_id not in db_trade_map:
+            mismatches.append(f"trade_identity:{trade_id}")
+        elif not snapshots_equal(rest_trade_map[trade_id], db_trade_map[trade_id]):
+            mismatches.append(f"trade_fields:{trade_id}")
+
+    rest_order_map = {item.order_id: item for item in rest_orders}
+    db_order_map = {item.order_id: item for item in db_orders}
+    for order_id in sorted(rest_order_map.keys() | db_order_map.keys()):
+        if order_id not in rest_order_map or order_id not in db_order_map:
+            mismatches.append(f"order_identity:{order_id}")
+        elif not snapshots_equal(rest_order_map[order_id], db_order_map[order_id]):
+            mismatches.append(f"order_fields:{order_id}")
+
+    open_orders = sum(item.is_open for item in rest_orders)
+    partial_orders = sum(
+        item.is_open and item.filled is not None and item.filled > 0 and (item.remaining or 0) > 0
+        for item in rest_orders
+    )
+    canonical = {
+        "rest_trades": [asdict(item) for item in rest_trades],
+        "rest_orders": [asdict(item) for item in rest_orders],
+        "db_trades": [asdict(item) for item in db_trades],
+        "db_orders": [asdict(item) for item in db_orders],
+    }
+    return {
+        "verdict": "MATCH" if not mismatches else "MISMATCH",
+        "unknown_outcomes": [],
+        "mismatches": mismatches,
+        "open_trades": len(rest_trades),
+        "open_orders": open_orders,
+        "partial_orders": partial_orders,
+        "matches_database": not mismatches,
+        "snapshot_sha256": sha256_text(serialize(canonical)),
+    }
+
+
+def snapshot_is_zero_proof(snapshot: dict) -> bool:
+    return (
+        snapshot.get("verdict") == "MATCH"
+        and snapshot.get("matches_database") is True
+        and snapshot.get("open_trades") == 0
+        and snapshot.get("open_orders") == 0
+        and snapshot.get("partial_orders") == 0
+        and snapshot.get("unknown_outcomes") == []
+    )
+
+
+def compose_command() -> list[str] | None:
+    if subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0:
+        return ["docker", "compose"]
+    if subprocess.run(["docker-compose", "--version"], capture_output=True).returncode == 0:
+        return ["docker-compose"]
+    return None
+
+
+@serialized_transition
+def preflight() -> dict:
+    checks = []
+    failures = []
+
+    def check(name: str, passed: bool, detail: str) -> None:
+        checks.append({"name": name, "passed": passed, "detail": detail})
+        if not passed:
+            failures.append(name)
+
+    binding, binding_error = validated_runtime_binding()
+    if binding_error:
+        write_state("DISARMED", reason="runtime_binding_invalid")
+        append_audit(
+            "preflight",
+            "gmaq-control",
+            refs={"failed": ["runtime binding"], "detail": binding_error},
+            verdict="FAIL",
+        )
+        return fail(binding_error, checks=checks)
+    assert binding is not None
+    fields = binding_fields(binding)
+    write_state("PREFLIGHTING", **fields)
+
+    if not CONFIG_PATH.is_file():
+        write_state("DISARMED", **fields, reason="config_missing")
+        append_audit("preflight", "gmaq-control", refs={"failed": ["config missing"], **fields}, verdict="FAIL")
+        return fail("config missing", checks=checks)
+    config = load_config()
+    check("runtime binding", True, "candidate/config/run identity bound")
+    check("credential-free", config_is_credential_free(config), "dry_run=true, empty key/secret")
+    check("pair scope", bool(config.get("exchange", {}).get("pair_whitelist")), "whitelist non-empty")
+    has_protections, missing = strategy_has_protections()
+    check("protections", has_protections, f"missing: {missing}" if missing else "StoplossGuard+MaxDrawdown+CooldownPeriod")
+    check("kill switch", compose_command() is not None, "docker compose present")
+
+    try:
+        chain = read_audit_chain()
+        valid, reason = audit_chain_valid(chain)
+    except ValueError as error:
+        valid, reason = False, str(error)
+    check("audit chain", valid, reason)
+
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        probe = AUDIT_DIR / ".probe"
+        probe.write_text("x")
+        probe.unlink()
+        check("audit writable", True, "journal dir writable")
+    except OSError as error:
+        check("audit writable", False, str(error))
+
+    offset = exchange_time_offset_s()
+    if offset is None:
+        check("clock offset", False, "exchange time unreachable")
+    else:
+        check("clock offset", abs(offset) <= CLOCK_OFFSET_LIMIT_S, f"offset {offset:+.3f}s (limit {CLOCK_OFFSET_LIMIT_S}s)")
+
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        check("bot reachable", False, "login failed or credentials missing")
+    else:
+        check("bot reachable", bot_ping(token), "ping ok")
+
+    verdict = "PASS" if not failures else "FAIL"
+    result = ok(verdict, checks=checks)
+    append_audit(
+        "preflight",
+        "gmaq-control",
+        refs={"failed": failures, **fields},
+        verdict=verdict,
+    )
+    if verdict == "PASS":
+        write_state(
+            "PREFLIGHT_PASS",
+            **fields,
+            preflight_verdict="PASS",
+            preflight_expires_at_epoch=int(time.time()) + PREFLIGHT_TTL_S,
+        )
+    else:
+        write_state("DISARMED", **fields, reason="preflight_failed")
+    if verdict == "FAIL":
+        dispatch_alert("preflight", verdict, failed=failures)
+    return result
+
+
+def health() -> dict:
+    checks = []
+    env = read_env()
+    token = api_login(env)
+
+    if token is None:
+        return fail("unable to reach bot API", checks=checks)
+    if not bot_ping(token):
+        return fail("bot ping failed", checks=checks)
+
+    checks.append({"name": "ping", "passed": True, "detail": "pong"})
+
+    age = bot_last_process_age_s(token)
+    fresh = age is not None and age <= 2 * TIMEFRAME_SECONDS
+    checks.append(
+        {
+            "name": "heartbeat",
+            "passed": bool(fresh),
+            "detail": f"last_process age {age:.0f}s" if age is not None else "unknown",
+        }
+    )
+
+    offset = exchange_time_offset_s()
+    clock_ok = offset is not None and abs(offset) <= CLOCK_OFFSET_LIMIT_S
+    checks.append(
+        {
+            "name": "clock offset",
+            "passed": bool(clock_ok),
+            "detail": f"{offset:+.3f}s" if offset is not None else "unknown",
+        }
+    )
+
+    open_trades = bot_open_trades(token)
+    nested_order_count = None
+    if open_trades is not None:
+        try:
+            _, nested_orders = normalize_rest_snapshot(open_trades)
+            nested_order_count = sum(item.is_open for item in nested_orders)
+        except ValueError:
+            open_trades = None
+    checks.append(
+        {
+            "name": "open trades",
+            "passed": open_trades is not None,
+            "detail": len(open_trades) if open_trades is not None else "unknown",
+        }
+    )
+    checks.append(
+        {
+            "name": "nested open orders",
+            "passed": nested_order_count is not None,
+            "detail": nested_order_count if nested_order_count is not None else "unknown",
+        }
+    )
+
+    if all(item["passed"] for item in checks):
+        verdict = "HEALTHY"
+    elif all(
+        item["passed"] or item["name"] in ("open trades", "nested open orders")
+        for item in checks
+    ):
+        verdict = "UNHEALTHY"
+    else:
+        verdict = "UNKNOWN"
+    result = ok(verdict, checks=checks)
+    append_audit("health", "gmaq-control", refs={"failed": [c["name"] for c in checks if not c["passed"]]}, verdict=verdict)
+    if verdict in ALERT_FAIL_VERDICTS:
+        dispatch_alert("health", verdict, checks=[c["name"] for c in checks if not c["passed"]])
+    return result
+
+
+def reconcile() -> dict:
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        result = {
+            "ok": False,
+            "verdict": "UNKNOWN",
+            "error": "unable to authenticate to bot API",
+            "unknown_outcomes": ["bot_api_auth_unavailable"],
+        }
+        append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": result["unknown_outcomes"]}, verdict="UNKNOWN")
+        disarm("reconcile_unknown")
+        return result
+    rest_payload = bot_open_trades(token)
+    db_payload = bot_db_snapshot(env)
+    if rest_payload is None or db_payload is None:
+        unknown = []
+        if rest_payload is None:
+            unknown.append("rest_status_unavailable")
+        if db_payload is None:
+            unknown.append("database_snapshot_unavailable")
+        result = {
+            "ok": False,
+            "verdict": "UNKNOWN",
+            "unknown_outcomes": unknown,
+            "error": "unable to obtain complete REST/database snapshot",
+        }
+        append_audit("reconcile", "gmaq-control", refs={"unknown_outcomes": unknown}, verdict="UNKNOWN")
+        disarm("reconcile_unknown")
+        dispatch_alert("reconcile", "UNKNOWN", unknown_outcomes=unknown)
+        return result
+
+    comparison = compare_snapshots(rest_payload, db_payload)
+    verdict = comparison["verdict"]
+    result = {"ok": verdict == "MATCH", **comparison}
+    append_audit(
+        "reconcile",
+        "gmaq-control",
+        refs={
+            "open_trades": comparison.get("open_trades"),
+            "open_orders": comparison.get("open_orders"),
+            "partial_orders": comparison.get("partial_orders"),
+            "unknown_outcomes": comparison.get("unknown_outcomes", []),
+            "mismatches": comparison.get("mismatches", []),
+            "snapshot_sha256": comparison.get("snapshot_sha256"),
+        },
+        verdict=verdict,
+    )
+    if verdict in ("MISMATCH", "UNKNOWN"):
+        disarm(f"reconcile_{verdict.lower()}")
+        dispatch_alert(
+            "reconcile",
+            verdict,
+            unknown_outcomes=comparison.get("unknown_outcomes", []),
+            mismatches=comparison.get("mismatches", []),
+        )
+    return result
+
+
+def audit(action: str, event: str | None) -> dict:
+    if action == "verify":
+        try:
+            chain = read_audit_chain()
+        except ValueError as error:
+            dispatch_alert("audit", "BROKEN", detail=str(error))
+            return ok("BROKEN", records=None, detail=str(error))
+        valid, reason = audit_chain_valid(chain)
+        if not valid:
+            dispatch_alert("audit", "BROKEN", detail=reason)
+        return ok("VERIFIED" if valid else "BROKEN", records=len(chain), detail=reason)
+    if action == "append":
+        return append_audit(event or "manual", "gmaq-control")
+    return fail(f"unknown audit action: {action}")
+
+
+@serialized_transition
+def kill() -> dict:
+    binding, binding_error = validated_runtime_binding()
+    fields = binding_fields(binding) if binding else {}
+    # Disable entry first.  Container stop is the second, independent layer.
+    write_state("KILLED", **fields, reason="kill_requested")
+    append_audit(
+        "kill-requested",
+        "gmaq-control",
+        refs={**fields, "binding_error": binding_error},
+        verdict="KILLED",
+    )
+    compose = compose_command()
+    if compose is None:
+        dispatch_alert("kill", "FAIL", detail="docker compose unavailable")
+        return fail("entry disabled, but docker compose unavailable; runtime stop unverified")
+    try:
+        proc = subprocess.run(
+            compose + ["-f", str(ROOT / "docker-compose.yml"), "stop", "freqtrade"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        dispatch_alert("kill", "FAIL", detail="runtime stop failed")
+        return fail(f"entry disabled, but runtime stop failed: {error}")
+    if proc.returncode != 0:
+        dispatch_alert("kill", "FAIL", detail="docker compose stop failed")
+        return fail("entry disabled, but docker compose stop failed", detail=proc.stderr.strip()[-200:])
+    append_audit("kill", "gmaq-control", refs={"method": "docker-compose-stop", **fields}, verdict="KILLED")
+    dispatch_alert("kill", "KILLED", method="docker-compose-stop")
+    return ok("KILLED", detail="runtime container stopped; state=KILLED")
+
+
+def exit_all() -> dict:
+    """Controlled close: force-exit every open trade by trade id and verify
+    a REST/database zero proof afterwards. Unknown outcomes are quarantined
+    and are never retried automatically."""
+    disarm("controlled_exit_requested")
+    env = read_env()
+    token = api_login(env)
+    if token is None:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["bot_api_auth_unavailable"]}, verdict="UNKNOWN")
+        return fail("unable to reach bot API", verdict="UNKNOWN", unknown_outcomes=["bot_api_auth_unavailable"])
+    open_payload = bot_open_trades(token)
+    if open_payload is None:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": ["rest_status_unavailable"]}, verdict="UNKNOWN")
+        return fail("unable to read open trades", verdict="UNKNOWN", unknown_outcomes=["rest_status_unavailable"])
+    try:
+        open_trades, _ = normalize_rest_snapshot(open_payload)
+    except ValueError as error:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": [str(error)]}, verdict="UNKNOWN")
+        return fail("invalid open trade snapshot", verdict="UNKNOWN", unknown_outcomes=[str(error)])
+
+    unknown_outcomes = []
+    for item in open_trades:
+        trade_id = item.trade_id
+        code, _ = api_post("/api/v1/forceexit", token, {"tradeid": trade_id})
+        if code not in (200, 201):
+            unknown_outcomes.append(f"forceexit_unacknowledged:{trade_id}:http_{code}")
+    if unknown_outcomes:
+        append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+        dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
+        return fail(
+            "one or more force-exit outcomes are unknown; no automatic retry",
+            verdict="UNKNOWN",
+            unknown_outcomes=unknown_outcomes,
+        )
+
+    deadline = time.time() + 120
+    last = {
+        "open_orders": None,
+        "open_trades": None,
+        "partial_orders": None,
+        "unknown_outcomes": ["zero_proof_not_obtained"],
+    }
+    while time.time() < deadline:
+        rest_payload = bot_open_trades(token)
+        db_payload = bot_db_snapshot(env)
+        if rest_payload is None or db_payload is None:
+            unknown_outcomes = []
+            if rest_payload is None:
+                unknown_outcomes.append("rest_status_unavailable_after_exit")
+            if db_payload is None:
+                unknown_outcomes.append("database_snapshot_unavailable_after_exit")
+            append_audit("exit", "gmaq-control", refs={"unknown_outcomes": unknown_outcomes}, verdict="UNKNOWN")
+            dispatch_alert("exit", "UNKNOWN", unknown_outcomes=unknown_outcomes)
+            return fail(
+                "unable to verify outcome after force-exit; no automatic retry",
+                verdict="UNKNOWN",
+                unknown_outcomes=unknown_outcomes,
+            )
+        last = compare_snapshots(rest_payload, db_payload)
+        if last.get("verdict") in ("UNKNOWN", "MISMATCH"):
+            append_audit("exit", "gmaq-control", refs=last, verdict=last["verdict"])
+            details = {key: value for key, value in last.items() if key != "verdict"}
+            dispatch_alert("exit", last["verdict"], **details)
+            return fail(
+                "post-exit reconciliation did not match; no automatic retry",
+                verdict=last["verdict"],
+                **details,
+            )
+        if snapshot_is_zero_proof(last):
+            append_audit(
+                "exit",
+                "gmaq-control",
+                refs={**last, "forceexited": len(open_trades)},
+                verdict="ZERO_POSITIONS_AND_ORDERS",
+            )
+            disarm("controlled_exit_complete")
+            details = {key: value for key, value in last.items() if key != "verdict"}
+            return ok("ZERO_POSITIONS_AND_ORDERS", **details)
+        time.sleep(5)
+    append_audit("exit", "gmaq-control", refs=last, verdict="TIMEOUT")
+    details = {key: value for key, value in last.items() if key != "verdict"}
+    dispatch_alert("exit", "TIMEOUT", **details)
+    return fail("zero proof not obtained within 120s", verdict="TIMEOUT", **details)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-control", description="GMAQ control plane (dry-run scope)")
+    sub = parser.add_subparsers(dest="command", required=True)
+    bind_parser = sub.add_parser("bind-runtime", help="bind and disarm an exact dry-run runtime")
+    bind_parser.add_argument("--run-id", required=True)
+    bind_parser.add_argument("--candidate-sha", required=True)
+    bind_parser.add_argument("--config-sha256", required=True)
+    bind_parser.add_argument("--environment", default=DRY_RUN_ENVIRONMENT)
+    sub.add_parser("preflight", help="fail-closed readiness check")
+    arm_parser = sub.add_parser("arm", help="authorize short-lived dry-run entries after preflight")
+    arm_parser.add_argument("--authorization-id", required=True)
+    arm_parser.add_argument("--ttl-seconds", type=int, default=300)
+    disarm_parser = sub.add_parser("disarm", help="immediately disable new entries")
+    disarm_parser.add_argument("--reason", default="operator_disarm")
+    sub.add_parser("pause", help="pause an armed runtime without stopping it")
+    sub.add_parser("recover", help="move KILLED to DISARMED; preflight is still required")
+    sub.add_parser("state", help="show the local gate state")
+    sub.add_parser("health", help="heartbeat, clock, and count verdict")
+    sub.add_parser("reconcile", help="cross-check bot view against audit journal")
+    audit_parser = sub.add_parser("audit", help="audit journal management")
+    audit_parser.add_argument("action", choices=["verify", "append"])
+    audit_parser.add_argument("--event", default=None)
+    sub.add_parser("exit", help="controlled close: force-exit all and verify zero positions")
+    sub.add_parser("alert-test", help="send a test alert through configured channels")
+    sub.add_parser("kill", help="independent kill switch")
+    args = parser.parse_args(argv)
+
+    global API_BASE
+    local_env = read_env()
+    if local_env.get("GMAQ_API_BASE"):
+        API_BASE = local_env["GMAQ_API_BASE"]
+
+    if args.command == "bind-runtime":
+        result = bind_runtime(
+            args.run_id,
+            args.candidate_sha,
+            args.config_sha256,
+            args.environment,
+        )
+    elif args.command == "preflight":
+        result = preflight()
+    elif args.command == "arm":
+        result = arm(args.authorization_id, args.ttl_seconds)
+    elif args.command == "disarm":
+        result = disarm(args.reason)
+    elif args.command == "pause":
+        result = pause()
+    elif args.command == "recover":
+        result = recover()
+    elif args.command == "state":
+        state, error = read_object_strict(STATE_PATH, "state")
+        result = fail(error) if error else ok("STATE", gate_state=state)
+    elif args.command == "health":
+        result = health()
+    elif args.command == "reconcile":
+        result = reconcile()
+    elif args.command == "audit":
+        result = audit(args.action, args.event)
+    elif args.command == "exit":
+        result = exit_all()
+    elif args.command == "alert-test":
+        env = read_env()
+        record = deliver_alert(env, "alert-test", {"verdict": "TEST"})
+        configured = alert_channels(env)
+        if not configured:
+            result = ok("NO_CHANNELS", detail="no alert channels configured", **record)
+        elif record["sent"]:
+            result = ok("SENT", **record)
+        else:
+            result = fail("configured alert channels failed to deliver", verdict="FAIL", **record)
+    elif args.command == "kill":
+        result = kill()
+    else:
+        result = fail(f"unknown command: {args.command}")
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    verdict = result.get("verdict")
+    fail_verdicts = {"FAIL", "UNKNOWN", "UNHEALTHY", "BROKEN", "MISMATCH"}
+    return 0 if result.get("ok") and verdict not in fail_verdicts else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

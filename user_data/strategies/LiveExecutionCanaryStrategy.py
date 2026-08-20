@@ -1,8 +1,14 @@
 from datetime import timedelta
+import logging
 
 from freqtrade.persistence import Trade
 from freqtrade.strategy import IStrategy
 from pandas import DataFrame
+
+from gmaq_entry_gate import decision_from_environment
+
+
+logger = logging.getLogger(__name__)
 
 
 class LiveExecutionCanaryStrategy(IStrategy):
@@ -23,11 +29,26 @@ class LiveExecutionCanaryStrategy(IStrategy):
 
     @property
     def protections(self):
+        # Inner safety layer. The independent kill switch in
+        # scripts/gmaq-control and configs/CONTROL_PLANE.md is the outer layer.
         return [
             {
                 "method": "CooldownPeriod",
                 "stop_duration_candles": 24,
-            }
+            },
+            {
+                "method": "StoplossGuard",
+                "lookback_period_candles": 48,
+                "trade_limit": 2,
+                "stop_duration_candles": 12,
+                "only_per_pair": False,
+            },
+            {
+                "method": "MaxDrawdown",
+                "lookback_period_candles": 48,
+                "trade_limit": 5,
+                "max_allowed_drawdown": 0.05,
+            },
         ]
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -45,6 +66,24 @@ class LiveExecutionCanaryStrategy(IStrategy):
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe["exit_long"] = 0
         return dataframe
+
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> bool:
+        """Final, fail-closed authorization check before Freqtrade orders."""
+        decision = decision_from_environment()
+        if not decision.allowed:
+            logger.warning("GMAQ entry rejected: %s", decision.reason)
+        return decision.allowed
 
     def custom_exit(
         self,

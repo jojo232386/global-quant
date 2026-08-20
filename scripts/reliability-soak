@@ -3,10 +3,31 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CONFIG="$ROOT_DIR/user_data/config.json"
-HOURS=${1:-72}
+AUDIT="$ROOT_DIR/user_data/audit/manifest.jsonl"
+MODE=""
+HOURS=""
+AUTHORIZATION_ID=""
+EVIDENCE_DIR=""
+START_SEQ=0
+RUNTIME_STARTED=0
+FINISHED=0
 
-if ! [[ "$HOURS" =~ ^(48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72)$ ]]; then
-  echo "Usage: $0 HOURS  # HOURS must be 48..72" >&2
+usage() {
+  echo "Usage: $0 --smoke | $0 HOURS --authorization-id ID  # HOURS=48..72" >&2
+}
+
+if [[ ${1:-} == "--smoke" && $# -eq 1 ]]; then
+  MODE=smoke
+elif [[ ${1:-} =~ ^(48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72)$ && ${2:-} == "--authorization-id" && -n ${3:-} && $# -eq 3 ]]; then
+  MODE=soak
+  HOURS=$1
+  AUTHORIZATION_ID=$3
+  if ! [[ $AUTHORIZATION_ID =~ ^[A-Za-z0-9._:-]{8,64}$ ]]; then
+    echo "STOP: authorization id must be 8-64 safe characters" >&2
+    exit 2
+  fi
+else
+  usage
   exit 2
 fi
 
@@ -15,9 +36,11 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE=(docker-compose)
 else
-  echo "Docker Compose is required." >&2
+  echo "STOP: Docker Compose is required" >&2
   exit 1
 fi
+
+cd "$ROOT_DIR"
 
 python3 - "$CONFIG" <<'PY'
 import json
@@ -27,145 +50,380 @@ import sys
 config = json.loads(pathlib.Path(sys.argv[1]).read_text())
 exchange = config.get("exchange", {})
 if config.get("dry_run") is not True or exchange.get("key") or exchange.get("secret"):
-    raise SystemExit("STOP: reliability soak is credential-free dry-run only")
+    raise SystemExit("STOP: reliability runner is credential-free dry-run only")
 PY
 
-api_get() {
-  curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
-    "http://127.0.0.1:8080/api/v1/$1"
+audit_count() {
+  python3 - "$AUDIT" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+print(sum(1 for line in path.read_text().splitlines() if line.strip()) if path.exists() else 0)
+PY
 }
 
-api_post() {
-  local endpoint=$1
-  local payload=${2:-'{}'}
-  curl --fail --silent --show-error --user "$API_USER:$API_PASSWORD" \
-    -H 'Content-Type: application/json' -X POST -d "$payload" \
-    "http://127.0.0.1:8080/api/v1/$endpoint"
+json_verdict() {
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict", ""))'
+}
+
+record_command() {
+  local output=$1
+  local payload code
+  shift
+  set +e
+  payload=$("$@")
+  code=$?
+  set -e
+  echo "$payload"
+  python3 - "$output" "$payload" "$code" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+try:
+    record = json.loads(sys.argv[2])
+except json.JSONDecodeError:
+    record = {"ok": False, "verdict": "INVALID_OUTPUT", "command_exit_code": int(sys.argv[3])}
+with path.open("a") as handle:
+    handle.write(json.dumps(record, sort_keys=True) + "\n")
+PY
+  return "$code"
 }
 
 wait_ping() {
-  local attempts=0
-  until curl --fail --silent http://127.0.0.1:8080/api/v1/ping >/dev/null; do
+  local api_base attempts=0
+  api_base=$(python3 - <<'PY'
+import pathlib
+
+for line in pathlib.Path(".env").read_text().splitlines():
+    if line.startswith("GMAQ_API_BASE="):
+        print(line.split("=", 1)[1])
+        break
+PY
+)
+  until curl --fail --silent "$api_base/api/v1/ping" >/dev/null; do
     attempts=$((attempts + 1))
     if (( attempts >= 90 )); then
-      echo "STOP: FreqUI/API did not reconnect" >&2
+      echo "STOP: bound Freqtrade API did not reconnect" >&2
       return 1
     fi
     sleep 2
   done
 }
 
-wait_state() {
-  local expected=$1
-  local attempts=0
-  until [[ $(api_get show_config | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state", ""))') == "$expected" ]]; do
+wait_control_verdict() {
+  local command=$1 expected=$2 attempts=0 payload="" code=1 verdict=""
+  while (( attempts < 60 )); do
     attempts=$((attempts + 1))
-    if (( attempts >= 60 )); then
-      echo "STOP: bot did not reach state=$expected" >&2
-      return 1
+    set +e
+    payload=$(./scripts/gmaq-control "$command")
+    code=$?
+    set -e
+    verdict=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("verdict", ""))' "$payload" 2>/dev/null || true)
+    if (( code == 0 )) && [[ $verdict == "$expected" ]]; then
+      echo "$payload"
+      return 0
     fi
-    sleep 1
+    sleep 2
   done
+  echo "$payload"
+  return 1
 }
 
-assert_no_duplicate_open_trades() {
-  api_get status | python3 -c '
-import json, sys
-trades = json.load(sys.stdin)
-ids = [trade["trade_id"] for trade in trades]
-pairs = [trade["pair"] for trade in trades]
-orders = [order["order_id"] for trade in trades for order in trade.get("orders", [])]
-if len(ids) != len(set(ids)) or len(pairs) != len(set(pairs)) or len(orders) != len(set(orders)):
-    raise SystemExit("STOP: duplicate open trade, pair, or order identity")
-if len(trades) > 1:
-    raise SystemExit("STOP: max_open_trades contract exceeded")
-'
-}
-
-cd "$ROOT_DIR"
-mkdir -p user_data/logs
-LOG="user_data/logs/reliability-$(date -u +%Y%m%dT%H%M%SZ).log"
-exec > >(tee -a "$LOG") 2>&1
-
-echo "RELIABILITY_START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "RELIABILITY_HOURS=$HOURS"
-./scripts/gmaq up
-read -r API_USER API_PASSWORD < <(
-  python3 - "$ROOT_DIR/.env" <<'PY'
+append_event() {
+  local event=$1 verdict=$2 detail=${3:-}
+  python3 - "$EVIDENCE_DIR/events.jsonl" "$event" "$verdict" "$detail" <<'PY'
+import datetime
+import json
 import pathlib
 import sys
 
-values = {}
-for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
-    if line and not line.startswith("#") and "=" in line:
-        key, value = line.split("=", 1)
-        values[key] = value
-print(values["GMAQ_API_USERNAME"], values["GMAQ_API_PASSWORD"])
+path = pathlib.Path(sys.argv[1])
+record = {
+    "ts_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "event": sys.argv[2],
+    "verdict": sys.argv[3],
+    "detail": sys.argv[4],
+}
+with path.open("a") as handle:
+    handle.write(json.dumps(record, sort_keys=True) + "\n")
+PY
+}
+
+capture_audit_segment() {
+  python3 - "$AUDIT" "$EVIDENCE_DIR/audit-journal.jsonl" "$START_SEQ" <<'PY'
+import json
+import pathlib
+import sys
+
+source, target, start = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), int(sys.argv[3])
+records = []
+if source.exists():
+    records = [json.loads(line) for line in source.read_text().splitlines() if line.strip()]
+target.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in records if item.get("seq", 0) > start))
+PY
+}
+
+write_verdict() {
+  local verdict=$1 reason=$2
+  capture_audit_segment || true
+  python3 - "$EVIDENCE_DIR/verdict.md" "$verdict" "$reason" "$MODE" <<'PY'
+import datetime
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_text(
+    f"# Reliability verdict\n\n"
+    f"- verdict: `{sys.argv[2]}`\n"
+    f"- reason: {sys.argv[3]}\n"
+    f"- mode: `{sys.argv[4]}`\n"
+    f"- ended_utc: `{datetime.datetime.now(datetime.timezone.utc).isoformat()}`\n"
+)
+PY
+}
+
+cleanup() {
+  local code=$?
+  if (( FINISHED == 0 )) && [[ -n $EVIDENCE_DIR ]]; then
+    ./scripts/gmaq-control disarm --reason reliability_runner_failed >/dev/null 2>&1 || true
+    write_verdict FAIL "runner exited unexpectedly (code=$code)"
+  fi
+  if (( RUNTIME_STARTED == 1 )); then
+    ./scripts/gmaq stop >/dev/null 2>&1 || true
+  fi
+  exit "$code"
+}
+trap cleanup EXIT INT TERM
+
+START_SEQ=$(audit_count)
+./scripts/gmaq up
+RUNTIME_STARTED=1
+wait_ping
+
+RUN_ID=$(python3 - <<'PY'
+import json
+import pathlib
+
+print(json.loads(pathlib.Path("user_data/audit/runtime-binding.json").read_text())["run_id"])
 PY
 )
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+EVIDENCE_DIR="$ROOT_DIR/user_data/audit/soak-${STAMP}-${RUN_ID}"
+mkdir -p "$EVIDENCE_DIR"
+./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
+append_event E0 EXACT_MATCH "isolated runtime manifest bound"
+
+record_command "$EVIDENCE_DIR/initial-audit-verify.json" ./scripts/gmaq-control audit verify
+[[ $(json_verdict <"$EVIDENCE_DIR/initial-audit-verify.json") == VERIFIED ]]
+
+if [[ $MODE == smoke ]]; then
+  record_command "$EVIDENCE_DIR/health-samples.jsonl" wait_control_verdict health HEALTHY
+  record_command "$EVIDENCE_DIR/reconcile-records.jsonl" wait_control_verdict reconcile MATCH
+  [[ $(json_verdict <"$EVIDENCE_DIR/reconcile-records.jsonl") == MATCH ]]
+  cp "$EVIDENCE_DIR/reconcile-records.jsonl" "$EVIDENCE_DIR/final-exit.json"
+  append_event E1 HEALTHY "credential-free health smoke"
+  append_event E2 MATCH "REST and database zero-state match"
+  record_command "$EVIDENCE_DIR/final-audit-verify.json" ./scripts/gmaq-control audit verify
+  [[ $(json_verdict <"$EVIDENCE_DIR/final-audit-verify.json") == VERIFIED ]]
+  write_verdict SMOKE_ONLY_PASS "runtime verified while entry gate remained DISARMED; not 48-72h evidence"
+  FINISHED=1
+  ./scripts/gmaq stop >/dev/null
+  RUNTIME_STARTED=0
+  trap - EXIT INT TERM
+  echo "RELIABILITY_RESULT=SMOKE_ONLY_PASS"
+  echo "EVIDENCE_DIR=$EVIDENCE_DIR"
+  exit 0
+fi
+
+# A promoted soak is intentionally impossible without an explicit dry-run
+# authorization id. This authorization never expands to live trading.
+record_command "$EVIDENCE_DIR/preflight.json" ./scripts/gmaq-control preflight
+[[ $(json_verdict <"$EVIDENCE_DIR/preflight.json") == PASS ]]
+record_command "$EVIDENCE_DIR/exchange-preflight.json" ./scripts/gmaq-exchange-preflight
+record_command "$EVIDENCE_DIR/liquidity.json" ./scripts/gmaq-liquidity
+
+# Rehearse the independent kill before the clock. A kill invalidates the run;
+# recovery therefore creates a fresh binding and fresh exact-runtime manifest.
+./scripts/gmaq-control kill >"$EVIDENCE_DIR/kill-rehearsal.json"
+RUNTIME_STARTED=0
+./scripts/gmaq-control recover >"$EVIDENCE_DIR/recover.json"
+./scripts/gmaq up
+RUNTIME_STARTED=1
 wait_ping
-assert_no_duplicate_open_trades
+./scripts/gmaq-runtime-manifest --expected-state DISARMED --output "$EVIDENCE_DIR/manifest.json" >/dev/null
+record_command "$EVIDENCE_DIR/preflight-after-kill.json" ./scripts/gmaq-control preflight
+./scripts/gmaq-control arm --authorization-id "$AUTHORIZATION_ID" --ttl-seconds 3600 >"$EVIDENCE_DIR/arm.json"
+append_event E0 PASS "entry gates and kill rehearsal passed; soak clock started"
 
-api_post pause >/dev/null
-wait_state paused
-api_post start >/dev/null
-wait_state running
-api_post stop >/dev/null
-wait_state stopped
-api_post start >/dev/null
-wait_state running
+START_EPOCH=$(date +%s)
+END_EPOCH=$((START_EPOCH + HOURS * 3600))
+NEXT_HEALTH=$START_EPOCH
+NEXT_DUPLICATE=$START_EPOCH
+NEXT_PAUSE=$((START_EPOCH + 6 * 3600))
+NEXT_RESTART=$((START_EPOCH + 12 * 3600))
+NEXT_REFRESH=$((START_EPOCH + 45 * 60))
+NETWORK_DONE=0
+BACKUP_DONE=0
 
-"${COMPOSE[@]}" restart --timeout 30 freqtrade
-wait_ping
-assert_no_duplicate_open_trades
+refresh_arm() {
+  local reason=$1 suffix=$2
+  ./scripts/gmaq-control disarm --reason "$reason" >/dev/null
+  ./scripts/gmaq-control preflight >/dev/null
+  ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-${suffix}" --ttl-seconds 3600 >/dev/null
+}
 
-NETWORK=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' gmaq-freqtrade)
-docker network disconnect -f "$NETWORK" gmaq-freqtrade
-sleep 15
-docker network connect "$NETWORK" gmaq-freqtrade
-wait_ping
-assert_no_duplicate_open_trades
+duplicate_scan() {
+  local container_name
+  container_name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
+  ./scripts/gmaq-control reconcile
+  docker exec "$container_name" python -c '
+import sqlite3
+connection = sqlite3.connect("file:/freqtrade/runtime/tradesv3.dryrun.sqlite?mode=ro", uri=True)
+checks = {
+    "trade_id": connection.execute("select count(*), count(distinct id) from trades").fetchone(),
+    "order_id": connection.execute("select count(*), count(distinct order_id) from orders").fetchone(),
+}
+connection.close()
+bad = [name for name, counts in checks.items() if counts[0] != counts[1]]
+if bad:
+    raise SystemExit(f"STOP: duplicate database identities: {bad}")
+print("DATABASE_IDENTITY_SCAN=PASS")
+'
+  python3 - "$AUDIT" <<'PY'
+import json
+import pathlib
+import sys
 
-"${COMPOSE[@]}" stop --timeout 30 freqtrade
-IMAGE=$(docker inspect -f '{{.Config.Image}}' gmaq-freqtrade)
-RUNTIME_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/runtime"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
-BACKUP_VOLUME=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/freqtrade/backups"}}{{.Name}}{{end}}{{end}}' gmaq-freqtrade)
-docker run --rm --entrypoint python -v "$RUNTIME_VOLUME:/runtime" -v "$BACKUP_VOLUME:/backups" "$IMAGE" -c '
-import pathlib, shutil, sqlite3, time
+records = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+seq = [item["seq"] for item in records]
+if len(seq) != len(set(seq)):
+    raise SystemExit("STOP: duplicate audit sequence")
+PY
+}
+
+backup_restore_check() {
+  ./scripts/gmaq-control disarm --reason soak_backup_check >/dev/null
+  local manifest image runtime_volume backup_volume
+  manifest="$EVIDENCE_DIR/manifest.json"
+  image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["image_ref"])' "$manifest")
+  runtime_volume=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["runtime_volume"])' "$manifest")
+  backup_volume=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["backup_volume"])' "$manifest")
+  "${COMPOSE[@]}" stop --timeout 30 freqtrade >/dev/null
+  docker run --rm --entrypoint python -v "$runtime_volume:/runtime" -v "$backup_volume:/backups" "$image" -c '
+import hashlib, pathlib, shutil, sqlite3, time
 source = pathlib.Path("/runtime/tradesv3.dryrun.sqlite")
 backup = pathlib.Path("/backups") / f"tradesv3-{int(time.time())}.sqlite"
 restore = pathlib.Path("/runtime/restore-check.sqlite")
 shutil.copy2(source, backup)
 shutil.copy2(backup, restore)
+before = hashlib.sha256(source.read_bytes()).hexdigest()
+after = hashlib.sha256(restore.read_bytes()).hexdigest()
 conn = sqlite3.connect(restore)
-assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
+integrity = conn.execute("pragma integrity_check").fetchone()[0]
 conn.close()
 restore.unlink()
-print(f"DB_BACKUP_RESTORE=PASS path={backup}")
-'
-"${COMPOSE[@]}" start freqtrade
-wait_ping
-assert_no_duplicate_open_trades
-
-END_EPOCH=$(( $(date +%s) + HOURS * 3600 ))
-while (( $(date +%s) < END_EPOCH )); do
+assert before == after and integrity == "ok"
+print(f"DB_BACKUP_RESTORE=PASS sha256={before} backup={backup}")
+' >"$EVIDENCE_DIR/backup-restore.md"
+  "${COMPOSE[@]}" start freqtrade >/dev/null
   wait_ping
-  assert_no_duplicate_open_trades
-  sleep 300
+  refresh_arm soak_backup_complete backup
+}
+
+while (( $(date +%s) < END_EPOCH )); do
+  NOW=$(date +%s)
+  if (( NOW >= NEXT_HEALTH )); then
+    ./scripts/gmaq-control health >>"$EVIDENCE_DIR/health-samples.jsonl"
+    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    append_event E1 HEALTHY "six-hour health sample"
+    append_event E2 MATCH "six-hour REST/database reconciliation"
+    NEXT_HEALTH=$((NEXT_HEALTH + 6 * 3600))
+  fi
+  if (( NOW >= NEXT_DUPLICATE )); then
+    duplicate_scan >>"$EVIDENCE_DIR/duplicate-scans.jsonl"
+    append_event E8 PASS "audit and runtime identity scan"
+    NEXT_DUPLICATE=$((NEXT_DUPLICATE + 12 * 3600))
+  fi
+  if (( NOW >= NEXT_PAUSE )); then
+    ./scripts/gmaq-control pause >/dev/null
+    refresh_arm soak_pause_resume "resume-$NOW"
+    append_event E3 PASS "fail-closed pause, preflight and re-arm"
+    NEXT_PAUSE=$((NEXT_PAUSE + 12 * 3600))
+  fi
+  if (( NOW >= NEXT_RESTART )); then
+    ./scripts/gmaq-control disarm --reason soak_clean_restart >/dev/null
+    "${COMPOSE[@]}" restart --timeout 30 freqtrade >/dev/null
+    wait_ping
+    ./scripts/gmaq-runtime-manifest --expected-state DISARMED >/dev/null
+    refresh_arm soak_restart_complete "restart-$NOW"
+    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    append_event E4 PASS "same-binding clean restart and reconciliation"
+    append_event E7 PASS "API reconnected after restart"
+    NEXT_RESTART=$((NEXT_RESTART + 24 * 3600))
+  fi
+  if (( NETWORK_DONE == 0 && NOW >= START_EPOCH + 3600 )); then
+    ./scripts/gmaq-control disarm --reason soak_network_exercise >/dev/null
+    CONTAINER_NAME=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
+    NETWORK=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$CONTAINER_NAME")
+    docker network disconnect -f "$NETWORK" "$CONTAINER_NAME"
+    sleep 15
+    docker network connect "$NETWORK" "$CONTAINER_NAME"
+    wait_ping
+    ./scripts/gmaq-control preflight >/dev/null
+    ./scripts/gmaq-control reconcile >>"$EVIDENCE_DIR/reconcile-records.jsonl"
+    ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-network" --ttl-seconds 3600 >/dev/null
+    append_event E5 PASS "network interruption recovered with reconciliation"
+    append_event E7 PASS "API reconnected after network interruption"
+    NETWORK_DONE=1
+  fi
+  if (( BACKUP_DONE == 0 && NOW >= START_EPOCH + 2 * 3600 )); then
+    backup_restore_check
+    append_event E6 PASS "stopped database copy restored byte-for-byte and passed integrity_check"
+    BACKUP_DONE=1
+  fi
+  if (( NOW >= NEXT_REFRESH )); then
+    refresh_arm soak_ttl_refresh "refresh-$NOW"
+    NEXT_REFRESH=$((NOW + 45 * 60))
+  fi
+  sleep 60
 done
 
-api_post pause >/dev/null
-wait_state paused
-if [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -gt 0 ]]; then
-  api_post forceexit '{"tradeid":"all","ordertype":"market"}' >/dev/null
-fi
-for _ in $(seq 1 60); do
-  [[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -eq 0 ]] && break
-  sleep 2
-done
-[[ $(api_get status | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -eq 0 ]]
-api_post stop >/dev/null
-"${COMPOSE[@]}" stop --timeout 30 freqtrade
-echo "OPEN_POSITION_AFTER_FINAL_STOP=0"
+python3 - "$EVIDENCE_DIR/events.jsonl" "$HOURS" <<'PY'
+import collections
+import json
+import pathlib
+import sys
+
+records = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+counts = collections.Counter(item["event"] for item in records if item["verdict"] == "PASS" or item["verdict"] in {"HEALTHY", "MATCH"})
+hours = int(sys.argv[2])
+required = {
+    "E1": (hours + 5) // 6,
+    "E2": (hours + 5) // 6,
+    "E3": ((hours - 7) // 12) + 1,
+    "E4": ((hours - 13) // 24) + 1,
+    "E5": 1,
+    "E6": 1,
+    "E7": 2,
+    "E8": (hours + 11) // 12,
+}
+missing = {key: value - counts[key] for key, value in required.items() if counts[key] < value}
+if missing:
+    raise SystemExit(f"STOP: mandatory exercise coverage missing: {missing}")
+PY
+
+./scripts/gmaq-control disarm --reason soak_final_exit >/dev/null
+record_command "$EVIDENCE_DIR/final-exit.json" ./scripts/gmaq-control exit
+[[ $(json_verdict <"$EVIDENCE_DIR/final-exit.json") == ZERO_POSITIONS_AND_ORDERS ]]
+record_command "$EVIDENCE_DIR/final-audit-verify.json" ./scripts/gmaq-control audit verify
+[[ $(json_verdict <"$EVIDENCE_DIR/final-audit-verify.json") == VERIFIED ]]
+write_verdict PASS "all mandatory 48-72h dry-run exercises and final zero proof completed"
+FINISHED=1
+./scripts/gmaq stop >/dev/null
+RUNTIME_STARTED=0
+trap - EXIT INT TERM
 echo "RELIABILITY_RESULT=PASS"
-echo "RELIABILITY_END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "EVIDENCE_DIR=$EVIDENCE_DIR"

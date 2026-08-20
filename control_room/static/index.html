@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GMAQ Control Room</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">G</span>
+        <div><strong>GMAQ</strong><small>CONTROL ROOM</small></div>
+      </div>
+      <nav aria-label="控制室导航">
+        <button class="nav-item active" data-target="overview"><span>01</span>运行总览</button>
+        <button class="nav-item" data-target="risk"><span>02</span>风险对账</button>
+        <button class="nav-item" data-target="research"><span>03</span>策略研究</button>
+        <button class="nav-item" data-target="evidence"><span>04</span>证据与阻断</button>
+      </nav>
+      <div class="safety-card">
+        <span class="safety-dot"></span>
+        <div><strong>只读安全模式</strong><small>无 Arm / 无下单入口</small></div>
+      </div>
+      <a class="freq-link" href="http://127.0.0.1:8082" target="_blank" rel="noreferrer">打开底层 FreqUI ↗</a>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">GLOBAL MULTI-ASSET QUANT</p>
+          <h1>量化控制室</h1>
+        </div>
+        <div class="top-actions">
+          <span id="updatedAt" class="timestamp">正在读取本机状态…</span>
+          <button id="refreshButton" class="refresh">刷新状态</button>
+        </div>
+      </header>
+
+      <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+
+      <section id="overview" class="page active">
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="hero-heading">
+              <div>
+                <p class="label">当前运行级别</p>
+                <h2 id="systemHeadline">读取中</h2>
+              </div>
+              <span id="gatePill" class="pill neutral">UNKNOWN</span>
+            </div>
+            <p id="systemSummary" class="hero-copy">正在核对运行时、入场闸门和审计证据。</p>
+            <div class="identity-strip">
+              <div><span>候选版本</span><code id="candidateSha">—</code></div>
+              <div><span>运行编号</span><code id="runId">—</code></div>
+              <div><span>环境</span><strong id="environment">—</strong></div>
+            </div>
+          </article>
+          <article class="score-card">
+            <div class="score-ring" id="scoreRing"><span id="scoreValue">0</span><small>/ 4</small></div>
+            <div><p class="label">核心证据</p><h3 id="scoreTitle">核验中</h3><p id="scoreCopy">健康、对账、审计、策略资格</p></div>
+          </article>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric"><span>运行健康</span><strong id="healthVerdict">—</strong><small id="heartbeat">—</small></article>
+          <article class="metric"><span>持仓 / 订单</span><strong><b id="openTrades">—</b> / <b id="openOrders">—</b></strong><small>实时只读探测</small></article>
+          <article class="metric"><span>审计链</span><strong id="auditVerdict">—</strong><small id="auditRecords">—</small></article>
+          <article class="metric"><span>策略晋级</span><strong id="promotionVerdict">—</strong><small>修正引擎证据</small></article>
+        </div>
+
+        <div class="two-column">
+          <article class="panel">
+            <div class="panel-title"><div><p class="label">RUNTIME</p><h3>运行身份</h3></div><span id="repoClean" class="mini-pill">—</span></div>
+            <dl class="detail-list">
+              <div><dt>分支</dt><dd id="branch">—</dd></div>
+              <div><dt>交易模式</dt><dd id="tradingMode">—</dd></div>
+              <div><dt>保证金模式</dt><dd id="marginMode">—</dd></div>
+              <div><dt>交易标的</dt><dd id="pairs">—</dd></div>
+              <div><dt>模拟名义金额</dt><dd id="stakeAmount">—</dd></div>
+              <div><dt>凭据边界</dt><dd id="credentialState">—</dd></div>
+            </dl>
+          </article>
+          <article class="panel">
+            <div class="panel-title"><div><p class="label">LIVE PROBE</p><h3>健康检查</h3></div><span class="read-only-badge">OBSERVE</span></div>
+            <div id="healthChecks" class="check-list"></div>
+            <p class="panel-note">这里只读取状态；安全控制仍由入场闸门、控制面和独立 kill switch 承担。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="risk" class="page">
+        <div class="section-heading"><div><p class="eyebrow">RISK & RECONCILIATION</p><h2>风险对账</h2></div><span id="reconcilePill" class="pill neutral">UNKNOWN</span></div>
+        <div class="metric-grid risk-metrics">
+          <article class="metric"><span>开放持仓</span><strong id="riskTrades">—</strong><small>REST 视图</small></article>
+          <article class="metric"><span>开放订单</span><strong id="riskOrders">—</strong><small>嵌套订单</small></article>
+          <article class="metric"><span>部分成交</span><strong id="partialOrders">—</strong><small>必须为 0</small></article>
+          <article class="metric"><span>未知结果</span><strong id="unknownOutcomes">—</strong><small>非零即停止</small></article>
+        </div>
+        <article class="panel full-panel">
+          <div class="panel-title"><div><p class="label">FAIL-CLOSED MATRIX</p><h3>安全条件</h3></div></div>
+          <div id="riskMatrix" class="risk-matrix"></div>
+        </article>
+      </section>
+
+      <section id="research" class="page">
+        <div class="section-heading"><div><p class="eyebrow">RESEARCH GATE</p><h2>策略研究</h2></div><span id="researchPill" class="pill blocked">未发现可晋级策略</span></div>
+        <div class="research-summary">
+          <article><span>PASS</span><strong id="passCount">0</strong></article>
+          <article><span>REJECT</span><strong id="rejectCount">0</strong></article>
+          <article><span>INCONCLUSIVE</span><strong id="inconclusiveCount">0</strong></article>
+          <article><span>可验证 PASS</span><strong id="currentPassCount">0</strong></article>
+        </div>
+        <article class="panel table-panel">
+          <div class="panel-title"><div><p class="label">STUDY REGISTRY</p><h3>研究证据登记</h3></div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>研究</th><th>结论</th><th>证据完整性</th><th>样本外收益</th><th>Sharpe</th><th>交易数</th></tr></thead>
+              <tbody id="researchRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="evidence" class="page">
+        <div class="section-heading"><div><p class="eyebrow">EVIDENCE & BLOCKERS</p><h2>证据与落地阻断</h2></div></div>
+        <div class="two-column evidence-columns">
+          <article class="panel">
+            <div class="panel-title"><div><p class="label">RECENT RUNS</p><h3>最近证据包</h3></div></div>
+            <div id="evidenceList" class="timeline"></div>
+          </article>
+          <article class="panel blockers-panel">
+            <div class="panel-title"><div><p class="label">LIVE READINESS</p><h3>仍未解除的阻断</h3></div><span id="blockerCount" class="count-badge">0</span></div>
+            <ol id="blockerList" class="blocker-list"></ol>
+          </article>
+        </div>
+      </section>
+
+      <footer>
+        <span>GMAQ Control Room · localhost only</span>
+        <span>只读界面不等于 Demo 授权、策略 PASS 或实盘资格</span>
+      </footer>
+    </main>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

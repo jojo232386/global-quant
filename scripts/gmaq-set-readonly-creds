@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Interactively update .env.readonly credentials.
+
+Prompts for the API key and secret with hidden input, writes the file
+atomically with 0600 permissions, and never prints any part of either value.
+"""
+
+import getpass
+import os
+import pathlib
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT / ".env.readonly"
+
+
+def write_credentials_atomic(destination: pathlib.Path, payload: str) -> None:
+    """Create secret content with mode 0600 before the first byte is written."""
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    temporary = pathlib.Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            descriptor = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        directory_descriptor = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
+def main() -> int:
+    key = getpass.getpass("API Key (input hidden): ").strip()
+    if not key:
+        print("STOP: empty API Key", file=sys.stderr)
+        return 1
+    secret = getpass.getpass("Secret Key (input hidden): ").strip()
+    if not secret:
+        print("STOP: empty Secret Key", file=sys.stderr)
+        return 1
+
+    payload = f"GMAQ_READ_KEY={key}\nGMAQ_READ_SECRET={secret}\n"
+    write_credentials_atomic(ENV_FILE, payload)
+
+    print("written:", ENV_FILE)
+    print("credential values accepted and stored locally; no prefix was displayed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

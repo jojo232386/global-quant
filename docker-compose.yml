@@ -11,7 +11,7 @@ services:
 
   freqtrade:
     image: freqtradeorg/freqtrade:stable@sha256:50720a4af314a812be2cfbf5cc6331c63e9332b06f3f4372241f54bc61a35486
-    container_name: gmaq-freqtrade
+    container_name: "${GMAQ_CONTAINER_NAME:-gmaq-freqtrade-p0-remediation}"
     restart: unless-stopped
     depends_on:
       runtime-init:
@@ -21,12 +21,18 @@ services:
       FREQTRADE__API_SERVER__PASSWORD: "${GMAQ_API_PASSWORD:-}"
       FREQTRADE__API_SERVER__JWT_SECRET_KEY: "${GMAQ_JWT_SECRET_KEY:-}"
       FREQTRADE__API_SERVER__WS_TOKEN: "${GMAQ_WS_TOKEN:-}"
+      GMAQ_GATE_ENVIRONMENT: "${GMAQ_GATE_ENVIRONMENT:-UNBOUND}"
+      GMAQ_CANDIDATE_SHA: "${GMAQ_CANDIDATE_SHA:-UNBOUND}"
+      GMAQ_CONFIG_SHA256: "${GMAQ_CONFIG_SHA256:-UNBOUND}"
+      GMAQ_RUN_ID: "${GMAQ_RUN_ID:-UNBOUND}"
+      GMAQ_USER_DATA_DIR: "/freqtrade/user_data"
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "runtime_data:/freqtrade/runtime"
       - "runtime_backups:/freqtrade/backups"
     ports:
-      - "127.0.0.1:8080:8080"
+      # Host 8082 leaves the original and continuation runtimes untouched.
+      - "127.0.0.1:${GMAQ_HOST_PORT:-8082}:8080"
     command:
       - trade
       - --config

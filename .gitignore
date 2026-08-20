@@ -1,6 +1,7 @@
 .DS_Store
 .idea/
 .pytest_cache/
+.playwright-cli/
 .ruff_cache/
 .venv/
 __pycache__/
@@ -8,6 +9,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+output/playwright/
 
 # Freqtrade runtime state is local. The empty directories remain versioned.
 user_data/data/*
@@ -18,6 +20,14 @@ user_data/backtest_results/
 user_data/hyperopt_results/
 user_data/plot/
 
+# Control-plane runtime state is local and append-only.
+user_data/audit/*.jsonl
+user_data/audit/*.json
+user_data/audit/.manifest.lock
+user_data/audit/.state-transition.lock
+user_data/audit/control-room.*
+!user_data/audit/.gitkeep
+
 # WorkBuddy workspace-local data (daily logs, memory) is never committed.
 .workbuddy/
 
@@ -27,3 +37,8 @@ user_data/plot/
 *.pem
 *.key
 *live*.json
+
+# Runtime smoke evidence packages are local.
+user_data/audit/runtime-smoke-*/
+user_data/audit/soak-*/
+.env.readonly.tmp

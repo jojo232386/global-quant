@@ -1,0 +1,186 @@
+{
+  "study_id": "study-2026-08-16-multi-funding-crosssection",
+  "rule": "funding_crosssection",
+  "params": {
+    "notional": 100.0,
+    "initial_equity": 1000.0,
+    "cost_bps_per_side": 15.0,
+    "stress_cost_bps_per_side": 30.0,
+    "stress_funding_buffer_bps": 1.0,
+    "legs": 3,
+    "universe_top": 15
+  },
+  "split_utc_ms": 1781568000000,
+  "universe": {
+    "ACEUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "771e844e6f6752e5d71f92cc04a480642d7655e791fc43e038394d6988a3b4f3",
+      "klines_sha256": "edada36577c9010b3baf0f56f01869d6029d461099e926a4b861cb55077e1335"
+    },
+    "AKEUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "487d20f02c13a4304708bdaea46d6b3a0a52cc618cc98f37a296b6b54e0b20e6",
+      "klines_sha256": "56a4081598aed31309d6b812986e3b3d921d1a6bb21dbebeec28df779937bfb9"
+    },
+    "APRUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "7cf04547f3c0e9c25d1d38a06e89f4fc58ea0f91109394cbb234df6fc7e73f8f",
+      "klines_sha256": "d00038cafe555509a84c18de7dcfcbaf374ec6dcc76151d896cc530b182ec9f4"
+    },
+    "BNBUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "af8d425d1d129780e046c6076f23e38baeb1e525b0bb02ca85ca713dd679df4a",
+      "klines_sha256": "218f5ed5a41bfb22def245f90467b10b841caa2d8c1bba0036cd8b326baedddf"
+    },
+    "BTCUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "0ec7f000ceb2df54cd60717ee447b4fb037346b8cae16e0512a5ac00bc046bf3",
+      "klines_sha256": "a54ca61ca2e23ba26d5624abee56215d355baf5a3cc348ae8d6b02e541cb6de4"
+    },
+    "COWUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "048bbd7d83d6eb2ea87da85abfc1dc61e4c2f5a8183060baa5e1029c57be7e43",
+      "klines_sha256": "4f3f020010c0d8d814cf4be6e5042b0bd33af6a9c1e49469e13a07720999958e"
+    },
+    "CYSUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "1839d4a803c8536017b3d78e626fd46a50c38d75bda33700578a53dbc2040d34",
+      "klines_sha256": "5710fcf57c6cb380a8ba16d8f7950d36d3992c35550aabb29b1878a216be2256"
+    },
+    "ETHUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "f092b8312b0ad038ddbd87121a244aa3aa3dde84f2ee12944df7841ac788166d",
+      "klines_sha256": "af6d8f009dab481103d804aa7599b6e323b9e55e63daa6e26054c6542f1f6d2c"
+    },
+    "HEMIUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "a24324eb56a531b85c945d552ec4619f343e0a994df4702c6705b94e7436eadf",
+      "klines_sha256": "9d058c0cef77d5d05bf3c2b95e167c56e76a783bd5dc7fafd319459d63681a3c"
+    },
+    "HYPEUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "8084822ac2b39502559e61e8ed9142467e392a7f94ee701de956552bb2c825ea",
+      "klines_sha256": "24ca73eda40e78fe621b269133d512ffe9f74253dd6d131387230ad4e8f197f6"
+    },
+    "LINKUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "a88f4b4a3a3c6a074e04223e393ed6d9d14d9689f0230b2485f651287069ce59",
+      "klines_sha256": "26d9edb88361376573df2abe17a0a08731b9da1fa4e21bad8f40d7ac65cf2ba1"
+    },
+    "SNDKUSDT": {
+      "bars": 12523,
+      "funding_records": 394,
+      "funding_sha256": "a552feed4883fb3f1a5ccefda91ccf6663abdc0490086b4e74e0852e0bbba505",
+      "klines_sha256": "6675feef696a48562d07b91d6f7f0f9c8641adbebe2f7bffd4731d05a53a17d4"
+    },
+    "SOLUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "d523c65211e2e99dc1483398b1314ebf04d9067c8e6cac483f59d3c9b6f62961",
+      "klines_sha256": "ca0afdb81dfbd4463eb5b357fd5d441f974f1c3295c041f2abb29f7e32c3a530"
+    },
+    "XRPUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "2ba82cee4ccc8b2409a9d10b60e22083d8523a5f597d8c3f83ecf5cf693e7a32",
+      "klines_sha256": "93441e8d8fe047cbdd4fa311505613d9b8d2c7f1b08933d0a475169cd9b0e9de"
+    },
+    "ZECUSDT": {
+      "bars": 18817,
+      "funding_records": 500,
+      "funding_sha256": "794c5d92e626d9d4fb5905b08dcc5f1c7be3f234abbff08b3896176a7c3a59ea",
+      "klines_sha256": "e9f856a8bcbf1487526019944458315b1839206c8bd9cc225be9636724522188"
+    }
+  },
+  "universe_sha256": null,
+  "legs": 3,
+  "oos_rebalance_events": 61,
+  "train": {
+    "trade_count": 312,
+    "total_return": 0.048821,
+    "annualized_return": 0.184022,
+    "annualized_volatility": 0.193078,
+    "max_drawdown": 0.093175,
+    "sharpe": 0.6799,
+    "sortino": 1.3137,
+    "calmar": 1.975,
+    "win_rate": 0.4551,
+    "profit_factor": 1.1192,
+    "turnover_notional_per_initial_equity": 31.2,
+    "avg_holding_bars": 96.0,
+    "max_consecutive_losses": 14,
+    "span_days": 103,
+    "stress": {
+      "trade_count": 312,
+      "total_return": -0.047905,
+      "annualized_return": -0.159671,
+      "annualized_volatility": 0.204016,
+      "max_drawdown": 0.126341,
+      "sharpe": -1.0096,
+      "sortino": -1.8732,
+      "calmar": -1.2638,
+      "win_rate": 0.3974,
+      "profit_factor": 0.8966,
+      "turnover_notional_per_initial_equity": 31.2,
+      "avg_holding_bars": 96.0,
+      "max_consecutive_losses": 14,
+      "span_days": 103
+    }
+  },
+  "out_of_sample": {
+    "trade_count": 183,
+    "total_return": 0.130559,
+    "annualized_return": 1.109598,
+    "annualized_volatility": 0.492634,
+    "max_drawdown": 0.103799,
+    "sharpe": 1.662,
+    "sortino": 4.7669,
+    "calmar": 10.6899,
+    "win_rate": 0.3989,
+    "profit_factor": 1.337,
+    "turnover_notional_per_initial_equity": 18.3,
+    "avg_holding_bars": 96.0,
+    "max_consecutive_losses": 9,
+    "span_days": 60,
+    "stress": {
+      "trade_count": 183,
+      "total_return": 0.07352,
+      "annualized_return": 0.539669,
+      "annualized_volatility": 0.516647,
+      "max_drawdown": 0.146926,
+      "sharpe": 1.0066,
+      "sortino": 2.9508,
+      "calmar": 3.6731,
+      "win_rate": 0.3388,
+      "profit_factor": 1.1743,
+      "turnover_notional_per_initial_equity": 18.3,
+      "avg_holding_bars": 96.0,
+      "max_consecutive_losses": 15,
+      "span_days": 60
+    }
+  },
+  "benchmark": {
+    "gross_return": 2.171347,
+    "net_return": 2.161847,
+    "symbols": 15
+  },
+  "verdict": "PASS",
+  "verdict_conditions": {
+    "oos_sharpe_ge_0.5": true,
+    "oos_stress_net_positive": true,
+    "oos_min_30_trades": true,
+    "train_oos_same_sign": true
+  },
+  "note": "This study does not authorize live trading. Taker fee is PLACEHOLDER_UNVERIFIED. Universe is today's top-15 (survivorship bias upward)."
+}

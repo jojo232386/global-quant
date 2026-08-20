@@ -7,7 +7,8 @@ deployment.
 ## Current stack
 
 - Freqtrade 2026.7 as the single active trading runtime
-- FreqUI as the operational interface
+- GMAQ Control Room as the default read-only operator interface
+- FreqUI as the lower-level runtime interface
 - Binance USD-M Futures
 - Docker and Compose, with Colima supported on macOS
 
@@ -15,7 +16,8 @@ deployment.
 
 - Binance public market data and dry-run trading verified
 - `ETH/USDT:USDT`, isolated margin, 1x leverage
-- FreqUI verified on `http://127.0.0.1:8080`
+- GMAQ Control Room uses `http://127.0.0.1:8090`; the isolated FreqUI uses
+  `http://127.0.0.1:8082`
 - persistence, restart recovery, and stopped-database backup/restore verified
 - live credentials are not configured or stored in this repository
 - live trading is not enabled
@@ -31,8 +33,12 @@ Requirements: Docker with Compose, plus Python 3.12 or newer for local tests.
 ```
 
 The first start creates random local FreqUI/API credentials in the ignored
-`.env` file. The values stay on the local machine. Open
-<http://127.0.0.1:8080> after startup.
+`.env` file. The values stay on the local machine. Start the read-only Control
+Room and open <http://127.0.0.1:8090>:
+
+```sh
+./scripts/gmaq-ui start
+```
 
 Useful commands:
 
@@ -41,7 +47,14 @@ Useful commands:
 ./scripts/gmaq logs
 ./scripts/gmaq restart
 ./scripts/gmaq down
+./scripts/gmaq-ui status
+./scripts/gmaq-ui stop
 ```
+
+The Control Room is localhost-only and exposes observation pages for runtime,
+risk reconciliation, research evidence, and readiness blockers. Every mutating
+HTTP method is rejected. It has no arm, order, exit, pause, or kill action and
+does not replace explicit authorization or the control-plane commands.
 
 ## Safety
 
@@ -49,8 +62,75 @@ Useful commands:
 - Binance key and secret fields are empty;
 - the startup wrapper refuses non-dry-run or credential-bearing exchange config;
 - the initial scope is one pair, isolated margin, 1x, one open trade maximum;
+- the strategy carries inner protections (StoplossGuard, MaxDrawdown,
+  CooldownPeriod);
+- the control plane (`configs/CONTROL_PLANE.md`, `scripts/gmaq-control`)
+  provides armed states, an order state machine, unique client-order
+  identity, reconciliation, an append-only audit manifest, health metrics,
+  alerts, and an independent kill switch — all dry-run scope;
 - live deployment requires a separate configuration and explicit review;
 - no active SQLite database should be copied or queried directly.
+
+## Control plane
+
+```sh
+./scripts/gmaq-control preflight   # fail-closed readiness check
+./scripts/gmaq-control health      # heartbeat, clock offset, counts
+./scripts/gmaq-control reconcile   # bot view vs. audit journal
+./scripts/gmaq-control audit verify
+./scripts/gmaq-control alert-test  # verify operator alert channels
+./scripts/gmaq-control kill        # independent kill switch
+```
+
+Operator alerts (webhook / Telegram) are configured with `GMAQ_ALERT_WEBHOOK_URL`,
+`GMAQ_TELEGRAM_BOT_TOKEN`, and `GMAQ_TELEGRAM_CHAT_ID` in the local `.env`;
+fail verdicts dispatch automatically and every delivery is audit-logged.
+
+## Exchange preflight (read-only, credential-free)
+
+```sh
+./scripts/gmaq-exchange-preflight
+```
+
+Queries Binance USD-M public market data only and writes a same-day manifest
+to `user_data/audit/exchange-preflight.json`: contract status, precision and
+filters, minimum notional, implied leverage headroom, funding, spread, and
+depth. Account-mode, permission, and fee items are reported as
+`UNVERIFIED_REQUIRES_AUTH` and keep live readiness BLOCKED until a separately
+authorized read-only session verifies them.
+
+## Execution cost and liquidity
+
+```sh
+./scripts/gmaq-liquidity
+```
+
+Walks the public order book to model market-order fills (VWAP, slippage,
+partial fills), spread, funding carry, and liquidation distance under depth,
+spread, latency, and funding stress. See `configs/EXECUTION_COST_MODEL.md`.
+A 2026-08-16 authorized read-only snapshot reported taker fee 5 bps and
+tier-1 MMR 0.4%. Those values are not same-day evidence for a future
+candidate, so committed cost inputs remain marked as placeholders; the
+snapshot itself does not authorize live trading.
+
+## Research commands
+
+```sh
+./scripts/gmaq-fetch-klines --start 2026-02-01 --end 2026-08-16 --out user_data/data/x.jsonl
+./scripts/gmaq-research-backtest --rule momentum \
+  --funding-data /path/to/ETHUSDT-funding.jsonl            # formal single-asset study
+./scripts/gmaq-fetch-universe && ./scripts/gmaq-fetch-multi --start ... --end ...
+./scripts/gmaq-research-crosssection --rule funding_crosssection
+./scripts/gmaq-fetch-pit --start ... --end ...             # point-in-time universe
+./scripts/gmaq-research-pit --rule funding_crosssection
+./scripts/gmaq-research-pit-funding-shock-neutral --data-dir /path/to/pit
+```
+
+Every study lives under `research/backtests/` with a locked
+preregistration, data checklist, run manifest, results, and an honest
+PASS/REJECT verdict. Research results do not authorize live trading.
+Post-result engine corrections and remaining promotion blockers are recorded
+in `configs/RESEARCH_REMEDIATION.md`; old studies are never silently rewritten.
 
 ## Validate
 
@@ -74,10 +154,12 @@ identity checks, and a final dry-run `forceexit all`.
 
 - `user_data/strategies/`: GMAQ strategy logic
 - `user_data/config.json`: credential-free dry-run configuration
-- `research/`: strategy research scope and future research artifacts
-- `configs/`: live-readiness policy and planning
+- `research/`: preregistration, data availability, run manifests, cost model
+  baseline, and PASS/REJECT evaluation gate for future strategy research
+- `configs/`: live-readiness policy, control-plane spec, and planning
 - `tests/`: focused configuration and custom-behavior contracts
-- `scripts/`: safe product and reliability commands
+- `scripts/`: safe product, reliability, and control-plane commands
+- `control_room/`: localhost-only read-only operator UI and status API
 
 Earlier architecture remains recoverable from Git history and the published
 historical tag; it is not part of the active runtime.

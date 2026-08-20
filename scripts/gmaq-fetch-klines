@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Fetch Binance USD-M public klines into a versioned JSONL file.
+
+Credential-free. Paginated (limit 1500 per request), records sha256 and
+fetch metadata for the research data checklist. This script never reads or
+prints API credentials.
+"""
+
+import argparse
+import calendar
+import hashlib
+import json
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+FAPI = "https://fapi.binance.com"
+KLINES_URL = f"{FAPI}/fapi/v1/klines"
+TIMEOUT_S = 10
+LIMIT = 1500
+
+
+def get_json(url: str) -> list | None:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+                return json.loads(response.read().decode())
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+            time.sleep(2 * (attempt + 1))
+    return None
+
+
+def fetch_range(symbol: str, start_ms: int, end_ms: int, interval: str = "15m", strict: bool = True) -> list[list]:
+    rows: list[list] = []
+    cursor = start_ms
+    while cursor < end_ms:
+        params = urllib.parse.urlencode(
+            {"symbol": symbol, "interval": interval, "startTime": cursor, "endTime": end_ms, "limit": LIMIT}
+        )
+        batch = get_json(f"{KLINES_URL}?{params}")
+        if not batch:
+            if strict:
+                raise RuntimeError(f"fetch failed at cursor {cursor}")
+            break  # partial data; caller records the shortfall
+        rows.extend(batch)
+        last_open = batch[-1][0]
+        if last_open <= cursor:
+            break
+        cursor = last_open + 1
+        time.sleep(0.4)
+    return rows
+
+
+def serialize(rows: list[list]) -> list[str]:
+    return [
+        json.dumps(
+            {
+                "open_time_utc_ms": row[0],
+                "open": row[1],
+                "high": row[2],
+                "low": row[3],
+                "close": row[4],
+                "volume": row[5],
+            },
+            ensure_ascii=False,
+        )
+        for row in rows
+    ]
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-fetch-klines", description="Fetch public Binance USD-M klines")
+    parser.add_argument("--symbol", default="ETHUSDT")
+    parser.add_argument("--start", required=True, help="start date YYYY-MM-DD (UTC)")
+    parser.add_argument("--end", required=True, help="end date YYYY-MM-DD (UTC)")
+    parser.add_argument("--out", required=True, help="output .jsonl path")
+    parser.add_argument("--interval", default="15m", help="klines interval, e.g. 15m or 1d")
+    args = parser.parse_args(argv)
+
+    start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
+    end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
+
+    rows = fetch_range(args.symbol, start_ms, end_ms, args.interval)
+    lines = serialize(rows)
+    payload = "".join(line + "\n" for line in lines)
+
+    out_path = pathlib.Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(payload)
+
+    digest = sha256_text(payload)
+    meta = {
+        "symbol": args.symbol,
+        "interval": args.interval,
+        "start": args.start,
+        "end": args.end,
+        "bars": len(lines),
+        "sha256": digest,
+        "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source": KLINES_URL,
+        "first_open_utc_ms": rows[0][0] if rows else None,
+        "last_open_utc_ms": rows[-1][0] if rows else None,
+    }
+    meta_path = out_path.with_suffix(".meta.json")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(meta, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
