@@ -83,6 +83,10 @@ def test_dashboard_has_no_action_api_or_order_controls():
     assert "/api/action" not in html + javascript
     assert 'method: "POST"' not in javascript
     assert "无 Arm / 无下单入口" in html
+    assert "research.current_pass_count" in javascript
+    assert "VERIFIED_CURATED_V1" in javascript
+    assert "RESEARCH_PASS_SHADOW_ONLY" in javascript
+    assert "const currentPass = 0" not in javascript
 
 
 def test_safe_config_snapshot_never_returns_exchange_credentials(monkeypatch):
@@ -105,6 +109,66 @@ def test_safe_config_snapshot_never_returns_exchange_credentials(monkeypatch):
     assert "key" not in result
     assert "secret" not in result
     assert result["credential_free"] is False
+
+
+def test_research_snapshot_reads_verified_curated_v1_results() -> None:
+    snapshot = server.research_snapshot()
+    studies = {item["study_id"]: item for item in snapshot["studies"]}
+    carry = studies["study-2026-08-20-btceth-spot-perp-carry"]
+    trend = studies["study-2026-08-20-btceth-volscaled-ls-tsmom"]
+    assert carry["evidence_generation"] == "VERIFIED_CURATED_V1"
+    assert carry["total_return"] == pytest.approx(-0.001776255692616413)
+    assert carry["sharpe"] == pytest.approx(-0.38091367612650073)
+    assert carry["max_drawdown"] == pytest.approx(0.004595250858907329)
+    assert carry["trade_count"] == 9
+    assert trend["evidence_generation"] == "VERIFIED_CURATED_V1"
+    assert snapshot["current_pass_count"] == 0
+    assert snapshot["promotion_verdict"] == "BLOCKED_NO_CURRENT_PASS"
+
+
+def test_research_binding_requires_all_v1_sha_pins() -> None:
+    valid = {
+        "dataset_binding": {
+            "data_layer_version": 1,
+            "integrity_verdict": "VERIFIED",
+            "stage": "curated",
+            "quality_verdict": "PASS",
+            "dataset_id": "a" * 64,
+            "snapshot_manifest_sha256": "b" * 64,
+            "files": {"bars": "c" * 64},
+        }
+    }
+    assert server.verified_curated_v1(valid) is True
+    valid["dataset_binding"]["files"]["bars"] = "not-a-sha"
+    assert server.verified_curated_v1(valid) is False
+
+
+def test_verified_research_pass_is_shadow_only(monkeypatch, tmp_path: pathlib.Path) -> None:
+    study = tmp_path / "study-pass"
+    study.mkdir()
+    (study / "results.json").write_text(
+        json.dumps(
+            {
+                "study_id": "study-pass",
+                "verdict": "PASS",
+                "cost_model": {"sha256": server.cost_model_sha()},
+                "dataset_binding": {
+                    "data_layer_version": 1,
+                    "integrity_verdict": "VERIFIED",
+                    "stage": "curated",
+                    "quality_verdict": "PASS",
+                    "dataset_id": "a" * 64,
+                    "snapshot_manifest_sha256": "b" * 64,
+                    "files": {"bars": "c" * 64},
+                },
+                "oos": {"baseline": {"net_total_return": 0.1}},
+            }
+        )
+    )
+    monkeypatch.setattr(server, "RESEARCH_DIR", tmp_path)
+    snapshot = server.research_snapshot()
+    assert snapshot["current_pass_count"] == 1
+    assert snapshot["promotion_verdict"] == "RESEARCH_PASS_SHADOW_ONLY"
 
 
 def test_git_error_is_not_reported_as_clean(monkeypatch):
