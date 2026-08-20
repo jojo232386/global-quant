@@ -23,10 +23,14 @@
 
 ## Data
 
-- data version pin and snapshot id: `<version / snapshot>`
-- checksum of inputs: `<sha256>`
+- Data Layer version and curated dataset ID: `V1 / <dataset id>`
+- integrity / stage / quality: `VERIFIED / curated / PASS`
+- snapshot-manifest SHA-256: `<sha256>`
+- role-to-input-file SHA-256 bindings: `<role / sha256>`
+- checksum of inputs: `<same frozen role / sha256 map>`
 - fetched at (UTC): `<timestamp>`
 - coverage window used: `<start - end>`
+- direct fetch or unregistered input used by runner: `NONE`
 
 ## Configuration
 

@@ -35,13 +35,19 @@
 
 ## 5. Data plan (required)
 
-- sources and retrieval method: `<source, endpoint/vendor>`
+- Data Layer V1 curated dataset name and frozen dataset ID: `<name + id>`
+- VERIFIED snapshot-manifest SHA-256 and input-file SHA-256 bindings:
+  `<manifest sha + role/sha map>`
+- upstream source and the existing V1 retrieval/migration method:
+  `<source + raw -> validated -> curated command/evidence>`
 - fields, frequency, timezone: `<fields> @ <frequency> <timezone>`
 - coverage window: `<start> - <end>`
 - adjustment / mapping rules (splits, rolls, symbol mapping, delistings):
   `<rules>`
 - data version pin and checksum policy: `<version + sha256>`
 - fill `data/DATA_AVAILABILITY_CHECKLIST.md` for the study before running.
+- The formal runner may accept only the bound V1 dataset ID. Direct exchange
+  fetches and unregistered files are invalid formal inputs.
 
 ## 6. Timing and availability (required)
 

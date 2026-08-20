@@ -1,0 +1,731 @@
+#!/usr/bin/env python3
+"""One-shot offline research runner over one verified Data Layer V1 snapshot."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import pathlib
+import random
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from gmaq_data import DataLayerError, default_data_root, verify_snapshot  # noqa: E402
+
+
+STUDY = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-volscaled-ls-tsmom"
+COST_MODEL = ROOT / "configs" / "execution-costs.json"
+DATASET = "btceth-weekly-tsmom"
+DATASET_ID = "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615"
+SNAPSHOT_MANIFEST_SHA = "002a47ae05e7bebb3859e4c5cbcaa450fcc505e86316f50165070df8283cf6b5"
+SCHEMA_ID = "92a61adfe86ce40a0664103d738c10989ac60dfaac63beb3cca64afb9434d462"
+PARENT_SNAPSHOT_ID = "b96f99695323653ae201fe2e860c42721a44169f5419950065452ad91427efb8"
+PREREGISTRATION_SHA = "a67ba9d038c8d4c8a667002f15f6c42635c18aa57dc6c52428b5824f653734c3"
+BINDING_SHA = "6a9e606f8e471b7fd15a22574856c6b255f4a7ca173bf36a445ff4dc5527fa5d"
+COST_SHA = "effa8ab33aa35f94788e77049adf13a4a0a3f226b68771797eded866d2689dc6"
+EXPECTED_FILES = {
+    "BTCUSDT.funding": "2886a5b621e9207bf6cc1da9c3490abd6bb183b512f9a9b7b0f21269373cd35c",
+    "BTCUSDT.klines": "124ab7650b0cd1f4f0b7a7c442ebb857ba6085ef449cd10b52f3b44506ca6feb",
+    "BTCUSDT.mark_8h": "f06bd79f001f83f4435bd8251d7f285c33fa56f657a3b1281c7c805dc701ccc4",
+    "ETHUSDT.funding": "d414437905c5528d31e24eca77e6e751063827a2984a545b3c9b2ab2b07020ff",
+    "ETHUSDT.klines": "f17168b40ebbff533b7a6d99231c7d22621885b8341f67d0c32a4f5812b18c89",
+    "ETHUSDT.mark_8h": "9b7aec88870aebc9e8c8b9edff6d62025044834d94b834beb2028b658c2c30e1",
+    "dataset_manifest": "71a8ec43a0d527b099cd00005ca2a4862626ed16e6f1dcca5a7a68abe40c14aa",
+}
+SYMBOLS = ("BTCUSDT", "ETHUSDT")
+DAY_MS = 86_400_000
+TRAIN_START = 1_609_459_200_000  # 2021-01-01
+TRAIN_END = 1_704_067_200_000  # 2024-01-01
+OOS_START = TRAIN_END
+OOS_MID = 1_745_625_600_000  # 2025-04-26
+SAMPLE_END = 1_787_184_000_000  # 2026-08-20 exclusive
+INITIAL_EQUITY = 1_000.0
+PRIMARY_TREND_DAYS = 180
+TREND_NEIGHBORS = (126, 252)
+PRIMARY_VOL_DAYS = 63
+VOL_NEIGHBORS = (42, 84)
+BOOTSTRAP_SEED = 20260820
+BOOTSTRAP_SAMPLES = 2_000
+BOOTSTRAP_BLOCK_DAYS = 28
+EPSILON = 1e-12
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def finite(value: object, label: str, *, positive: bool = False) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} is not numeric") from error
+    if not math.isfinite(result) or (positive and result <= 0):
+        raise ValueError(f"{label} is invalid")
+    return result
+
+
+def clean_candidate_sha() -> str:
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT, text=True
+    ).strip()
+    if dirty:
+        raise RuntimeError("formal research requires a clean committed worktree")
+    tracked = subprocess.check_output(["git", "ls-files", "-v"], cwd=ROOT, text=True)
+    if any(line and line[0] != "H" for line in tracked.splitlines()):
+        raise RuntimeError("formal research rejects hidden Git index flags")
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+
+
+def load_jsonl(path: pathlib.Path) -> list[dict]:
+    rows = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"non-object JSONL row: {path.name}:{line_number}")
+            rows.append(value)
+    if not rows:
+        raise ValueError(f"empty curated file: {path.name}")
+    return rows
+
+
+def load_curated_dataset(data_root: pathlib.Path, dataset_id: str) -> dict:
+    if dataset_id != DATASET_ID:
+        raise DataLayerError("formal study dataset ID differs from the frozen binding")
+    record = verify_snapshot(
+        data_root,
+        dataset_id,
+        expected_dataset=DATASET,
+        minimum_stage="curated",
+    )
+    expected_record = {
+        "stage": "curated",
+        "quality_verdict": "PASS",
+        "integrity_verdict": "VERIFIED",
+        "manifest_sha256": SNAPSHOT_MANIFEST_SHA,
+        "schema_id": SCHEMA_ID,
+        "parent_snapshot_id": PARENT_SNAPSHOT_ID,
+        "window_start": "2020-01-01",
+        "window_end": "2026-08-20",
+    }
+    for field, expected in expected_record.items():
+        if record.get(field) != expected:
+            raise DataLayerError(f"curated dataset binding mismatch: {field}")
+    files = {item["role"]: item for item in record["files"]}
+    if set(files) != set(EXPECTED_FILES):
+        raise DataLayerError("curated dataset file roles differ from the frozen binding")
+    for role, expected_sha in EXPECTED_FILES.items():
+        if files[role].get("sha256") != expected_sha:
+            raise DataLayerError(f"curated dataset file SHA mismatch: {role}")
+
+    artifact = pathlib.Path(record["artifact_path"])
+    manifest = json.loads((artifact / files["dataset_manifest"]["relpath"]).read_text())
+    if (
+        manifest.get("start_inclusive") != "2020-01-01"
+        or manifest.get("end_exclusive") != "2026-08-20"
+        or tuple(manifest.get("symbols", {})) != SYMBOLS
+        or manifest.get("data_layer_parent_snapshot_id") != PARENT_SNAPSHOT_ID
+        or manifest.get("data_layer_schema_id") != SCHEMA_ID
+    ):
+        raise DataLayerError("curated dataset manifest semantics differ from the binding")
+
+    bars: dict[str, dict[int, dict[str, float]]] = {}
+    funding: dict[str, dict[int, list[tuple[float, float]]]] = {}
+    for symbol in SYMBOLS:
+        symbol_bars = {}
+        for item in load_jsonl(artifact / files[f"{symbol}.klines"]["relpath"]):
+            timestamp = int(item["open_time_utc_ms"])
+            if timestamp in symbol_bars:
+                raise ValueError(f"duplicate curated bar: {symbol} {timestamp}")
+            values = {
+                name: finite(item[name], f"{symbol} {name}", positive=True)
+                for name in ("open", "high", "low", "close")
+            }
+            if values["high"] < max(values["open"], values["close"]) or values["low"] > min(values["open"], values["close"]):
+                raise ValueError(f"invalid curated OHLC envelope: {symbol} {timestamp}")
+            symbol_bars[timestamp] = values
+        expected_days = list(range(1_577_836_800_000, SAMPLE_END, DAY_MS))
+        if sorted(symbol_bars) != expected_days:
+            raise ValueError(f"curated daily coverage differs from frozen window: {symbol}")
+        boundary = finite(manifest["symbols"][symbol]["end_boundary_open"], "end boundary", positive=True)
+        symbol_bars[SAMPLE_END] = {"open": boundary, "high": boundary, "low": boundary, "close": boundary}
+        bars[symbol] = symbol_bars
+
+        by_interval: dict[int, list[tuple[float, float]]] = {}
+        previous = None
+        previous_bucket = None
+        for item in load_jsonl(artifact / files[f"{symbol}.funding"]["relpath"]):
+            timestamp = int(item["fundingTime"])
+            rate = finite(item["fundingRate"], f"{symbol} funding rate")
+            mark = finite(item["markPrice"], f"{symbol} funding mark", positive=True)
+            bucket = timestamp // 28_800_000 * 28_800_000
+            if previous is not None and (
+                timestamp <= previous or bucket != int(previous_bucket) + 28_800_000
+            ):
+                raise ValueError(f"curated funding settlement buckets are gapped or disordered: {symbol}")
+            previous = timestamp
+            previous_bucket = bucket
+            interval_start = ((timestamp - 1) // DAY_MS) * DAY_MS
+            by_interval.setdefault(interval_start, []).append((rate, mark))
+        funding[symbol] = by_interval
+
+    return {
+        "bars": bars,
+        "funding": funding,
+        "record": record,
+        "file_bindings": {role: files[role]["sha256"] for role in sorted(files)},
+    }
+
+
+def load_costs() -> dict:
+    if sha256_file(COST_MODEL) != COST_SHA:
+        raise ValueError("execution cost config differs from preregistration")
+    model = json.loads(COST_MODEL.read_text())
+    fee_bps = finite(model["taker_fee_rate"], "taker fee") * 10_000
+    slippage_bps = finite(model["baseline_slippage_bps_per_side"], "slippage")
+    return {
+        "baseline": (fee_bps + slippage_bps) / 10_000,
+        "stress": (
+            fee_bps * finite(model["stress_fee_multiplier"], "fee stress")
+            + slippage_bps * finite(model["stress_slippage_multiplier"], "slippage stress")
+        )
+        / 10_000,
+    }
+
+
+def is_monday(timestamp: int) -> bool:
+    return time.gmtime(timestamp / 1000).tm_wday == 0
+
+
+def target_at(data: dict, decision: int, trend_days: int, vol_days: int) -> dict[str, float]:
+    latest = decision - DAY_MS
+    result = {}
+    for symbol in SYMBOLS:
+        series = data["bars"][symbol]
+        trend_base = latest - trend_days * DAY_MS
+        closes = [series[latest - offset * DAY_MS]["close"] for offset in range(vol_days, -1, -1)]
+        log_returns = [math.log(right / left) for left, right in zip(closes, closes[1:])]
+        realized_vol = statistics.stdev(log_returns) * math.sqrt(365) if len(log_returns) > 1 else 0.0
+        trend_return = series[latest]["close"] / series[trend_base]["close"] - 1
+        direction = 1.0 if trend_return > 0 else -1.0 if trend_return < 0 else 0.0
+        result[symbol] = direction * min(0.50, 0.10 / max(realized_vol, 0.20))
+    if sum(abs(value) for value in result.values()) > 1.0 + EPSILON:
+        raise ValueError("target gross exposure exceeds one")
+    return result
+
+
+def target_events(
+    data: dict,
+    start: int,
+    end: int,
+    trend_days: int,
+    vol_days: int,
+    execution_lag_days: int,
+) -> tuple[dict[int, dict[str, float]], int]:
+    events = {}
+    decisions = 0
+    for timestamp in range(start, end, DAY_MS):
+        if not is_monday(timestamp):
+            continue
+        target = target_at(data, timestamp, trend_days, vol_days)
+        execution = timestamp + execution_lag_days * DAY_MS
+        if execution < end:
+            events[execution] = target
+        decisions += 1
+    return events, decisions
+
+
+def simulate(
+    data: dict,
+    start: int,
+    end: int,
+    events: dict[int, dict[str, float]],
+    decisions: int,
+    cost_rate: float,
+    funding_mode: str,
+) -> dict:
+    units = {symbol: 0.0 for symbol in SYMBOLS}
+    short_entry = {symbol: None for symbol in SYMBOLS}
+    holding_start = {symbol: None for symbol in SYMBOLS}
+    cash = INITIAL_EQUITY
+    equity_curve = [INITIAL_EQUITY]
+    daily_returns = []
+    daily_timestamps = []
+    contributions = {symbol: 0.0 for symbol in SYMBOLS}
+    holding_days = []
+    turnover = 0.0
+    executed_orders = 0
+    position_entries = 0
+    active_symbol_days = 0
+    gross_observations = []
+    worst_short_excursion = 0.0
+
+    for timestamp in range(start, end, DAY_MS):
+        next_timestamp = timestamp + DAY_MS
+        opens = {symbol: data["bars"][symbol][timestamp]["open"] for symbol in SYMBOLS}
+        next_opens = {symbol: data["bars"][symbol][next_timestamp]["open"] for symbol in SYMBOLS}
+        equity_before = cash + sum(units[symbol] * opens[symbol] for symbol in SYMBOLS)
+        if not math.isfinite(equity_before) or equity_before <= 0:
+            raise ValueError("portfolio equity became non-positive")
+
+        if timestamp in events:
+            target = events[timestamp]
+            current_weights = {
+                symbol: units[symbol] * opens[symbol] / equity_before for symbol in SYMBOLS
+            }
+            symbol_turnover = {
+                symbol: abs(target[symbol] - current_weights[symbol]) for symbol in SYMBOLS
+            }
+            event_turnover = sum(symbol_turnover.values())
+            cost = equity_before * event_turnover * cost_rate
+            post_cost_equity = equity_before - cost
+            if post_cost_equity <= 0:
+                raise ValueError("transaction cost exhausted equity")
+            new_units = {
+                symbol: post_cost_equity * target[symbol] / opens[symbol] for symbol in SYMBOLS
+            }
+            for symbol in SYMBOLS:
+                old = units[symbol]
+                new = new_units[symbol]
+                contributions[symbol] -= equity_before * symbol_turnover[symbol] * cost_rate
+                if abs(new - old) > EPSILON:
+                    executed_orders += 1
+                old_sign = 1 if old > EPSILON else -1 if old < -EPSILON else 0
+                new_sign = 1 if new > EPSILON else -1 if new < -EPSILON else 0
+                if old_sign != new_sign:
+                    if old_sign and holding_start[symbol] is not None:
+                        holding_days.append((timestamp - int(holding_start[symbol])) / DAY_MS)
+                    holding_start[symbol] = timestamp if new_sign else None
+                    if new_sign:
+                        position_entries += 1
+                if new < -EPSILON:
+                    if old >= -EPSILON or old_sign != new_sign:
+                        short_entry[symbol] = opens[symbol]
+                    elif abs(new) > abs(old):
+                        added = abs(new) - abs(old)
+                        short_entry[symbol] = (
+                            abs(old) * float(short_entry[symbol]) + added * opens[symbol]
+                        ) / abs(new)
+                else:
+                    short_entry[symbol] = None
+            units = new_units
+            cash = post_cost_equity - sum(units[symbol] * opens[symbol] for symbol in SYMBOLS)
+            turnover += event_turnover
+
+        gross = sum(abs(units[symbol] * opens[symbol] / equity_before) for symbol in SYMBOLS)
+        gross_observations.append(gross)
+        active_symbol_days += sum(abs(units[symbol]) > EPSILON for symbol in SYMBOLS)
+        for symbol in SYMBOLS:
+            if units[symbol] < -EPSILON:
+                entry = float(short_entry[symbol])
+                high = data["bars"][symbol][timestamp]["high"]
+                worst_short_excursion = max(worst_short_excursion, high / entry - 1)
+            price_pnl = units[symbol] * (next_opens[symbol] - opens[symbol])
+            funding_cash_change = 0.0
+            for rate, mark in data["funding"][symbol].get(timestamp, []):
+                if funding_mode == "actual":
+                    funding_cash_change -= units[symbol] * mark * rate
+                elif funding_mode == "adverse":
+                    funding_cash_change -= abs(units[symbol] * mark) * 5 * abs(rate)
+                else:
+                    raise ValueError("funding mode is invalid")
+            cash += funding_cash_change
+            contributions[symbol] += price_pnl + funding_cash_change
+
+        equity_after = cash + sum(units[symbol] * next_opens[symbol] for symbol in SYMBOLS)
+        if next_timestamp == end:
+            liquidation_equity = equity_after
+            if liquidation_equity <= 0:
+                raise ValueError("equity failed before final liquidation")
+            for symbol in SYMBOLS:
+                value = units[symbol] * next_opens[symbol]
+                liquidation_cost = abs(value) * cost_rate
+                cash += value - liquidation_cost
+                contributions[symbol] -= liquidation_cost
+                if abs(value) > EPSILON:
+                    executed_orders += 1
+                    turnover += abs(value) / liquidation_equity
+                if abs(units[symbol]) > EPSILON and holding_start[symbol] is not None:
+                    holding_days.append((next_timestamp - int(holding_start[symbol])) / DAY_MS)
+                units[symbol] = 0.0
+            equity_after = cash
+        daily_return = equity_after / equity_before - 1
+        if not math.isfinite(daily_return) or daily_return <= -1:
+            raise ValueError("daily return is invalid")
+        daily_returns.append(daily_return)
+        daily_timestamps.append(next_timestamp)
+        equity_curve.append(equity_after)
+
+    return {
+        "equity_curve": equity_curve,
+        "daily_returns": daily_returns,
+        "daily_timestamps": daily_timestamps,
+        "contributions": contributions,
+        "holding_days": holding_days,
+        "turnover": turnover,
+        "executed_orders": executed_orders,
+        "position_entries": position_entries,
+        "active_symbol_days": active_symbol_days,
+        "scheduled_decisions": decisions,
+        "gross_observations": gross_observations,
+        "worst_short_excursion": worst_short_excursion,
+    }
+
+
+def drawdown(equity: list[float]) -> tuple[float, int]:
+    peak = equity[0]
+    peak_index = 0
+    worst = 0.0
+    duration = 0
+    for index, value in enumerate(equity):
+        if value >= peak:
+            peak = value
+            peak_index = index
+        current = 1 - value / peak
+        if current > worst:
+            worst = current
+            duration = index - peak_index
+    return worst, duration
+
+
+def metric_values(simulation: dict) -> dict:
+    returns = simulation["daily_returns"]
+    equity = simulation["equity_curve"]
+    total_return = equity[-1] / equity[0] - 1
+    annual_return = (equity[-1] / equity[0]) ** (365 / len(returns)) - 1
+    sample_std = statistics.stdev(returns) if len(returns) > 1 else 0.0
+    volatility = sample_std * math.sqrt(365)
+    sharpe = statistics.mean(returns) / sample_std * math.sqrt(365) if sample_std > 0 else 0.0
+    downside = [value for value in returns if value < 0]
+    downside_std = statistics.stdev(downside) if len(downside) > 1 else 0.0
+    sortino = statistics.mean(returns) / downside_std * math.sqrt(365) if downside_std > 0 else 0.0
+    maximum_drawdown, duration = drawdown(equity)
+    positive = sum(value for value in returns if value > 0)
+    negative = -sum(value for value in returns if value < 0)
+    consecutive = 0
+    max_consecutive = 0
+    for value in returns:
+        consecutive = consecutive + 1 if value < 0 else 0
+        max_consecutive = max(max_consecutive, consecutive)
+    contributions = simulation["contributions"]
+    contribution_total = sum(abs(value) for value in contributions.values())
+    contribution_share = (
+        max(abs(value) for value in contributions.values()) / contribution_total
+        if contribution_total > 0
+        else 1.0
+    )
+    return {
+        "start_equity": equity[0],
+        "end_equity": equity[-1],
+        "net_total_return": total_return,
+        "annualized_return": annual_return,
+        "annualized_volatility": volatility,
+        "annualized_sharpe": sharpe,
+        "annualized_sortino": sortino,
+        "max_drawdown": maximum_drawdown,
+        "max_drawdown_duration_days": duration,
+        "calmar": annual_return / maximum_drawdown if maximum_drawdown > 0 else None,
+        "daily_win_rate": sum(value > 0 for value in returns) / len(returns),
+        "daily_profit_factor": positive / negative if negative > 0 else None,
+        "daily_observations": len(returns),
+        "scheduled_decisions": simulation["scheduled_decisions"],
+        "executed_symbol_orders": simulation["executed_orders"],
+        "position_entries": simulation["position_entries"],
+        "total_turnover": simulation["turnover"],
+        "average_holding_days": statistics.mean(simulation["holding_days"]) if simulation["holding_days"] else 0.0,
+        "max_consecutive_losing_days": max_consecutive,
+        "active_symbol_days": simulation["active_symbol_days"],
+        "average_gross_exposure": statistics.mean(simulation["gross_observations"]),
+        "maximum_gross_exposure": max(simulation["gross_observations"], default=0.0),
+        "worst_short_adverse_excursion": simulation["worst_short_excursion"],
+        "symbol_net_pnl_contribution": {key: round(value, 8) for key, value in contributions.items()},
+        "largest_absolute_symbol_contribution_share": contribution_share,
+    }
+
+
+def sliced_return_metrics(simulation: dict, start_exclusive: int | None, end_inclusive: int | None) -> dict:
+    selected = [
+        value
+        for timestamp, value in zip(simulation["daily_timestamps"], simulation["daily_returns"], strict=True)
+        if (start_exclusive is None or timestamp > start_exclusive)
+        and (end_inclusive is None or timestamp <= end_inclusive)
+    ]
+    equity = [1.0]
+    for value in selected:
+        equity.append(equity[-1] * (1 + value))
+    sample_std = statistics.stdev(selected) if len(selected) > 1 else 0.0
+    maximum_drawdown, duration = drawdown(equity)
+    return {
+        "net_total_return": equity[-1] - 1,
+        "annualized_sharpe": statistics.mean(selected) / sample_std * math.sqrt(365) if sample_std > 0 else 0.0,
+        "max_drawdown": maximum_drawdown,
+        "max_drawdown_duration_days": duration,
+        "daily_observations": len(selected),
+        "inherits_primary_oos_positions": True,
+    }
+
+
+def run_strategy(
+    data: dict,
+    start: int,
+    end: int,
+    trend_days: int,
+    vol_days: int,
+    lag_days: int,
+    cost_rate: float,
+    funding_mode: str,
+) -> tuple[dict, dict]:
+    events, decisions = target_events(data, start, end, trend_days, vol_days, lag_days)
+    simulation = simulate(data, start, end, events, decisions, cost_rate, funding_mode)
+    return metric_values(simulation), simulation
+
+
+def run_benchmark(data: dict, cost_rate: float) -> dict:
+    simulation = simulate(
+        data,
+        OOS_START,
+        SAMPLE_END,
+        {OOS_START: {symbol: 0.5 for symbol in SYMBOLS}},
+        1,
+        cost_rate,
+        "actual",
+    )
+    return metric_values(simulation)
+
+
+def bootstrap_probability(returns: list[float]) -> float:
+    generator = random.Random(BOOTSTRAP_SEED)
+    positive = 0
+    count = len(returns)
+    for _ in range(BOOTSTRAP_SAMPLES):
+        sample = []
+        while len(sample) < count:
+            start = generator.randrange(count)
+            sample.extend(returns[(start + offset) % count] for offset in range(BOOTSTRAP_BLOCK_DAYS))
+        compounded = math.prod(1 + value for value in sample[:count]) - 1
+        positive += compounded > 0
+    return positive / BOOTSTRAP_SAMPLES
+
+
+def score(results: dict) -> tuple[str, dict]:
+    oos = results["oos"]["baseline"]
+    neighbors = list(results["trend_neighbor_stress"].values()) + list(results["vol_neighbor_stress"].values())
+    checks = {
+        "oos_sharpe_gte_0_70": oos["annualized_sharpe"] >= 0.70,
+        "oos_return_positive": oos["net_total_return"] > 0,
+        "oos_adverse_funding_stress_positive": results["oos"]["stress"]["net_total_return"] > 0,
+        "oos_max_drawdown_lte_20pct": oos["max_drawdown"] <= 0.20,
+        "train_return_positive": results["train"]["baseline"]["net_total_return"] > 0,
+        "both_oos_halves_positive": all(item["net_total_return"] > 0 for item in results["walk_forward_halves"]),
+        "all_neighbor_stress_returns_positive": all(item["net_total_return"] > 0 for item in neighbors),
+        "delayed_stress_positive": results["oos"]["delayed_stress"]["net_total_return"] > 0,
+        "oos_decisions_gte_100": oos["scheduled_decisions"] >= 100,
+        "bootstrap_positive_probability_gte_80pct": results["bootstrap_positive_probability"] >= 0.80,
+        "symbol_contribution_share_lte_75pct": oos["largest_absolute_symbol_contribution_share"] <= 0.75,
+        "short_risk_below_50pct": results["short_risk"]["maximum_adverse_excursion_all_runs"] < 0.50,
+        "data_layer_v1_verified_curated": results["dataset_binding"]["integrity_verdict"] == "VERIFIED"
+        and results["dataset_binding"]["quality_verdict"] == "PASS",
+        "benchmarks_reported": "benchmark_50_50" in results["oos"] and "cash_benchmark_return" in results["oos"],
+    }
+    return ("PASS" if all(checks.values()) else "REJECT"), checks
+
+
+def write_evidence(results: dict, candidate_sha: str) -> None:
+    failed = [name for name, passed in results["gate_checks"].items() if not passed]
+    manifest = f"""# Run Manifest: BTC/ETH volatility-scaled long/short TSMOM
+
+- study id: `{STUDY.name}`
+- implementation candidate SHA: `{candidate_sha}`
+- preregistration SHA-256: `{PREREGISTRATION_SHA}`
+- Data Layer binding SHA-256: `{BINDING_SHA}`
+- runner SHA-256: `{sha256_file(ROOT / 'scripts' / 'gmaq-research-ls-tsmom')}`
+- curated dataset ID: `{DATASET_ID}`
+- snapshot manifest SHA-256: `{SNAPSHOT_MANIFEST_SHA}`
+- schema ID: `{SCHEMA_ID}`
+- validated parent snapshot ID: `{PARENT_SNAPSHOT_ID}`
+- execution-cost config SHA-256: `{COST_SHA}`
+- Data Layer verdict: `VERIFIED / curated / PASS`
+- formal run UTC: `{results['run_at_utc']}`
+- public curated data only; private calls / credentials / orders: `NONE`
+- train: `2021-01-01..2023-12-31 UTC`
+- OOS: `2024-01-01..2026-08-19 UTC`
+- verdict: `{results['verdict']}`
+"""
+    verdict = f"""# Verdict: {results['verdict']}
+
+- OOS net return: `{results['oos']['baseline']['net_total_return']:.2%}`
+- OOS annualized Sharpe: `{results['oos']['baseline']['annualized_sharpe']:.3f}`
+- OOS maximum drawdown: `{results['oos']['baseline']['max_drawdown']:.2%}`
+- OOS adverse-funding stress return: `{results['oos']['stress']['net_total_return']:.2%}`
+- delayed stressed return: `{results['oos']['delayed_stress']['net_total_return']:.2%}`
+- bootstrap positive probability: `{results['bootstrap_positive_probability']:.1%}`
+- failed gates: `{failed}`
+
+This one-shot verdict does not authorize Demo or live trading. A PASS could
+only enter the preregistered prospective shadow gate; a REJECT closes the
+hypothesis without parameter rescue.
+"""
+    checklist = f"""# Data checklist
+
+- Data Layer V1 dataset: `{DATASET}`
+- curated dataset ID: `{DATASET_ID}`
+- snapshot manifest SHA-256: `{SNAPSHOT_MANIFEST_SHA}`
+- integrity / stage / quality: `VERIFIED / curated / PASS`
+- source window: `[2020-01-01, 2026-08-20)` UTC
+- file role/SHA bindings: `{json.dumps(results['dataset_binding']['files'], sort_keys=True)}`
+- direct fetch / unregistered input / private endpoint: `NONE`
+- cross-source verdict: `UNVERIFIED_SINGLE_VENUE`
+"""
+    payloads = {
+        "manifest.md": manifest,
+        "verdict.md": verdict,
+        "data-checklist.md": checklist,
+        "results.json": json.dumps(results, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    }
+    staged: list[tuple[pathlib.Path, pathlib.Path]] = []
+    try:
+        for name, payload in payloads.items():
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=STUDY, prefix=f".{name}.", delete=False
+            ) as handle:
+                handle.write(payload)
+                handle.flush()
+                staged.append((pathlib.Path(handle.name), STUDY / name))
+        for source, destination in staged:
+            source.replace(destination)
+    finally:
+        for source, _ in staged:
+            source.unlink(missing_ok=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="gmaq-research-ls-tsmom")
+    parser.add_argument("--dataset-id", required=True)
+    parser.add_argument("--data-root")
+    args = parser.parse_args(argv)
+    results_path = STUDY / "results.json"
+    if results_path.exists():
+        parser.error("formal result already exists; this study permits one run")
+    candidate_sha = clean_candidate_sha()
+    if sha256_file(STUDY / "preregistration.md") != PREREGISTRATION_SHA:
+        raise SystemExit("STOP: preregistration changed after freezing")
+    if sha256_file(STUDY / "data-layer-binding.md") != BINDING_SHA:
+        raise SystemExit("STOP: Data Layer binding changed after freezing")
+    data_root = pathlib.Path(args.data_root).expanduser().resolve() if args.data_root else default_data_root(ROOT)
+    data = load_curated_dataset(data_root, args.dataset_id)
+    costs = load_costs()
+
+    train, train_sim = run_strategy(data, TRAIN_START, TRAIN_END, PRIMARY_TREND_DAYS, PRIMARY_VOL_DAYS, 1, costs["baseline"], "actual")
+    oos, oos_sim = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_TREND_DAYS, PRIMARY_VOL_DAYS, 1, costs["baseline"], "actual")
+    stress, stress_sim = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_TREND_DAYS, PRIMARY_VOL_DAYS, 1, costs["stress"], "adverse")
+    delayed, delayed_sim = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_TREND_DAYS, PRIMARY_VOL_DAYS, 2, costs["stress"], "adverse")
+    trend_neighbors = {}
+    trend_sims = []
+    for value in TREND_NEIGHBORS:
+        metric, simulation = run_strategy(data, OOS_START, SAMPLE_END, value, PRIMARY_VOL_DAYS, 1, costs["stress"], "adverse")
+        trend_neighbors[str(value)] = metric
+        trend_sims.append(simulation)
+    vol_neighbors = {}
+    vol_sims = []
+    for value in VOL_NEIGHBORS:
+        metric, simulation = run_strategy(data, OOS_START, SAMPLE_END, PRIMARY_TREND_DAYS, value, 1, costs["stress"], "adverse")
+        vol_neighbors[str(value)] = metric
+        vol_sims.append(simulation)
+
+    all_simulations = [train_sim, oos_sim, stress_sim, delayed_sim, *trend_sims, *vol_sims]
+    results = {
+        "schema_version": 1,
+        "study_id": STUDY.name,
+        "run_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "implementation_candidate_sha": candidate_sha,
+        "dataset_binding": {
+            "data_layer_version": 1,
+            "dataset": DATASET,
+            "dataset_id": DATASET_ID,
+            "snapshot_manifest_sha256": SNAPSHOT_MANIFEST_SHA,
+            "schema_id": SCHEMA_ID,
+            "parent_snapshot_id": PARENT_SNAPSHOT_ID,
+            "integrity_verdict": data["record"]["integrity_verdict"],
+            "quality_verdict": data["record"]["quality_verdict"],
+            "stage": data["record"]["stage"],
+            "window_start": data["record"]["window_start"],
+            "window_end": data["record"]["window_end"],
+            "cross_source_verdict": data["record"]["cross_source_verdict"],
+            "files": data["file_bindings"],
+        },
+        "parameters": {
+            "trend_days": PRIMARY_TREND_DAYS,
+            "trend_neighbors": list(TREND_NEIGHBORS),
+            "volatility_days": PRIMARY_VOL_DAYS,
+            "volatility_neighbors": list(VOL_NEIGHBORS),
+            "decision": "Monday 00:00 UTC",
+            "execution": "Tuesday 00:00 UTC",
+            "delayed_execution": "Wednesday 00:00 UTC",
+            "per_symbol_vol_target": 0.10,
+            "volatility_floor": 0.20,
+            "per_symbol_abs_cap": 0.50,
+            "gross_cap": 1.0,
+        },
+        "cost_model": {
+            "sha256": COST_SHA,
+            "baseline_bps_per_side": costs["baseline"] * 10_000,
+            "stress_bps_per_side": costs["stress"] * 10_000,
+            "funding_stress": "5x absolute adverse",
+        },
+        "train": {"baseline": train},
+        "oos": {
+            "baseline": oos,
+            "stress": stress,
+            "delayed_stress": delayed,
+            "benchmark_50_50": run_benchmark(data, costs["baseline"]),
+            "cash_benchmark_return": 0.0,
+        },
+        "walk_forward_halves": [
+            sliced_return_metrics(oos_sim, None, OOS_MID),
+            sliced_return_metrics(oos_sim, OOS_MID, None),
+        ],
+        "trend_neighbor_stress": trend_neighbors,
+        "vol_neighbor_stress": vol_neighbors,
+        "bootstrap": {"seed": BOOTSTRAP_SEED, "samples": BOOTSTRAP_SAMPLES, "block_days": BOOTSTRAP_BLOCK_DAYS},
+        "bootstrap_positive_probability": bootstrap_probability(oos_sim["daily_returns"]),
+        "short_risk": {
+            "maximum_adverse_excursion_all_runs": max(item["worst_short_excursion"] for item in all_simulations),
+            "threshold": 0.50,
+            "account_specific_liquidation_model": False,
+        },
+    }
+    verdict, checks = score(results)
+    results["gate_checks"] = checks
+    results["verdict"] = verdict
+    write_evidence(results, candidate_sha)
+    print(json.dumps({
+        "study_id": STUDY.name,
+        "verdict": verdict,
+        "dataset_id": DATASET_ID,
+        "snapshot_manifest_sha256": SNAPSHOT_MANIFEST_SHA,
+        "oos_return": oos["net_total_return"],
+        "oos_sharpe": oos["annualized_sharpe"],
+        "oos_max_drawdown": oos["max_drawdown"],
+        "failed_gates": [name for name, passed in checks.items() if not passed],
+    }, indent=2, sort_keys=True))
+    return 0 if verdict == "PASS" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

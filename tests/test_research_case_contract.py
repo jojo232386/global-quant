@@ -5,7 +5,7 @@ from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "gmaq-research-backtest"
+SCRIPT = ROOT / "legacy_research_engines" / "gmaq-research-backtest"
 STUDY = ROOT / "research" / "backtests" / "study-2026-08-16-eth15m-momentum"
 
 

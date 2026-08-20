@@ -1,4 +1,7 @@
 import pathlib
+from importlib.machinery import SourceFileLoader
+
+import pytest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -11,6 +14,14 @@ ARTIFACTS = {
     "costs": RESEARCH / "costs" / "COST_MODEL_BASELINE.md",
     "gate": RESEARCH / "gate" / "EVALUATION_GATE.md",
 }
+
+LEGACY_RUNNERS = (
+    "gmaq-research-backtest",
+    "gmaq-research-crosssection",
+    "gmaq-research-pit",
+    "gmaq-research-pit-funding-shock-neutral",
+    "gmaq-research-tsmom",
+)
 
 
 def test_research_readme_indexes_all_artifacts() -> None:
@@ -120,6 +131,30 @@ def test_research_never_authorizes_live_trading() -> None:
     for name, path in ARTIFACTS.items():
         text = path.read_text()
         assert "does not authorize live trading" in text, name
+
+
+@pytest.mark.parametrize("name", LEGACY_RUNNERS)
+def test_legacy_direct_file_runners_cannot_write_new_formal_results(name: str) -> None:
+    script = ROOT / "scripts" / name
+    module = SourceFileLoader(f"retired_{name.replace('-', '_')}", str(script)).load_module()
+    with pytest.raises(SystemExit, match="VERIFIED curated Data Layer V1 dataset ID/SHA"):
+        module.main([])
+
+
+def test_every_active_formal_result_writer_consumes_verified_curated_v1() -> None:
+    writers = []
+    for script in sorted((ROOT / "scripts").glob("gmaq-research-*")):
+        source = script.read_text()
+        if "results.json" not in source:
+            continue
+        writers.append(script.name)
+        assert 'parser.add_argument("--dataset-id", required=True)' in source
+        assert "verify_snapshot(" in source
+        assert 'minimum_stage="curated"' in source
+        assert "expected_dataset=" in source
+        assert "urllib" not in source
+        assert "requests" not in source
+    assert writers == ["gmaq-research-ls-tsmom"]
 
 
 def test_post_result_remediation_is_explicit_and_blocks_promotion() -> None:

@@ -48,6 +48,13 @@ Binance at <https://developers.binance.com/en/docs/catalog/core-trading-derivati
   one-day delayed stress -41.45%. Both frozen lookback neighbors lost money
   under stress and bootstrap confidence was 54.8%. The train/OOS decay and
   ETH drag make this a closed hypothesis, not a promotion candidate.
+- The 2026-08-20 BTC/ETH volatility-scaled long/short TSMOM study consumed the
+  Data Layer V1 curated snapshot
+  `88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615`
+  and ended `REJECT`: OOS return -11.05%, Sharpe -0.152, max drawdown 36.51%,
+  adverse-funding stress -40.19%, delayed stress -34.73%, bootstrap confidence
+  33.0%, and worst short adverse excursion 92.02%. This hypothesis is closed
+  without parameter rescue.
 - A corrected result must be a new preregistration; changing the old study in
   place after seeing its outcome would contaminate the research record.
 

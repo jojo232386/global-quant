@@ -7,6 +7,9 @@
 
 ## A. Provenance
 
+- Data Layer version / dataset / curated dataset ID: `V1 / <name> / <id>`
+- registry integrity / stage / quality: `VERIFIED / curated / PASS`
+- snapshot-manifest and role-to-file SHA-256 bindings: `<evidence>`
 - source and access method: `<vendor / public endpoint>`
 - retrieval datetime (UTC) and frequency: `<when fetched, how often>`
 - coverage window and gaps: `<start - end; known gaps>`
@@ -16,6 +19,7 @@
 - symbol / venue mapping table: `<mapping>`
 - data snapshot or checksum: `<snapshot id / sha256>`
 - data version pin: `<version>`
+- formal runner direct fetch / unregistered input: `NONE`
 
 ## B. Quality checks
 
