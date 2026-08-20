@@ -454,19 +454,32 @@ def reconcile_binance_usdm_truth(
 
 def evaluate_live_candidate(
     *,
-    account_evidence: dict,
-    broker_evidence: dict,
-    readiness: dict,
-    strategy_result: dict,
-    verified_dataset: dict,
-    candidate_sha: str,
-    config_sha256: str,
-    now_epoch: int,
+    account_evidence: object,
+    broker_evidence: object,
+    readiness: object,
+    strategy_result: object,
+    verified_dataset: object,
+    candidate_sha: object,
+    config_sha256: object,
+    now_epoch: object,
     max_evidence_age_seconds: int = 15 * 60,
 ) -> dict:
     """Return candidate eligibility, never live-entry authority."""
 
     blockers: list[str] = []
+    for label, value in (
+        ("account", account_evidence),
+        ("broker", broker_evidence),
+        ("readiness", readiness),
+    ):
+        if not isinstance(value, dict):
+            blockers.append(f"{label}_evidence_invalid")
+    account_evidence = account_evidence if isinstance(account_evidence, dict) else {}
+    broker_evidence = broker_evidence if isinstance(broker_evidence, dict) else {}
+    readiness = readiness if isinstance(readiness, dict) else {}
+    if not isinstance(now_epoch, int) or isinstance(now_epoch, bool) or now_epoch < 0:
+        blockers.append("evaluation_time_invalid")
+        now_epoch = 0
     if (
         not isinstance(max_evidence_age_seconds, int)
         or isinstance(max_evidence_age_seconds, bool)
@@ -474,9 +487,9 @@ def evaluate_live_candidate(
     ):
         blockers.append("evidence_age_limit_invalid")
         max_evidence_age_seconds = MAX_EVIDENCE_AGE_SECONDS
-    if not GIT_SHA_RE.fullmatch(candidate_sha):
+    if not isinstance(candidate_sha, str) or not GIT_SHA_RE.fullmatch(candidate_sha):
         blockers.append("candidate_sha_invalid")
-    if not SHA256_RE.fullmatch(config_sha256):
+    if not isinstance(config_sha256, str) or not SHA256_RE.fullmatch(config_sha256):
         blockers.append("config_sha256_invalid")
     blockers.extend(f"account_{item}" for item in _identity_errors(account_evidence, candidate_sha, config_sha256))
     if account_evidence.get("schema_version") != 2:
