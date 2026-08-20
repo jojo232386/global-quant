@@ -17,6 +17,7 @@ from gmaq_data import (  # noqa: E402
     DataLayerError,
     default_data_root,
     initialize,
+    migrate_carry,
     migrate_tsmom,
     status_summary,
     verify_snapshot,
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("init")
     migrate = subparsers.add_parser("migrate-tsmom")
     migrate.add_argument("--source-dir", required=True)
+    migrate_carry_parser = subparsers.add_parser("migrate-carry")
+    migrate_carry_parser.add_argument("--source-dir", required=True)
     verify = subparsers.add_parser("verify")
     verify.add_argument("--snapshot-id", required=True)
     status = subparsers.add_parser("status")
@@ -47,6 +50,12 @@ def main(argv: list[str] | None = None) -> int:
             result = {"verdict": "INITIALIZED", "data_root": str(data_root)}
         elif args.command == "migrate-tsmom":
             result = migrate_tsmom(
+                source_dir=pathlib.Path(args.source_dir),
+                data_root=data_root,
+                repo_root=ROOT,
+            )
+        elif args.command == "migrate-carry":
+            result = migrate_carry(
                 source_dir=pathlib.Path(args.source_dir),
                 data_root=data_root,
                 repo_root=ROOT,

@@ -1,0 +1,23 @@
+{
+  "authoritative_sources": {
+    "source_funding": "https://fapi.binance.com/fapi/v1/fundingRate",
+    "source_mark_klines": "https://fapi.binance.com/fapi/v1/markPriceKlines",
+    "source_spot_klines": "https://api.binance.com/api/v3/klines"
+  },
+  "dataset": "btceth-spot-perp-carry",
+  "fields": {
+    "funding": ["fundingRate", "fundingTime", "markPrice", "markPriceSource", "symbol"],
+    "mark_8h": ["open_time_utc_ms", "open", "high", "low", "close"],
+    "spot_8h": ["open_time_utc_ms", "open", "high", "low", "close", "volume"]
+  },
+  "intervals": {
+    "funding_bucket_ms": 28800000,
+    "mark_8h_ms": 28800000,
+    "spot_8h_ms": 28800000
+  },
+  "market": "crypto_spot_and_perpetual",
+  "schema_version": 1,
+  "symbols": ["BTCUSDT", "ETHUSDT"],
+  "time_standard": "UTC",
+  "venue": "Binance"
+}
