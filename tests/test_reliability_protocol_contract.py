@@ -90,8 +90,9 @@ def test_live_readiness_stays_planning_only_and_lists_blockers() -> None:
     for blocker in (
         "sole-operator status are unverified",
         "account modes are unverified",
-        "no same-day, version-bound account evidence",
-        "Portfolio Margin account",
+        "None of those historical values is accepted as current",
+        "both returned Binance `-2015`",
+        "remain `UNVERIFIED`",
         "not approved",
         "reliability run has not yet been completed",
         "cannot be inferred from dry-run",
