@@ -222,3 +222,26 @@ def test_pending_carry_study_cannot_bypass_data_layer_v1() -> None:
     assert "Latest formal study" in readme
     assert "spot-perp-carry" in readme
     assert "REJECT" in readme
+
+
+def test_forward_relative_value_study_is_locked_before_data_and_results() -> None:
+    path = (
+        RESEARCH
+        / "backtests"
+        / "study-2026-08-21-btceth-relative-value-forward"
+        / "preregistration.md"
+    )
+    text = path.read_text()
+    for marker in (
+        "WAITING_FOR_PROSPECTIVE_WINDOW",
+        "2026-08-21 00:00 UTC",
+        "2027-02-17 00:00 UTC",
+        "UNASSIGNED",
+        "raw -> validated -> curated",
+        'verify_snapshot(..., minimum_stage="curated")',
+        "No formal runner may fetch Binance",
+        "one formal run",
+        "minimum 30 completed trades",
+        "no parameter rescue",
+    ):
+        assert marker in text

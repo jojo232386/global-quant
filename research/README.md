@@ -37,6 +37,10 @@ active runtime, and it does not authorize live trading.
   separately bound VERIFIED Data Layer V1 curated dataset and is `REJECT`:
   OOS -0.18%, Sharpe -0.381, only 9 active symbol-weeks, and all cost/funding/
   delay stresses negative. The hypothesis is closed without parameter rescue.
+- Next preregistered study: `study-2026-08-21-btceth-relative-value-forward`
+  is `WAITING_FOR_PROSPECTIVE_WINDOW`. It cannot fetch or run formally before
+  its frozen forward window completes and a new VERIFIED curated V1 dataset ID
+  plus manifest/schema/file SHAs are bound. It is not a current PASS.
 
 ## Layout
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the preregistered BTC/ETH daily TSMOM dataset.
+"""Fetch a preregistered BTC/ETH public Data Layer V1 source dataset.
 
 Uses only Binance USD-M public endpoints. The output lives under ignored
 user_data/data and is pinned by SHA-256 in a manifest. No credential is read.
@@ -18,7 +18,8 @@ from importlib.machinery import SourceFileLoader
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-STUDY = ROOT / "research" / "backtests" / "study-2026-08-20-btceth-weekly-tsmom"
+BACKTESTS = ROOT / "research" / "backtests"
+DEFAULT_STUDY_ID = "study-2026-08-20-btceth-weekly-tsmom"
 DEFAULT_OUT = ROOT / "user_data" / "data" / "tsmom"
 SYMBOLS = ("BTCUSDT", "ETHUSDT")
 DAY_MS = 86_400_000
@@ -37,6 +38,16 @@ def load_script(name: str, path: pathlib.Path):
 
 def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def study_preregistration(study_id: str) -> pathlib.Path:
+    if pathlib.PurePath(study_id).name != study_id or not study_id.startswith("study-"):
+        raise ValueError("study id must be one flat study-* directory name")
+    study = BACKTESTS / study_id
+    preregistration = study / "preregistration.md"
+    if study.is_symlink() or preregistration.is_symlink() or not preregistration.is_file():
+        raise ValueError("study preregistration must be a regular file")
+    return preregistration
 
 
 def validate_daily_rows(rows: list[list], start_ms: int, end_ms: int) -> list[list]:
@@ -151,7 +162,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", default="2020-01-01", help="inclusive UTC date")
     parser.add_argument("--end", default="2026-08-20", help="exclusive UTC date")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT))
+    parser.add_argument("--study-id", default=DEFAULT_STUDY_ID)
     args = parser.parse_args(argv)
+
+    try:
+        preregistration = study_preregistration(args.study_id)
+    except ValueError as error:
+        parser.error(str(error))
 
     start_ms = int(calendar.timegm(time.strptime(args.start, "%Y-%m-%d")) * 1000)
     end_ms = int(calendar.timegm(time.strptime(args.end, "%Y-%m-%d")) * 1000)
@@ -166,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
 
     manifest = {
         "schema_version": 1,
-        "study_id": STUDY.name,
+        "study_id": args.study_id,
         "fetched_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_klines": fetcher.KLINES_URL,
         "source_funding": multi.FUNDING_URL,
@@ -175,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         "end_exclusive": args.end,
         "interval": "1d",
         "symbols": {},
-        "preregistration_sha256": sha256_bytes((STUDY / "preregistration.md").read_bytes()),
+        "preregistration_sha256": sha256_bytes(preregistration.read_bytes()),
         "credential_scope": "public_endpoints_only",
     }
 
