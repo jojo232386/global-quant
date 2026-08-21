@@ -315,7 +315,7 @@ LAST_LOOP_EPOCH=$START_EPOCH
 refresh_arm() {
   local reason=$1 suffix=$2
   ./scripts/gmaq-control disarm --reason "$reason" >/dev/null
-  ./scripts/gmaq-control preflight >/dev/null
+  record_command "$EVIDENCE_DIR/preflight-${suffix}.json" ./scripts/gmaq-control preflight >/dev/null
   ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-${suffix}" --ttl-seconds 3600 >/dev/null
 }
 
@@ -488,7 +488,7 @@ while true; do
     sleep 15
     docker network connect "$NETWORK" "$CONTAINER_NAME"
     wait_ping
-    ./scripts/gmaq-control preflight >/dev/null
+    record_command "$EVIDENCE_DIR/preflight-network.json" ./scripts/gmaq-control preflight >/dev/null
     record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
     ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-network" --ttl-seconds 3600 >/dev/null
     append_event E5 PASS "network interruption recovered with reconciliation"

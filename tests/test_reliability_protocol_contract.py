@@ -77,6 +77,8 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert 'LOOP_GAP_SECONDS < 0 || LOOP_GAP_SECONDS > MAX_LOOP_GAP_SECONDS' in text
     assert 'while true; do' in text and 'NOW >= END_EPOCH' in text
     assert 'continuous soak monitor gap is invalid' in text
+    assert 'preflight-${suffix}.json' in text
+    assert 'preflight-network.json' in text
     assert "runtime-binding.json" in text
     assert "initial-audit-verify.json" in text
     assert text.count("final-audit-verify.json") >= 2
@@ -86,6 +88,12 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     smoke = text[text.index("if [[ $MODE == smoke ]]"):text.index("# A promoted soak")]
     assert "gmaq-control arm" not in smoke
     assert "SMOKE_ONLY_PASS" in smoke
+
+
+def test_protocol_preserves_every_refresh_preflight_evidence() -> None:
+    flat = " ".join(PROTOCOL.read_text().split())
+    assert "five-sample clock evidence" in flat
+    assert "including a failed refresh" in flat
 
 
 def test_runner_anchors_audit_after_runtime_binding() -> None:

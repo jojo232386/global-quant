@@ -81,6 +81,8 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 - `audit-start-anchor.json` and `initial-audit-verify.json`: the verified
   predecessor hash and record count anchoring that segment to the pre-soak chain.
 - `health-samples.jsonl`: timestamped E1 verdict records at the six-hour cadence.
+- `preflight-*.json`: the complete five-sample clock evidence and every other
+  preflight check for each authorization refresh, including a failed refresh.
 - `reconcile-records.jsonl`: timestamped E2 verdict records at the six-hour cadence.
 - `trade-baseline.json` and `trade-lifecycle.json`: the pre-E0 database
   identity boundary and proof of a complete post-baseline canary round trip.

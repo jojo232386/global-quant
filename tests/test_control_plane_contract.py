@@ -196,7 +196,8 @@ def test_alerts_route_fail_verdicts_and_never_leak_credentials() -> None:
 def test_preflight_is_fail_closed_on_unknown_inputs() -> None:
     text = SCRIPT.read_text()
     assert "CLOCK_OFFSET_LIMIT_S" in text
-    assert "exchange time unreachable" in text
+    assert "INSUFFICIENT_QUALIFIED_SAMPLES" in text
+    assert "exchange_time_unreachable" in text
     assert "login failed or credentials missing" in text
     assert "docker compose unavailable" in text
     # FAIL/UNKNOWN verdicts must exit non-zero, not just ok=False.
@@ -206,6 +207,134 @@ def test_preflight_is_fail_closed_on_unknown_inputs() -> None:
     kill_source = text[text.index("def kill") : text.index("def exit_all")]
     assert "api_login" not in kill_source
     assert "docker" in kill_source
+
+
+def clock_sample(attempt: int, offset_s: float, rtt_s: float = 0.1) -> dict:
+    return {
+        "attempt": attempt,
+        "ok": True,
+        "server_time_ms": 1_900_000_000_000,
+        "local_start_epoch_ms": 1_900_000_000_000,
+        "local_end_epoch_ms": 1_900_000_000_100,
+        "rtt_s": rtt_s,
+        "offset_s": offset_s,
+    }
+
+
+def test_clock_assessment_tolerates_one_transient_outlier() -> None:
+    control = load_control()
+    assessment = control.assess_exchange_clock(
+        [
+            clock_sample(1, 0.02),
+            clock_sample(2, -0.03),
+            clock_sample(3, 8.0),
+            clock_sample(4, 0.01),
+            clock_sample(5, 0.04),
+        ]
+    )
+
+    assert assessment["status"] == "PASS"
+    assert assessment["passed"] is True
+    assert assessment["qualified_sample_count"] == 5
+    assert assessment["estimate_offset_s"] == 0.02
+
+
+def test_clock_assessment_rejects_sustained_offset() -> None:
+    control = load_control()
+    assessment = control.assess_exchange_clock(
+        [clock_sample(attempt, offset) for attempt, offset in enumerate([2.2, 2.4, 2.5, 2.6, 0.1], 1)]
+    )
+
+    assert assessment["status"] == "SUSTAINED_OFFSET_EXCEEDED"
+    assert assessment["passed"] is False
+    assert assessment["estimate_offset_s"] == 2.4
+
+
+def test_clock_assessment_rejects_insufficient_low_latency_evidence() -> None:
+    control = load_control()
+    assessment = control.assess_exchange_clock(
+        [
+            clock_sample(1, 0.01),
+            clock_sample(2, -0.01),
+            clock_sample(3, 0.0, rtt_s=2.1),
+            {"attempt": 4, "ok": False, "error": "exchange_time_unreachable"},
+            {"attempt": 5, "ok": False, "error": "exchange_time_unreachable"},
+        ]
+    )
+
+    assert assessment["status"] == "INSUFFICIENT_QUALIFIED_SAMPLES"
+    assert assessment["passed"] is False
+    assert assessment["estimate_offset_s"] is None
+    assert assessment["qualified_sample_count"] == 2
+
+
+def test_clock_assessment_rejects_non_finite_or_boolean_samples() -> None:
+    control = load_control()
+    assessment = control.assess_exchange_clock(
+        [
+            clock_sample(1, 0.01),
+            clock_sample(2, -0.01),
+            clock_sample(3, float("nan")),
+            clock_sample(4, True),
+            clock_sample(5, 0.0, rtt_s=float("inf")),
+        ]
+    )
+
+    assert assessment["status"] == "INSUFFICIENT_QUALIFIED_SAMPLES"
+    assert assessment["passed"] is False
+    assert assessment["qualified_sample_count"] == 2
+
+
+def test_clock_sample_records_exact_failure_evidence(monkeypatch) -> None:
+    control = load_control()
+    times = iter([1_900_000_000.0, 1_900_000_000.25])
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"serverTime":1900000000100}'
+
+    monkeypatch.setattr(control.time, "time", lambda: next(times))
+    monkeypatch.setattr(control.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    sample = control.exchange_time_sample(3)
+
+    assert sample == {
+        "attempt": 3,
+        "ok": True,
+        "server_time_ms": 1_900_000_000_100,
+        "local_start_epoch_ms": 1_900_000_000_000,
+        "local_end_epoch_ms": 1_900_000_000_250,
+        "rtt_s": 0.25,
+        "offset_s": 0.15,
+    }
+
+
+def test_alert_always_persists_local_status(tmp_path, monkeypatch, capsys) -> None:
+    control = load_control()
+    monkeypatch.setattr(control, "AUDIT_DIR", tmp_path)
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(
+        control,
+        "deliver_alert",
+        lambda *_args, **_kwargs: {
+            "channels_configured": [],
+            "delivered": [],
+            "sent": False,
+        },
+    )
+    monkeypatch.setattr(control, "append_audit", lambda *_args, **_kwargs: {"ok": True})
+
+    control.dispatch_alert("preflight", "FAIL", failed=["clock offset"])
+
+    status = json.loads((tmp_path / "last-alert.json").read_text())
+    assert status["delivery_verdict"] == "NO_CHANNELS"
+    assert status["payload"] == {"failed": ["clock offset"]}
+    assert "GMAQ_ALERT event=preflight verdict=FAIL delivery=NO_CHANNELS" in capsys.readouterr().err
 
 
 def test_bind_and_arm_outputs_are_accepted_by_strategy_gate(tmp_path, monkeypatch) -> None:
