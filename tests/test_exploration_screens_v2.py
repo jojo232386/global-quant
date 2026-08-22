@@ -90,6 +90,30 @@ def test_position_return_costs_and_funding():
     assert got[2] == pytest.approx(0.0 + 0.0003 - 2 * 0.001)
 
 
+def test_overlapping_events_net_with_cap():
+    # event A (k=1, h=3, +1) covers bars 2,3,4; event B (k=2, h=3, -1)
+    # covers bars 3,4,5. Netting: bar2 +1, bars 3-4 cancel to 0, bar5 -1.
+    got = v2.apply_events_netted(7, [(1, 3, 1.0), (2, 3, -1.0)])
+    assert got == [0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0]
+    # same-direction overlap nets to +2 then caps at +1
+    got2 = v2.apply_events_netted(5, [(0, 2, 1.0), (1, 2, 1.0)])
+    assert got2 == [0.0, 1.0, 1.0, 1.0, 0.0]
+
+
+def test_judgment_uses_same_cost_benchmark_for_stress():
+    # stress comparison must use the 2x-cost benchmark: a strategy at 2x
+    # costs beating only the 1x benchmark is NOT a stress survivor.
+    base = [{"net": {"sharpe": 1.5, "calmar": 1.2}, "tag": "a"}]
+    stress = [{"net": {"sharpe": 1.05, "calmar": 1.0}, "tag": "a"}]
+    bench_1x = {"sharpe": 1.0, "calmar": 0.9}
+    bench_2x = {"sharpe": 1.1, "calmar": 0.95}
+    out = v2.judge_beats_and_stress(
+        base, stress, bench_1x, mode="vs_benchmark",
+        stress_benchmark_metrics=bench_2x)
+    # 1.05 < 1.1 stress benchmark -> dropped even though it beats 1x
+    assert out["verdict"] == "DROPPED_COST_FRAGILE"
+
+
 def test_judgment_modes():
     bench = {"sharpe": 1.0, "calmar": 0.9}
     base = [

@@ -158,6 +158,17 @@ def run_expl008(btc_ret, eth_ret, btc_close, eth_close, btc_fund, eth_fund,
     return results, benchmark
 
 
+def apply_events_netted(length: int, events: list[tuple[int, int, float]]) -> list[float]:
+    """Net overlapping event positions with a ±1 cap (spec: 'overlapping
+    events net; position capped at ±1'). Each event (k, horizon, position)
+    covers bars k+1 .. k+horizon."""
+    pending = [0.0] * length
+    for k, horizon, position in events:
+        for m in range(k + 1, min(k + 1 + horizon, length)):
+            pending[m] += position
+    return [max(-1.0, min(1.0, p)) for p in pending]
+
+
 def run_expl015(btc_ret, eth_ret, btc_close, eth_close, btc_fund, eth_fund,
                 cost: float) -> list[dict]:
     """Post-jump conditional drift grid; benchmark is cash (Sharpe > 0)."""
@@ -172,7 +183,7 @@ def run_expl015(btc_ret, eth_ret, btc_close, eth_close, btc_fund, eth_fund,
                 rv = realized_vol(rets, JUMP_VOL_LOOKBACK)
                 # funding z from strictly prior daily sums
                 fund_hist: list[float] = []
-                target: list[float | None] = [None] * len(rets)
+                events: list[tuple[int, int, float]] = []
                 for k in range(len(rets)):
                     z = None
                     if len(fund_hist) >= FUNDING_Z_MIN_HISTORY:
@@ -186,10 +197,9 @@ def run_expl015(btc_ret, eth_ret, btc_close, eth_close, btc_fund, eth_fund,
                         if jump:
                             direction = math.copysign(1.0, rets[k])
                             position = direction if z <= 0 else -direction
-                            for m in range(k + 1, min(k + 1 + horizon, len(rets))):
-                                target[m] = position
+                            events.append((k, horizon, position))
                     fund_hist.append(fund[k])
-                positions = [0.0 if t is None else t for t in target]
+                positions = apply_events_netted(len(rets), events)
                 legs.append(position_return_series(rets, positions, fund, cost))
             portfolio = [0.5 * a + 0.5 * b for a, b in zip(*legs)]
             results.append({
@@ -199,17 +209,24 @@ def run_expl015(btc_ret, eth_ret, btc_close, eth_close, btc_fund, eth_fund,
     return results
 
 
-def judge_beats_and_stress(base_rows, stress_rows, benchmark_metrics, mode):
+def judge_beats_and_stress(base_rows, stress_rows, benchmark_metrics, mode,
+                           stress_benchmark_metrics=None):
     """Shared frozen judgment: beats both Sharpe and Calmar (expl008) or
     Sharpe > 0 (expl015 cash mode); primary = best baseline Sharpe among
-    stress survivors."""
+    stress survivors. The stress regime compares against the SAME-cost
+    benchmark (2x-cost strategy vs 2x-cost benchmark), not the 1x one."""
     if mode == "vs_benchmark":
-        beats = lambda m: (m["net"]["sharpe"] > benchmark_metrics["sharpe"]
-                           and m["net"]["calmar"] > benchmark_metrics["calmar"])
+        stress_bench = stress_benchmark_metrics or benchmark_metrics
+        beats_base = lambda m: (
+            m["net"]["sharpe"] > benchmark_metrics["sharpe"]
+            and m["net"]["calmar"] > benchmark_metrics["calmar"])
+        beats_stress = lambda m: (
+            m["net"]["sharpe"] > stress_bench["sharpe"]
+            and m["net"]["calmar"] > stress_bench["calmar"])
     else:
-        beats = lambda m: m["net"]["sharpe"] > 0.0
-    survivors = [i for i, row in enumerate(stress_rows) if beats(stress_rows[i])]
-    baseline_beats = sum(beats(row) for row in base_rows)
+        beats_base = beats_stress = lambda m: m["net"]["sharpe"] > 0.0
+    survivors = [i for i, row in enumerate(stress_rows) if beats_stress(row)]
+    baseline_beats = sum(beats_base(row) for row in base_rows)
     if survivors:
         primary = max((base_rows[i] for i in survivors),
                       key=lambda row: row["net"]["sharpe"])
@@ -236,7 +253,7 @@ def main() -> None:
     # closes passed to signal builders are the WARM closes (len = rets + 1)
     e8_base, e8_bench = run_expl008(
         btc_ret, eth_ret, btc_warm, eth_warm, btc_fund, eth_fund, COST_PER_SIDE)
-    e8_stress, _ = run_expl008(
+    e8_stress, e8_stress_bench = run_expl008(
         btc_ret, eth_ret, btc_warm, eth_warm, btc_fund, eth_fund, COST_PER_SIDE * 2)
     e15_base = run_expl015(
         btc_ret, eth_ret, btc_warm, eth_warm, btc_fund, eth_fund, COST_PER_SIDE)
@@ -244,7 +261,8 @@ def main() -> None:
         btc_ret, eth_ret, btc_warm, eth_warm, btc_fund, eth_fund, COST_PER_SIDE * 2)
 
     e8_judgment = judge_beats_and_stress(
-        e8_base, e8_stress, e8_bench["ungated_tsmom"], mode="vs_benchmark")
+        e8_base, e8_stress, e8_bench["ungated_tsmom"], mode="vs_benchmark",
+        stress_benchmark_metrics=e8_stress_bench["ungated_tsmom"])
     e15_judgment = judge_beats_and_stress(
         e15_base, e15_stress, None, mode="vs_cash")
 
@@ -269,7 +287,10 @@ def main() -> None:
                                  "formal gate retains it",
         },
         "expl008_judgment": e8_judgment,
-        "expl008_benchmark": {k: round_metrics(v) for k, v in e8_bench.items()},
+        "expl008_benchmark": {
+            "ungated_1x": round_metrics(e8_bench["ungated_tsmom"]),
+            "ungated_2x_stress": round_metrics(e8_stress_bench["ungated_tsmom"]),
+        },
         "expl008_baseline": present(e8_base),
         "expl008_cost_stress_2x": present(e8_stress),
         "expl015_judgment": e15_judgment,

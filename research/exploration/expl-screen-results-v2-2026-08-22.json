@@ -20,12 +20,19 @@
     "stress_survivors_count": "0/4"
   },
   "expl008_benchmark": {
-    "ungated_tsmom": {
+    "ungated_1x": {
       "net_total_return": 5.7378,
       "annualized_return": 0.6444,
       "sharpe": 1.057,
       "calmar": 1.3054,
       "max_drawdown": -0.4936
+    },
+    "ungated_2x_stress": {
+      "net_total_return": 4.0224,
+      "annualized_return": 0.5231,
+      "sharpe": 0.9473,
+      "calmar": 0.9968,
+      "max_drawdown": -0.5248
     }
   },
   "expl008_baseline": [
@@ -122,7 +129,7 @@
   ],
   "expl015_judgment": {
     "verdict": "DROPPED_COST_FRAGILE",
-    "baseline_beats_count": "1/6",
+    "baseline_beats_count": "2/6",
     "stress_survivors_count": "0/6"
   },
   "expl015_baseline": [
@@ -141,10 +148,10 @@
       "k_sigma": 3,
       "horizon": 3,
       "net": {
-        "net_total_return": -0.0737,
-        "annualized_return": -0.0198,
-        "sharpe": 0.0223,
-        "calmar": -0.0644,
+        "net_total_return": -0.0424,
+        "annualized_return": -0.0112,
+        "sharpe": 0.0618,
+        "calmar": -0.0367,
         "max_drawdown": -0.3067
       }
     },
@@ -152,11 +159,11 @@
       "k_sigma": 3,
       "horizon": 5,
       "net": {
-        "net_total_return": -0.1685,
-        "annualized_return": -0.047,
-        "sharpe": -0.0465,
-        "calmar": -0.1322,
-        "max_drawdown": -0.3553
+        "net_total_return": -0.0399,
+        "annualized_return": -0.0106,
+        "sharpe": 0.0782,
+        "calmar": -0.0371,
+        "max_drawdown": -0.2845
       }
     },
     {
@@ -209,10 +216,10 @@
       "k_sigma": 3,
       "horizon": 3,
       "net": {
-        "net_total_return": -0.1513,
-        "annualized_return": -0.0419,
-        "sharpe": -0.0813,
-        "calmar": -0.1282,
+        "net_total_return": -0.1227,
+        "annualized_return": -0.0335,
+        "sharpe": -0.0418,
+        "calmar": -0.1027,
         "max_drawdown": -0.3266
       }
     },
@@ -220,11 +227,11 @@
       "k_sigma": 3,
       "horizon": 5,
       "net": {
-        "net_total_return": -0.237,
-        "annualized_return": -0.0681,
-        "sharpe": -0.1313,
-        "calmar": -0.1786,
-        "max_drawdown": -0.3813
+        "net_total_return": -0.1189,
+        "annualized_return": -0.0325,
+        "sharpe": -0.0154,
+        "calmar": -0.1054,
+        "max_drawdown": -0.3079
       }
     },
     {
