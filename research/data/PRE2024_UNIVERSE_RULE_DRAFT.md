@@ -20,9 +20,16 @@ data source, no new governance.
 - Bars: 1d klines ONLY (breadth over granularity; cross-sectional cards
   are daily/weekly). Funding: 8h rates (needed by Family B conditioning).
   Mark price: NOT fetched (no queued card needs it).
-- Window: exchange launch (2019-09) .. 2023-12-31 inclusive. Nothing from
-  the tainted 2024+ region is fetched, structurally preventing its use in
-  selection.
+- Window: exchange launch (2019-09) .. 2023-12-31 inclusive. No 2024+
+  bar data is fetched. This does NOT make the dataset PIT-clean by itself:
+  the candidate list comes from today's `exchangeInfo`, so 2026 listing
+  status participates in pool construction.
+- Honest labeling: the candidate set cannot cover contracts delisted
+  before today (public endpoints expose no delisting archive). The
+  dataset is therefore a **survivor-biased exploration set** and every
+  consuming artifact must carry that label; it must not be described as
+  a structurally taint-free or complete historical domain. The prior PIT
+  studies carried the same limitation.
 - Endpoints: public, no credentials, read-only.
 
 ## PIT universe rule (frozen)
@@ -54,15 +61,20 @@ data source, no new governance.
   the overlapping window must match curated `88d9ff34` values exactly
   (spot-check in validation).
 
-## Acceptance criteria
+## Acceptance criteria (exact)
 
 - Symbol count and per-year pool sizes recorded; expected order of
-  magnitude: tens of symbols eligible by 2022 (exchange-listed perps with
-  $5M+ median volume), NOT hundreds.
-- PIT pool membership is a pure function of the raw data (re-running the
-  filter reproduces identical pools).
-- BTC/ETH overlap spot-check passes against `88d9ff34`.
-- Registry replay VERIFIED; quarantine zero.
+  magnitude: tens of symbols eligible by 2022, NOT hundreds.
+- PIT pool membership is a pure function of the raw data: re-running the
+  filter must reproduce identical pools (pipeline asserts set equality).
+- Cross-validation against curated `88d9ff34` (BTC/ETH 1d): every
+  overlapping bar must match on close after float parsing with tolerance
+  0 (exact string-to-float equality); any mismatch fails the snapshot.
+- Registry replay must be `VERIFIED` with `quarantine = 0`. If quarantine
+  is nonzero the snapshot FAILS: investigate the offending rows and
+  re-curate; forcing a pass by relaxing the check is forbidden.
+- Field scope per symbol file: 1d bars (open_time, OHLC, volume) and 8h
+  funding (fundingTime, fundingRate) only; anything else fails validation.
 
 ## Cost and authorization
 
