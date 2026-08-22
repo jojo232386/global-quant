@@ -122,12 +122,13 @@ vol as a gate or target, not as a signal direction.
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
 
-### EXPL-010 · target-vol portfolio of the universe · SCREEN STATUS SPLIT 2026-08-22 (corrected)
+### EXPL-010 · target-vol portfolio of the universe · SCREENED 2026-08-22 · BLOCKED_ON_DATA
 - `EXPL-010_FULL = BLOCKED_ON_DATA`: pre-2024 top-N universe data absent;
   the registered card has not run.
 - `EXPL-010_N2_DIAGNOSTIC = DROPPED`: N=2 BTC/ETH diagnostic fails the
   card's Calmar/MDD graduation bar at every grid point. Direction consistent
-  with the ASQ A5-1 outcome but not a cross-market confirmation.
+  with the ASQ A5-1 outcome; directional consistency only, no
+  cross-market claim is made.
 - Original card: top-N universe portfolio at constant target vol with
   rebalance bands vs unscaled buy-and-hold; graduation bar Calmar/MDD.
   Grid target ∈ {15%, 20%, 30%}; band ∈ {±10%, ±20%}.
@@ -146,7 +147,7 @@ vol as a gate or target, not as a signal direction.
 
 ## Family E — Portfolio construction
 
-### EXPL-013 · banded inverse-vol universe portfolio · DRAFT
+### EXPL-013 · banded inverse-vol universe portfolio · BLOCKED_ON_DATA
 - Hypothesis: inverse-vol weights across the top-N universe with wide
   rebalance bands (trade only when weight drift > band) retains the
   diversification benefit at a fraction of the turnover.
@@ -171,7 +172,12 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: event-conditioned, two-state; unconditional single-bar
   studies were never run (the dead momentum family was multi-bar).
 
-### EXPL-016 · weekend/session effect gated by vol regime · DRAFT
+### EXPL-016 · weekend/session effect gated by vol regime · BLOCKED_ON_DATA
+
+> Blocked 2026-08-22 (plan review): the session effect claims
+> cross-sectional breadth; running it on BTC/ETH alone would overclaim.
+> Waits on the pre-2024 multi-symbol universe data.
+
 - Hypothesis: the (previously rejected, unconditional, single-symbol)
   session effect exists only in above-median vol regimes and across the
   universe rather than one symbol.
@@ -181,15 +187,16 @@ vol as a gate or target, not as a signal direction.
 
 ## Screening order
 
-1. ~~EXPL-010 and EXPL-013 first~~ — EXPL-010 screened (dropped at N=2,
-   full breadth blocked on data); EXPL-013 blocked on data (needs top-N).
-2. EXPL-012 screened 2026-08-22: KEPT_PRIMARY_SELECTED (corrected same-day
-   after review; primary config and counts in the results JSON).
-3. Next screenable on clean BTC/ETH data: EXPL-008 (vol-regime gated
-   trend), EXPL-015 (post-jump conditional drift), EXPL-016 (session ×
-   vol regime, 1d granularity only).
-4. Family A, EXPL-013, full EXPL-010 wait on the pre-2024 universe data
-   decision (see DATA BLOCKERS).
+1. EXPL-010: BLOCKED_ON_DATA (full card never ran; N2 diagnostic DROPPED
+   on unified semantics).
+2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
+3. EXPL-013: BLOCKED_ON_DATA (needs top-N universe).
+4. Next screenable on clean BTC/ETH data: EXPL-008 (vol-regime gated
+   trend), EXPL-015 (post-jump conditional drift).
+5. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
+   force-run on two symbols).
+6. Family A cards wait on the pre-2024 universe data decision (see DATA
+   BLOCKERS).
 
 ## Escalation note
 

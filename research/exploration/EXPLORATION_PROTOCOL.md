@@ -46,7 +46,13 @@ Two rules summarize the whole document:
 
 1. `DRAFT` — hypothesis card written in `hypothesis-backlog.md` with family,
    hypothesis, data plan, fixed grid, and how it differs from already-dead
-   hypotheses.
+   hypotheses. **A DRAFT must freeze its comparison spec before any code is
+   written**: scope (full card vs diagnostic), universe/N, base portfolio
+   construction, benchmark construction (exact, e.g. "fixed-share
+   buy-and-hold rebased at window start", not "static"), cost application
+   points, and the permitted claim wording. A screen that deviates from
+   its frozen spec may only be labeled a diagnostic of that card, never
+   the card's registered screen.
 2. `SCREENED` — run once on the train window with registered grid. Record
    kept/dropped plus one line of reason. Dropped cards stay in the backlog as
    negative memory; they are evidence of coverage, not of performance.
