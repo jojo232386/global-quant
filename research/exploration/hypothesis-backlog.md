@@ -191,8 +191,7 @@ vol as a gate or target, not as a signal direction.
    on unified semantics).
 2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
 3. EXPL-013: BLOCKED_ON_DATA (needs top-N universe).
-4. Queue (DRAFT, next screenable on clean BTC/ETH data): EXPL-008
-   (vol-regime gated trend), EXPL-015 (post-jump conditional drift).
+4. Queue (DRAFT, next screenable on clean BTC/ETH data): EXPL-008, EXPL-015.
 5. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
    force-run on two symbols).
 6. Family A cards wait on the pre-2024 universe data decision (see DATA
