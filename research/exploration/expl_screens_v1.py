@@ -31,14 +31,21 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_closes(symbol: str) -> list[tuple[int, float]]:
-    rows = []
+def load_aligned(symbol: str, ms: list[int] | None = None) -> tuple[list[int], list[float]]:
+    rows = {}
     with open(DATA_DIR / f"{symbol}-1d.jsonl") as handle:
         for line in handle:
             row = json.loads(line)
             if TRAIN_START_MS <= row["open_time_utc_ms"] < TRAIN_END_MS:
-                rows.append((row["open_time_utc_ms"], float(row["close"])))
-    return rows
+                rows[row["open_time_utc_ms"]] = float(row["close"])
+    if ms is None:
+        ms = sorted(rows)
+    closes = [rows[m] for m in ms]  # raises KeyError on misalignment
+    return ms, closes
+
+
+def check_timestamp_alignment(btc_ms: list[int], eth_ms: list[int]) -> None:
+    assert btc_ms == eth_ms, "BTC/ETH timestamps misaligned"
 
 
 def daily_returns(closes: list[float]) -> list[float]:
@@ -150,40 +157,116 @@ def run_expl010(btc_ret: list[float], eth_ret: list[float], cost: float) -> list
     return results
 
 
-def benchmark(btc_ret: list[float], eth_ret: list[float], cost: float) -> dict:
-    warm_b = slice_warmup(btc_ret, WARMUP_DAYS)
-    warm_e = slice_warmup(eth_ret, WARMUP_DAYS)
-    buy_hold = [0.5 * b + 0.5 * e for b, e in zip(warm_b, warm_e)]
-    # daily-rebalanced 50/50, costs on tiny rebalance turnover (approx 15bps *
-    # sum |w - 0.5| changes ~ bounded small); modelled as one side per unit drift
-    daily_rb = []
-    for b, e in zip(warm_b, warm_e):
-        daily_rb.append(0.5 * b + 0.5 * e)
+def benchmark(btc_ret: list[float], eth_ret: list[float], cost: float,
+              btc_close_warm: list[float], eth_close_warm: list[float]) -> dict:
+    # True static 50/50 buy-and-hold: fixed initial notional split, weights
+    # drift with prices, no trades after entry. Rebased at the post-warmup
+    # start so all curves are measured on identical days.
+    btc_rel = [c / btc_close_warm[0] for c in btc_close_warm]
+    eth_rel = [c / eth_close_warm[0] for c in eth_close_warm]
+    bh_equity = [0.5 * b + 0.5 * e for b, e in zip(btc_rel, eth_rel)]
+    bh_ret = [bh_equity[i] / bh_equity[i - 1] - 1.0 for i in range(1, len(bh_equity))]
+    # Daily-rebalanced 50/50 with its own rebalancing costs (diagnostic
+    # benchmark; semantically different from buy-and-hold).
+    daily_rb = [0.5 * b + 0.5 * e for b, e in zip(btc_ret, eth_ret)]
     drift = sum(abs(0.5 * (1 + b) / (0.5 * (1 + b) + 0.5 * (1 + e)) - 0.5)
-                for b, e in zip(warm_b, warm_e))
+                for b, e in zip(btc_ret, eth_ret))
     if daily_rb:
         daily_rb[0] -= drift * cost
     return {
-        "btc": metrics(warm_b),
-        "eth": metrics(warm_e),
-        "static_5050_buyhold": metrics(buy_hold),
-        "daily_rebalanced_5050_net": metrics(daily_rb),
+        "btc": metrics(btc_ret),
+        "eth": metrics(eth_ret),
+        "static_5050_buyhold_primary": metrics(bh_ret),
+        "daily_rebalanced_5050_diagnostic": metrics(daily_rb),
     }
 
 
 def main() -> None:
-    btc = load_closes("BTCUSDT")
-    eth = load_closes("ETHUSDT")
-    assert len(btc) == len(eth) and len(btc) > 400, "unexpected data shape"
-    btc_close = [c for _, c in btc]
-    eth_close = [c for _, c in eth]
-    btc_ret = daily_returns(btc_close)
-    eth_ret = daily_returns(eth_close)
+    btc_ms, btc_close = load_aligned("BTCUSDT")
+    eth_ms, eth_close = load_aligned("ETHUSDT", btc_ms)
+    check_timestamp_alignment(btc_ms, eth_ms)
+    btc_ret_full = daily_returns(btc_close)
+    eth_ret_full = daily_returns(eth_close)
+    # post-warmup window shared by every strategy and benchmark below
+    btc_ret = slice_warmup(btc_ret_full, WARMUP_DAYS)
+    eth_ret = slice_warmup(eth_ret_full, WARMUP_DAYS)
+    btc_close_warm = btc_close[WARMUP_DAYS + 1:]
+    eth_close_warm = eth_close[WARMUP_DAYS + 1:]
+    assert len(btc_ret) == len(btc_close_warm), "window alignment broken"
+
+    benchmarks = benchmark(btc_ret, eth_ret, COST_PER_SIDE,
+                           btc_close_warm, eth_close_warm)
+    bh = benchmarks["static_5050_buyhold_primary"]
+
+    expl012_base = run_expl012(btc_ret_full, eth_ret_full, btc_close,
+                               eth_close, COST_PER_SIDE)
+    expl012_stress = run_expl012(btc_ret_full, eth_ret_full, btc_close,
+                                 eth_close, COST_PER_SIDE * 2)
+    expl010_base = run_expl010(btc_ret_full, eth_ret_full, COST_PER_SIDE)
+    expl010_stress = run_expl010(btc_ret_full, eth_ret_full, COST_PER_SIDE * 2)
+
+    # frozen judgment rule (see EXPLORATION_PROTOCOL.md graduation rules):
+    # beats = net Sharpe > primary benchmark (true buy-and-hold 50/50);
+    # stress survivor = grid point whose 2x-cost net Sharpe still beats it;
+    # primary config = highest baseline net Sharpe among stress survivors;
+    # no stress survivor -> DROPPED (cost-fragile).
+    stress_survivors = [
+        i for i, row in enumerate(expl012_stress)
+        if row["net"]["sharpe"] > bh["sharpe"]
+    ]
+    baseline_beats = [
+        row for row in expl012_base if row["net"]["sharpe"] > bh["sharpe"]
+    ]
+    if stress_survivors:
+        primary = max(
+            (expl012_base[i] for i in stress_survivors),
+            key=lambda row: row["net"]["sharpe"],
+        )
+        expl012_verdict = {
+            "verdict": "KEPT_PRIMARY_SELECTED",
+            "primary_config": {"lookback": primary["lookback"],
+                               "band": primary["band"]},
+            "baseline_beats_count": f"{len(baseline_beats)}/{len(expl012_base)}",
+            "stress_survivors_count": f"{len(stress_survivors)}/{len(expl012_stress)}",
+        }
+    else:
+        expl012_verdict = {
+            "verdict": "DROPPED_COST_FRAGILE",
+            "baseline_beats_count": f"{len(baseline_beats)}/{len(expl012_base)}",
+            "stress_survivors_count": "0/4",
+        }
+
+    unscaled = benchmarks["daily_rebalanced_5050_diagnostic"]
+    calmar_improves = any(
+        row["net"]["calmar"] > unscaled["calmar"] for row in expl010_base
+    )
+    expl010_verdict = {
+        "EXPL-010_FULL": "BLOCKED_ON_DATA (pre-2024 top-N universe data absent)",
+        "EXPL-010_N2_DIAGNOSTIC": (
+            "DROPPED" if not calmar_improves else "INCONCLUSIVE"
+        ),
+        "note": "N=2 BTC/ETH diagnostic only; direction consistent with ASQ "
+                "A5-1 but not a cross-market confirmation",
+    }
+
+    # required checks
+    assert any(
+        b["net"]["net_total_return"] != s["net"]["net_total_return"]
+        for b, s in zip(expl012_base, expl012_stress)
+    ), "cost stress did not change results"
+    assert (bh["sharpe"] != unscaled["sharpe"]
+            or bh["max_drawdown"] != unscaled["max_drawdown"]), (
+        "buy-and-hold and daily-rebalanced benchmarks are semantically "
+        "identical - benchmark fix regressed"
+    )
 
     output = {
-        "screen": "EXPL-012 + EXPL-010 (reduced breadth) train-window screen",
+        "screen": "EXPL-012 + EXPL-010 N2 diagnostic (corrected benchmarks)",
         "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
         "claim_status": "NOT EVIDENCE - exploration tier screen only",
+        "correction": "supersedes the first run: true static buy-and-hold "
+                      "benchmark, EXPL-010 split into FULL vs N2 diagnostic, "
+                      "frozen judgment rule applied in code",
         "data": {
             "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
             "files": {
@@ -191,34 +274,29 @@ def main() -> None:
                 "ETHUSDT-1d.jsonl": sha256(DATA_DIR / "ETHUSDT-1d.jsonl"),
             },
             "window": "2020-01-01..2023-12-31 (train only)",
-            "days": len(btc),
+            "days": len(btc_close),
+            "timestamp_alignment_checked": True,
             "funding": "excluded: long-only spot feasible for BTC/ETH",
         },
         "cost_per_side": COST_PER_SIDE,
-        "benchmarks": benchmark(btc_ret, eth_ret, COST_PER_SIDE),
-        "expl012_baseline": run_expl012(btc_ret, eth_ret, btc_close, eth_close, COST_PER_SIDE),
-        "expl012_cost_stress_2x": run_expl012(btc_ret, eth_ret, btc_close, eth_close, COST_PER_SIDE * 2),
-        "expl010_reduced_breadth_baseline": run_expl010(btc_ret, eth_ret, COST_PER_SIDE),
-        "expl010_reduced_breadth_cost_stress_2x": run_expl010(btc_ret, eth_ret, COST_PER_SIDE * 2),
-        "expl010_caveat": (
-            "N=2 only (BTC/ETH); the card specifies a top-N universe. "
-            "Full-breadth screen BLOCKED_ON_DATA: PIT universe files cover "
-            "2026-02..2026-08 only (tainted region). Reduced-breadth result is "
-            "a preliminary signal, not the card's registered screen."
-        ),
+        "checks": {
+            "timestamps_aligned": True,
+            "cost_stress_changes_results": True,
+            "buyhold_and_daily_rb_differ": True,
+        },
+        "benchmarks": benchmarks,
+        "expl012_judgment": expl012_verdict,
+        "expl012_baseline": expl012_base,
+        "expl012_cost_stress_2x": expl012_stress,
+        "expl010_judgment": expl010_verdict,
+        "expl010_n2_diagnostic_baseline": expl010_base,
+        "expl010_n2_diagnostic_cost_stress_2x": expl010_stress,
     }
     out_path = Path(__file__).parent / "expl-screen-results-2026-08-22.json"
     out_path.write_text(json.dumps(output, indent=2, ensure_ascii=False))
-    print(json.dumps(output["benchmarks"], indent=2))
-    print("\nEXPL-012 baseline:")
-    for row in output["expl012_baseline"]:
-        print(row)
-    print("\nEXPL-012 stress 2x:")
-    for row in output["expl012_cost_stress_2x"]:
-        print(row)
-    print("\nEXPL-010 (N=2) baseline:")
-    for row in output["expl010_reduced_breadth_baseline"]:
-        print(row)
+    print("benchmarks:", json.dumps(benchmarks, indent=2))
+    print("\nEXPL-012 judgment:", expl012_verdict)
+    print("\nEXPL-010 judgment:", expl010_verdict)
     print("\nresults written to", out_path)
 
 

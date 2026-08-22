@@ -107,28 +107,23 @@ target, not as a signal direction.
 - Delta vs closed: breadth is a market-level gate, unavailable to
   single-symbol studies; overlay on EXPL-010 base.
 
-### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 · KEPT_THIN
-- Screen result (train 2020-01-01..2023-12-31, dataset 88d9ff34, spot
-  long-only, 15bps/side, full numbers in `expl-screen-results-2026-08-22.json`):
-  baseline net Sharpe 1.131–1.229 vs daily-rebalanced 50/50 benchmark 1.115
-  (all 4 grid points beat it; Calmar 1.044–1.236 vs 0.951). Under 2x cost
-  stress only the 14d/3% point still beats the benchmark (Sharpe 1.170,
-  Calmar 1.089); the other three lose their excess. Verdict: weak survivor —
-  thin, cost-fragile edge concentrated at fast lookback + tight band. If
-  graduated, the formal preregistration must re-test the FULL grid (no
-  cherry-picking the stress survivor); expectations low.
+### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 (corrected) · KEPT_PRIMARY_SELECTED
+- Status: kept under the frozen judgment rule; primary config selected and
+  recorded in the results JSON. All grid points beat the true static
+  buy-and-hold benchmark at baseline and under 2x cost stress; the margin
+  is thin at the weakest points. Formal confirmation, if any, tests the
+  primary config only; the remaining grid is sensitivity diagnostics that
+  cannot rescue the primary result. Full numbers: `expl-screen-results-2026-08-22.json`.
 - Original card: rotate between BTC and ETH by relative strength with
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
 
-### EXPL-010 · target-vol portfolio of the universe · SCREENED 2026-08-22 (reduced breadth) · DROPPED (preliminary)
-- Screen result (N=2 BTC/ETH only — the card specifies top-N; full breadth
-  BLOCKED_ON_DATA, see below): target-vol scaling cuts MDD from -76% to
-  -27%..-49% but Calmar lands 0.68–0.86 vs 0.95 for unscaled 50/50 on every
-  grid point; Sharpe improvement is marginal (≤ +0.09). Risk-adjusted terms
-  worsen. Mirrors the ASQ A5-1 lesson: vol scaling alone does not improve
-  tail-risk-adjusted returns. Dropped at preliminary breadth; re-carding at
-  top-N requires pre-2024 universe data.
+### EXPL-010 · target-vol portfolio of the universe · SCREEN STATUS SPLIT 2026-08-22 (corrected)
+- `EXPL-010_FULL = BLOCKED_ON_DATA`: pre-2024 top-N universe data absent;
+  the registered card has not run.
+- `EXPL-010_N2_DIAGNOSTIC = DROPPED`: N=2 BTC/ETH diagnostic fails the
+  card's Calmar/MDD graduation bar at every grid point. Direction consistent
+  with the ASQ A5-1 outcome but not a cross-market confirmation.
 - Original card: top-N universe portfolio at constant target vol with
   rebalance bands vs unscaled buy-and-hold; graduation bar Calmar/MDD.
   Grid target ∈ {15%, 20%, 30%}; band ∈ {±10%, ±20%}.

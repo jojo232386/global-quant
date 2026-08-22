@@ -1,7 +1,8 @@
 {
-  "screen": "EXPL-012 + EXPL-010 (reduced breadth) train-window screen",
+  "screen": "EXPL-012 + EXPL-010 N2 diagnostic (corrected benchmarks)",
   "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
   "claim_status": "NOT EVIDENCE - exploration tier screen only",
+  "correction": "supersedes the first run: true static buy-and-hold benchmark, EXPL-010 split into FULL vs N2 diagnostic, frozen judgment rule applied in code",
   "data": {
     "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
     "files": {
@@ -10,9 +11,15 @@
     },
     "window": "2020-01-01..2023-12-31 (train only)",
     "days": 1461,
+    "timestamp_alignment_checked": true,
     "funding": "excluded: long-only spot feasible for BTC/ETH"
   },
   "cost_per_side": 0.0015,
+  "checks": {
+    "timestamps_aligned": true,
+    "cost_stress_changes_results": true,
+    "buyhold_and_daily_rb_differ": true
+  },
   "benchmarks": {
     "btc": {
       "net_total_return": 3.5185,
@@ -28,20 +35,29 @@
       "calmar": 1.15,
       "max_drawdown": -0.7935
     },
-    "static_5050_buyhold": {
-      "net_total_return": 7.5499,
-      "annualized_return": 0.7293,
-      "sharpe": 1.118,
-      "calmar": 0.956,
-      "max_drawdown": -0.7629
+    "static_5050_buyhold_primary": {
+      "net_total_return": 7.4647,
+      "annualized_return": 0.7256,
+      "sharpe": 1.096,
+      "calmar": 0.933,
+      "max_drawdown": -0.7776
     },
-    "daily_rebalanced_5050_net": {
+    "daily_rebalanced_5050_diagnostic": {
       "net_total_return": 7.4704,
       "annualized_return": 0.7252,
       "sharpe": 1.115,
       "calmar": 0.951,
       "max_drawdown": -0.7629
     }
+  },
+  "expl012_judgment": {
+    "verdict": "KEPT_PRIMARY_SELECTED",
+    "primary_config": {
+      "lookback": 14,
+      "band": 0.03
+    },
+    "baseline_beats_count": "4/4",
+    "stress_survivors_count": "4/4"
   },
   "expl012_baseline": [
     {
@@ -143,7 +159,12 @@
       }
     }
   ],
-  "expl010_reduced_breadth_baseline": [
+  "expl010_judgment": {
+    "EXPL-010_FULL": "BLOCKED_ON_DATA (pre-2024 top-N universe data absent)",
+    "EXPL-010_N2_DIAGNOSTIC": "DROPPED",
+    "note": "N=2 BTC/ETH diagnostic only; direction consistent with ASQ A5-1 but not a cross-market confirmation"
+  },
+  "expl010_n2_diagnostic_baseline": [
     {
       "target_vol": 0.15,
       "band": 0.1,
@@ -223,7 +244,7 @@
       }
     }
   ],
-  "expl010_reduced_breadth_cost_stress_2x": [
+  "expl010_n2_diagnostic_cost_stress_2x": [
     {
       "target_vol": 0.15,
       "band": 0.1,
@@ -302,6 +323,5 @@
         "max_drawdown": -0.4942
       }
     }
-  ],
-  "expl010_caveat": "N=2 only (BTC/ETH); the card specifies a top-N universe. Full-breadth screen BLOCKED_ON_DATA: PIT universe files cover 2026-02..2026-08 only (tainted region). Reduced-breadth result is a preliminary signal, not the card's registered screen."
+  ]
 }

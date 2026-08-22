@@ -55,6 +55,26 @@ Two rules summarize the whole document:
    `VERIFIED` curated dataset binding, and a one-shot formal run under the
    existing gate. Graduation does not weaken any formal rule.
 
+## Graduation selection rule (frozen 2026-08-22, per Codex-App review)
+
+- A graduated card designates **one primary configuration**, selected by a
+  deterministic rule written in the screen code before the formal run:
+  the primary is the grid point with the best baseline net Sharpe among
+  points that still beat the primary benchmark under 2x cost stress.
+- The formal preregistration confirms **the primary configuration only**.
+  The remaining grid points may be reported as sensitivity diagnostics;
+  they can never rescue or replace a failed primary result. Re-opening
+  grid competition on formal/OOS data is winner selection and is
+  forbidden.
+
+## Record containment (reinforced)
+
+- Backlog entries, commit messages, the vault, and agent-to-agent
+  summaries record only status (`DRAFT / SCREENED / KEPT / DROPPED /
+  BLOCKED_ON_DATA`), the primary config, and non-numeric reasons.
+- All performance figures live exclusively in the exploration results
+  JSON under `research/exploration/`.
+
 ## Project-level kill criterion
 
 Formal research stops when: 6 consecutive formal REJECTs occur across
