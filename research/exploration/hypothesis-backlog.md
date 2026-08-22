@@ -86,11 +86,32 @@ REJECTED with materially negative OOS return and extreme short-side
 adverse excursion (figures in the formal study artifacts). Family C uses
 vol as a gate or target, not as a signal direction.
 
-### EXPL-008 · vol-regime gated trend · DRAFT
-- Hypothesis: LS-TSMOM exposure only in below-median realized-vol regimes
-  (trends persist in calm; churn in stress).
-- Fixed grid: vol window ∈ {14d, 30d}; gate ∈ {median, tercile}.
-- Delta vs closed: gate vs always-on; expected exposure roughly halved.
+### EXPL-008 · vol-regime gated trend · DRAFT · SPEC FROZEN 2026-08-22
+- Comparison spec (frozen before code; deviations may only be labeled
+  diagnostic):
+  - Universe: BTC/ETH per-asset diagnostic breadth (no cross-sectional
+    claim). Data: curated 88d9ff34 1d closes + funding.
+  - Signal: per-asset TSMOM, position ∈ {+1, -1} = sign of trailing 30d
+    return (lookback fixed at 30d), evaluated daily at close t, effective
+    for bar t.
+  - Gate: per-asset realized vol over grid window ∈ {14d, 30d} versus its
+    own EXPANDING percentile (history up to t only); gate ∈ {on below
+    expanding median, on below expanding bottom-tercile boundary}.
+    Position = signal × gate.
+  - Costs: |Δposition| × per-side cost per change day; shorts are perps,
+    funding applied as position × daily funding sum (from curated funding
+    files; the formal layer's 5x funding stress is not part of the
+    screen — noted, not claimed).
+  - Stress: 2x per-side trade costs.
+  - Benchmark: the SAME ungated TSMOM signal with identical costs and
+    funding. Beats = gated net Sharpe > AND net Calmar > ungated, full
+    precision. Primary = best baseline net Sharpe among grid points that
+    still beat ungated under stress; none → DROPPED_COST_FRAGILE.
+  - Grid (frozen): vol window {14d, 30d} × gate {median, tercile}.
+- Original card: LS-TSMOM exposure only in below-median realized-vol
+  regimes (trends persist in calm; churn in stress).
+- Delta vs closed: gate vs always-on; the formally rejected study was
+  unconditional and vol-scaled in sizing, not gated in time.
 
 ### EXPL-009 · vol-of-vol leverage filter · DRAFT
 - Hypothesis: scale any base exposure down when vol-of-vol (std of realized
@@ -165,12 +186,30 @@ vol as a gate or target, not as a signal direction.
 
 ## Family F — Event behavior
 
-### EXPL-015 · post-jump conditional drift · DRAFT
-- Hypothesis: after a >4σ daily bar, subsequent 1–5d drift depends on
+### EXPL-015 · post-jump conditional drift · DRAFT · SPEC FROZEN 2026-08-22
+- Comparison spec (frozen before code; deviations may only be labeled
+  diagnostic):
+  - Universe: BTC/ETH per-asset event study (no breadth claim). Data:
+    curated 88d9ff34 1d closes + funding.
+  - Jump: |daily return| > k × trailing-30d daily vol, evaluated at close
+    t; k ∈ {3, 4} (grid).
+  - Condition: funding regime at t — z of the day's total funding rate
+    against its own expanding history (min 30d): calm z ≤ 0, crowded
+    z > 0.
+  - Trade: after a jump at close t — calm: take sign(jump) (continuation);
+    crowded: take -sign(jump) (reversal); hold h ∈ {1, 3, 5} bars from
+    bar t+1. Overlapping events net; position capped at ±1 per asset.
+  - Costs: entry + exit = 2 sides per nonzero position change (|Δposition|
+    × per-side cost); funding applied while holding.
+  - Stress: 2x per-side trade costs.
+  - Benchmark: cash (zero). Beats = net Sharpe > 0, full precision.
+    Primary = best baseline net Sharpe among grid points still > 0 under
+    stress; none → DROPPED_COST_FRAGILE.
+  - Grid (frozen): k {3, 4} × h {1, 3, 5}.
+- Original card: after a >4σ daily bar, subsequent 1–5d drift depends on
   funding regime (continuation in calm, reversal in crowded).
-- Fixed grid: σ threshold ∈ {3, 4}; horizon ∈ {1d, 3d, 5d}.
-- Delta vs closed: event-conditioned, two-state; unconditional single-bar
-  studies were never run (the dead momentum family was multi-bar).
+- Delta vs closed: event-conditioned two-state behavior; the dead momentum
+  family was multi-bar and unconditional.
 
 ### EXPL-016 · weekend/session effect gated by vol regime · BLOCKED_ON_DATA
 
