@@ -77,6 +77,12 @@ def test_screening_order_matches_card_verdicts():
         verdict_in_order = [
             token for token in VERDICT_TOKENS if token in mentions[0]
         ]
+        if verdict_in_order:
+            # a split-status line may name several tokens; the CARD verdict
+            # is the one that appears first in the line
+            verdict_in_order = [
+                min(verdict_in_order, key=lambda t: mentions[0].index(t))
+            ]
         if not verdict_in_order:
             problems.append(f"{card}: no verdict token in screening order")
         elif verdict_in_order[0] != header_verdict:
