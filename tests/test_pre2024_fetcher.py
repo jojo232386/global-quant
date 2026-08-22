@@ -177,24 +177,40 @@ def test_audit_first_month_and_funding_verdicts(tmp_path):
     report = fx.audit(out, make_candidates(tmp_path))
     assert report["kline_verdict"] == "FAIL"  # AAA leading month missing
     assert any("frozen first month" in p for p in report["kline_problems"])
-    assert any("BBBUSDT" in p and "funding mid-gaps" in p
+    assert any("BBBUSDT" in p and "missing funding" in p
                for p in report["funding_problems"])
     assert report["funding_verdict"] == "FAIL"
     assert report["verdict"] == "FAIL"
 
 
-def test_audit_kline_only_pass_advances_price_cards(tmp_path):
+def test_audit_kline_pass_with_funding_fail_advances_price_cards(tmp_path):
     out = tmp_path / "raw"
     out.mkdir()
+    # candidates file with a single symbol so the split verdict is clean
+    spec_path = tmp_path / "candidates-only-aaa.json"
+    spec_path.write_text(json.dumps({
+        "current_symbols_frozen_at_enumeration": [],
+        "first_bar_by_symbol": {"AAAUSDT": "2023-01"},
+    }))
     entries = []
+    # klines: continuous from the frozen first month, post-delisting tail
     for m in ("2023-01", "2023-02", "2023-03"):
         entries.append({"symbol": "AAAUSDT", "month": m, "kind": "kline",
                         "status": "ok"})
+    # funding: 2023-02 missing (kline-active) -> FAIL; 2023-04 is extra
+    for m in ("2023-01", "2023-03", "2023-04"):
         entries.append({"symbol": "AAAUSDT", "month": m, "kind": "funding",
                         "status": "ok"})
     out.joinpath("canonical-manifest.json").write_text(
-        json.dumps({"run_id": "t-b", "entries": entries}))
-    # BBBUSDT absent entirely: kline no-data fails overall, but AAA alone
-    # would pass; verify the per-verdict split exists for gating
-    report = fx.audit(out, make_candidates(tmp_path))
-    assert "kline_verdict" in report and "funding_verdict" in report
+        json.dumps({"run_id": "t-split", "entries": entries}))
+    report = fx.audit(out, spec_path)
+    # the actual price-card advance condition: klines clean, funding not
+    assert report["kline_verdict"] == "PASS"
+    assert report["funding_verdict"] == "FAIL"
+    assert report["verdict"] == "FAIL"
+    assert any("missing funding" in p and "2023-02" in p
+               for p in report["funding_problems"])
+    # the extra funding month is recorded as a warning, not evidence
+    assert any("beyond kline lifecycle" in w and "2023-04" in w
+               for w in report["warnings"])
+    assert report["per_symbol"]["AAAUSDT"]["extra_funding_months"] == ["2023-04"]

@@ -440,13 +440,19 @@ def audit(out_dir: Path, candidates_path: Path) -> dict:
                 f"{sym}: missing tail after {kmonths[-1]} but currently trading")
         elif kmonths[-1] < "2023-12":
             info["post_delisting_after"] = kmonths[-1]
-        if not fmonths:
-            funding_problems.append(f"{sym}: no funding data")
-        else:
-            fexpected = month_range(fmonths[0], fmonths[-1])
-            fgaps = [m for m in fexpected if m not in fmonths]
-            if fgaps:
-                funding_problems.append(f"{sym}: funding mid-gaps {fgaps}")
+        # funding completeness is measured against the kline lifecycle:
+        # every kline-active month must have funding; months beyond it are
+        # recorded as extra (not completeness evidence)
+        missing_funding = sorted(set(kmonths) - set(fmonths))
+        if missing_funding:
+            funding_problems.append(
+                f"{sym}: missing funding for kline-active months "
+                f"{missing_funding}")
+        extra_funding = sorted(set(fmonths) - set(kmonths))
+        if extra_funding:
+            info["extra_funding_months"] = extra_funding
+            warnings.append(f"{sym}: funding months beyond kline lifecycle "
+                            f"{extra_funding}")
         per_symbol[sym] = info
     kline_verdict = "PASS" if not kline_problems else "FAIL"
     funding_verdict = "PASS" if not funding_problems else "FAIL"
