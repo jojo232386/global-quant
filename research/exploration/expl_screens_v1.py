@@ -126,18 +126,21 @@ def buyhold_returns(btc_warm: list[float], eth_warm: list[float]) -> list[float]
 
 def daily_rb_with_costs(btc_ret: list[float], eth_ret: list[float],
                         cost: float) -> tuple[list[float], list[float]]:
-    """Daily-rebalanced 50/50: gross returns plus per-day internal
-    rebalancing cost. Restoring 50/50 sells |drift| of the winner and buys
-    |drift| of the loser, so the traded notional is the SUM of absolute
-    weight changes (2 x drift) and cost applies per side of that."""
-    gross, net = [], []
+    """Daily-rebalanced 50/50. Returns (gross returns, per-day cost series).
+    Restoring 50/50 sells |drift| of the winner and buys |drift| of the
+    loser, so the traded notional is the SUM of absolute weight changes
+    (2 x drift) and cost applies per side of that. Callers combine:
+    net = gross - cost. (A previous version returned net here and one
+    caller subtracted it as if it were the cost — pinned by regression
+    test.)"""
+    gross, costs = [], []
     for b, e in zip(btc_ret, eth_ret):
         g = 0.5 * b + 0.5 * e
         wb = 0.5 * (1 + b) / (0.5 * (1 + b) + 0.5 * (1 + e))
         traded_notional = abs(wb - 0.5) + abs((1 - wb) - 0.5)
         gross.append(g)
-        net.append(g - traded_notional * cost)
-    return gross, net
+        costs.append(traded_notional * cost)
+    return gross, costs
 
 
 def rotation_series(btc_ret: list[float], eth_ret: list[float],
@@ -253,7 +256,8 @@ def benchmark(btc_ret: list[float], eth_ret: list[float],
               btc_warm: list[float], eth_warm: list[float],
               cost: float) -> dict:
     bh = buyhold_returns(btc_warm, eth_warm)
-    _, daily_rb_net = daily_rb_with_costs(btc_ret, eth_ret, cost)
+    rb_gross, rb_costs = daily_rb_with_costs(btc_ret, eth_ret, cost)
+    daily_rb_net = [g - c for g, c in zip(rb_gross, rb_costs)]
     return {
         "btc": metrics(btc_ret),
         "eth": metrics(eth_ret),

@@ -173,11 +173,11 @@
       "avg_weight": 0.273,
       "turnover_total": 7.93,
       "net": {
-        "net_total_return": -0.0072,
-        "annualized_return": -0.0018,
-        "sharpe": -2.1651,
-        "calmar": -0.2379,
-        "max_drawdown": -0.0077
+        "net_total_return": 1.0588,
+        "annualized_return": 0.2024,
+        "sharpe": 1.0416,
+        "calmar": 0.7252,
+        "max_drawdown": -0.2791
       }
     },
     {
@@ -186,11 +186,11 @@
       "avg_weight": 0.279,
       "turnover_total": 6.37,
       "net": {
-        "net_total_return": -0.0047,
-        "annualized_return": -0.0012,
-        "sharpe": -1.3686,
-        "calmar": -0.2283,
-        "max_drawdown": -0.0053
+        "net_total_return": 0.9782,
+        "annualized_return": 0.1902,
+        "sharpe": 0.9682,
+        "calmar": 0.6532,
+        "max_drawdown": -0.2912
       }
     },
     {
@@ -199,11 +199,11 @@
       "avg_weight": 0.356,
       "turnover_total": 9.63,
       "net": {
-        "net_total_return": -0.0083,
-        "annualized_return": -0.0021,
-        "sharpe": -2.5048,
-        "calmar": -0.2404,
-        "max_drawdown": -0.0089
+        "net_total_return": 1.5901,
+        "annualized_return": 0.275,
+        "sharpe": 1.1218,
+        "calmar": 0.8225,
+        "max_drawdown": -0.3343
       }
     },
     {
@@ -212,11 +212,11 @@
       "avg_weight": 0.363,
       "turnover_total": 7.55,
       "net": {
-        "net_total_return": -0.0051,
-        "annualized_return": -0.0013,
-        "sharpe": -1.4268,
-        "calmar": -0.2297,
-        "max_drawdown": -0.0056
+        "net_total_return": 1.4509,
+        "annualized_return": 0.2571,
+        "sharpe": 1.0388,
+        "calmar": 0.7479,
+        "max_drawdown": -0.3438
       }
     },
     {
@@ -225,11 +225,11 @@
       "avg_weight": 0.518,
       "turnover_total": 11.75,
       "net": {
-        "net_total_return": -0.0088,
-        "annualized_return": -0.0022,
-        "sharpe": -2.5133,
-        "calmar": -0.2412,
-        "max_drawdown": -0.0093
+        "net_total_return": 2.8929,
+        "annualized_return": 0.4147,
+        "sharpe": 1.1863,
+        "calmar": 0.8883,
+        "max_drawdown": -0.4669
       }
     },
     {
@@ -238,11 +238,11 @@
       "avg_weight": 0.531,
       "turnover_total": 8.95,
       "net": {
-        "net_total_return": -0.0043,
-        "annualized_return": -0.0011,
-        "sharpe": -1.161,
-        "calmar": -0.2251,
-        "max_drawdown": -0.0049
+        "net_total_return": 2.6764,
+        "annualized_return": 0.3942,
+        "sharpe": 1.1175,
+        "calmar": 0.8299,
+        "max_drawdown": -0.475
       }
     }
   ],
@@ -253,11 +253,11 @@
       "avg_weight": 0.273,
       "turnover_total": 7.93,
       "net": {
-        "net_total_return": -0.0143,
-        "annualized_return": -0.0037,
-        "sharpe": -2.1651,
-        "calmar": -0.2386,
-        "max_drawdown": -0.0154
+        "net_total_return": 1.0249,
+        "annualized_return": 0.1973,
+        "sharpe": 1.0201,
+        "calmar": 0.7042,
+        "max_drawdown": -0.2802
       }
     },
     {
@@ -266,11 +266,11 @@
       "avg_weight": 0.279,
       "turnover_total": 6.37,
       "net": {
-        "net_total_return": -0.0094,
-        "annualized_return": -0.0024,
-        "sharpe": -1.3686,
-        "calmar": -0.2288,
-        "max_drawdown": -0.0105
+        "net_total_return": 0.95,
+        "annualized_return": 0.1859,
+        "sharpe": 0.9501,
+        "calmar": 0.636,
+        "max_drawdown": -0.2922
       }
     },
     {
@@ -279,11 +279,11 @@
       "avg_weight": 0.356,
       "turnover_total": 9.63,
       "net": {
-        "net_total_return": -0.0166,
-        "annualized_return": -0.0043,
-        "sharpe": -2.5048,
-        "calmar": -0.2412,
-        "max_drawdown": -0.0177
+        "net_total_return": 1.5376,
+        "annualized_return": 0.2683,
+        "sharpe": 1.1003,
+        "calmar": 0.7996,
+        "max_drawdown": -0.3355
       }
     },
     {
@@ -292,11 +292,11 @@
       "avg_weight": 0.363,
       "turnover_total": 7.55,
       "net": {
-        "net_total_return": -0.0101,
-        "annualized_return": -0.0026,
-        "sharpe": -1.4268,
-        "calmar": -0.2302,
-        "max_drawdown": -0.0112
+        "net_total_return": 1.4083,
+        "annualized_return": 0.2515,
+        "sharpe": 1.0211,
+        "calmar": 0.729,
+        "max_drawdown": -0.345
       }
     },
     {
@@ -305,11 +305,11 @@
       "avg_weight": 0.518,
       "turnover_total": 11.75,
       "net": {
-        "net_total_return": -0.0175,
-        "annualized_return": -0.0045,
-        "sharpe": -2.5133,
-        "calmar": -0.242,
-        "max_drawdown": -0.0185
+        "net_total_return": 2.7915,
+        "annualized_return": 0.4052,
+        "sharpe": 1.1667,
+        "calmar": 0.8613,
+        "max_drawdown": -0.4704
       }
     },
     {
@@ -318,11 +318,11 @@
       "avg_weight": 0.531,
       "turnover_total": 8.95,
       "net": {
-        "net_total_return": -0.0086,
-        "annualized_return": -0.0022,
-        "sharpe": -1.161,
-        "calmar": -0.2255,
-        "max_drawdown": -0.0098
+        "net_total_return": 2.5949,
+        "annualized_return": 0.3862,
+        "sharpe": 1.1014,
+        "calmar": 0.8106,
+        "max_drawdown": -0.4765
       }
     }
   ],

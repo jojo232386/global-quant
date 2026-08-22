@@ -32,19 +32,33 @@ def test_buyhold_differs_from_daily_rebalanced():
     # day 1 flat -> 0.0; day 2: (0.5*2+0.5*1)/1 - 1 = 0.5;
     # day 3: (0.5*2.2+0.5*1)/(0.5*2+0.5*1) - 1 = 1.6/1.5 - 1 = 1/15
     assert bh == pytest.approx([0.0, 0.5, 1.0 / 15.0])
-    gross, net = expl.daily_rb_with_costs(
-        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=0.0)
+    gross, rb_costs = expl.daily_rb_with_costs(
+        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=0.01)
     # daily rebalanced: day 3 earns only 0.5*10% = 0.05 -> diverges from bh
     assert gross == pytest.approx([0.0, 0.5, 0.05])
     assert bh[2] != pytest.approx(gross[2])  # the actual divergence pin
-    assert net == pytest.approx([0.0, 0.5, 0.05])
     # restoring 50/50 after day 2's move trades BOTH legs: sell 1/6 BTC,
     # buy 1/6 ETH -> traded notional 1/3, not 1/6
-    _, net_costed = expl.daily_rb_with_costs(
-        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=0.01)
-    assert net_costed[1] == pytest.approx(0.5 - (1.0 / 3.0) * 0.01)
+    assert rb_costs[1] == pytest.approx((1.0 / 3.0) * 0.01)
     # day 3: both legs drift by 11/21 - 1/2 = 1/42 each -> traded 1/21 total
-    assert net_costed[2] == pytest.approx(0.05 - (1.0 / 21.0) * 0.01)
+    assert rb_costs[2] == pytest.approx((1.0 / 21.0) * 0.01)
+
+
+def test_target_vol_subtracts_cost_not_net():
+    # regression: a prior version returned NET from daily_rb_with_costs and
+    # the strategy subtracted it as if it were the cost, collapsing returns
+    # to ~ -cost. The cost series must enter as a small deduction only.
+    rets_b = [0.0, 1.0, 0.10]
+    gross, rb_costs = expl.daily_rb_with_costs(rets_b, [0.0, 0.0, 0.0], cost=0.01)
+    series, traded, weights = expl.target_vol_series(
+        gross, rb_costs, target=1.0, band=10.0, cost=0.0, vol_window=30)
+    # target=1.0 with a huge band -> weight stays 1, no vol trades; every
+    # day must equal gross - cost, NOT gross - (gross - cost)
+    assert weights == [1.0, 1.0, 1.0]
+    for i in range(3):
+        assert series[i] == pytest.approx(gross[i] - rb_costs[i])
+    for i in (1, 2):  # nonzero days: a net-as-cost bug collapses these to ~-cost
+        assert series[i] != pytest.approx(rb_costs[i])
 
 
 def test_rs_momentum_first_legal_signal_boundary():
