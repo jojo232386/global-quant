@@ -16,9 +16,17 @@
     }
   },
   "cross_check": {
+    "fields_compared_cross_dataset": [
+      "open",
+      "high",
+      "low",
+      "close"
+    ],
+    "quote_volume": "not cross-dataset comparable (reference lacks the field); validated by range invariant only",
     "curated_rows": 2423,
     "overlap_days": 30,
     "decimal_mismatches": 0,
-    "examples": []
+    "examples": [],
+    "quote_volume_invariant_violations": 0
   }
 }

@@ -70,6 +70,9 @@ def _assert_public_resolution(host: str) -> None:
             raise RuntimeError(f"blocked resolved address for {host}: {ip}")
 
 
+RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+
+
 def http_get(url: str, retries: int = 3) -> bytes:
     import time
     parsed = urllib.parse.urlparse(url)
@@ -84,8 +87,13 @@ def http_get(url: str, retries: int = 3) -> bytes:
         try:
             with _OPENER.open(req, timeout=120) as resp:
                 return resp.read()
-        except urllib.error.HTTPError:
-            raise  # 404 etc. are deterministic; do not retry
+        except urllib.error.HTTPError as exc:
+            if exc.code in RETRYABLE_HTTP and attempt < retries - 1:
+                wait = 2 ** attempt
+                print(f"  http {exc.code}; retry in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise  # 404 and exhausted retries surface to the caller
         except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
             if attempt == retries - 1:
                 raise
@@ -229,13 +237,17 @@ def smoke(symbol: str, months: list[str], curated_path: Path) -> dict:
         }
         for r in rows:
             all_rows[r[0]] = r
-    # Decimal cross-check against curated 88d9ff34 (string values, no floats)
+    # Decimal cross-check against curated 88d9ff34 (string values, no floats).
+    # The reference dataset carries OHLC only — quote volume is NOT
+    # cross-dataset comparable; it is checked per bar by the range
+    # invariant volume*low <= quote <= volume*high.
     curated = {}
     for line in curated_path.read_text().splitlines():
         row = json.loads(line)
         curated[str(row["open_time_utc_ms"])] = row
     overlap = set(all_rows) & set(curated)
     mismatches = []
+    invariant_violations = []
     for ts in sorted(overlap):
         a, c = all_rows[ts], curated[ts]
         checks = [(Decimal(a[1]), Decimal(c["open"])),
@@ -245,9 +257,17 @@ def smoke(symbol: str, months: list[str], curated_path: Path) -> dict:
         if any(x != y for x, y in checks):
             mismatches.append({"ts": ts, "archive": a[:5],
                                "curated": [c["open"], c["high"], c["low"], c["close"]]})
+    for ts, r in all_rows.items():
+        vol, low, high, quote = Decimal(r[5]), Decimal(r[3]), Decimal(r[2]), Decimal(r[7])
+        if not (vol * low <= quote <= vol * high):
+            invariant_violations.append({"ts": ts, "row": r[:8]})
     report["cross_check"] = {
+        "fields_compared_cross_dataset": ["open", "high", "low", "close"],
+        "quote_volume": "not cross-dataset comparable (reference lacks the "
+                        "field); validated by range invariant only",
         "curated_rows": len(curated), "overlap_days": len(overlap),
         "decimal_mismatches": len(mismatches), "examples": mismatches[:3],
+        "quote_volume_invariant_violations": len(invariant_violations),
     }
     print(json.dumps(report, indent=2)[:2000])
     return report
@@ -266,11 +286,31 @@ def month_range(first: str, last: str = "2023-12") -> list[str]:
     return out
 
 
+def atomic_write(dest: Path, blob: bytes) -> None:
+    """Write via temp file + rename so readers never see partial files."""
+    import os
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_bytes(blob)
+    os.replace(tmp, dest)
+
+
+def official_checksum(key: str, get=http_get) -> str:
+    return get(f"{ARCHIVE_BASE}/{key}.CHECKSUM").decode().strip().split()[0]
+
+
 def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
-          limit: int, months_filter: set[str] | None = None) -> None:
-    """Download kline + funding zips with checksum verification into a raw
-    directory. Resumable: existing files with matching sha256 are skipped.
-    Missing months (delistings) are recorded, not fatal."""
+          limit: int, months_filter: set[str] | None = None,
+          run_id: str = "unassigned", get=http_get) -> list[dict]:
+    """Download kline + funding zips into a raw directory.
+
+    - cached files are re-verified against the OFFICIAL .CHECKSUM; a
+      mismatch triggers re-download and atomic replacement
+    - only HTTP 404 records 'missing'; retryable codes that still fail
+      after http_get's retries (and any other HTTP error) FAIL the run
+    - the append manifest is a run log only; a canonical manifest keyed
+      by (symbol, month, kind), last-write-wins, is written at the end
+    """
     spec = json.loads(candidates_path.read_text())
     symbols = sorted(spec["first_bar_by_symbol"])
     if only:
@@ -281,6 +321,7 @@ def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
     funding_dir = out_dir / "fundingRate"
     manifest_path = out_dir / "fetch-manifest.jsonl"
     out_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict] = []
     done_syms = 0
     with open(manifest_path, "a", encoding="utf-8") as manifest:
         for sym in symbols:
@@ -288,63 +329,142 @@ def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
             wanted = month_range(first)
             if months_filter:
                 wanted = [m for m in wanted if m in months_filter]
-            entries = []
             for m in wanted:
-                for kind, prefix, directory in (
+                for kind, key, directory in (
                     ("kline", KLINE_PREFIX + f"{sym}/1d/{sym}-1d-{m}.zip", klines_dir),
                     ("funding", FUNDING_PREFIX + f"{sym}/{sym}-fundingRate-{m}.zip", funding_dir),
                 ):
                     dest = directory / sym / f"{kind}-{m}.zip"
-                    record = {"symbol": sym, "month": m, "kind": kind,
-                              "key": prefix, "path": str(dest)}
-                    if dest.exists():
-                        blob = dest.read_bytes()
-                        record.update(status="cached",
-                                      sha256=hashlib.sha256(blob).hexdigest())
-                    else:
-                        try:
-                            blob = http_get(f"{ARCHIVE_BASE}/{prefix}")
-                            ck = http_get(f"{ARCHIVE_BASE}/{prefix}.CHECKSUM").decode().strip()
-                            if not verify_sha256(blob, ck):
+                    record = {"run_id": run_id, "symbol": sym, "month": m,
+                              "kind": kind, "key": key, "path": str(dest)}
+                    try:
+                        expected = official_checksum(key, get)
+                        if dest.exists():
+                            local = hashlib.sha256(dest.read_bytes()).hexdigest()
+                            if local == expected:
+                                record.update(status="cached", sha256=local)
+                            else:
+                                blob = get(f"{ARCHIVE_BASE}/{key}")
+                                if hashlib.sha256(blob).hexdigest() != expected:
+                                    record.update(status="checksum_mismatch")
+                                else:
+                                    atomic_write(dest, blob)
+                                    record.update(status="replaced",
+                                                  sha256=expected, bytes=len(blob))
+                        else:
+                            blob = get(f"{ARCHIVE_BASE}/{key}")
+                            if hashlib.sha256(blob).hexdigest() != expected:
                                 record.update(status="checksum_mismatch")
                             else:
-                                dest.parent.mkdir(parents=True, exist_ok=True)
-                                dest.write_bytes(blob)
-                                record.update(status="ok",
-                                              sha256=hashlib.sha256(blob).hexdigest(),
+                                atomic_write(dest, blob)
+                                record.update(status="ok", sha256=expected,
                                               bytes=len(blob))
-                        except urllib.error.HTTPError as exc:
-                            record.update(status="missing", http=exc.code)
-                    entries.append(record)
+                    except urllib.error.HTTPError as exc:
+                        if exc.code == 404:
+                            record.update(status="missing", http=404)
+                        else:
+                            record.update(status="run_fail", http=exc.code)
+                            manifest.write(json.dumps(record, sort_keys=True) + "\n")
+                            raise RuntimeError(
+                                f"fetch run FAIL ({sym} {m} {kind}): "
+                                f"HTTP {exc.code} after retries")
+                    records.append(record)
                     manifest.write(json.dumps(record, sort_keys=True) + "\n")
-            bad = [e for e in entries if e["status"] in ("checksum_mismatch",)]
-            if bad:
-                raise RuntimeError(f"{sym}: checksum mismatch on {len(bad)} files")
             done_syms += 1
             if done_syms % 10 == 0:
                 print(f"  fetched {done_syms}/{len(symbols)} symbols", file=sys.stderr)
+    canonical = {(r["symbol"], r["month"], r["kind"]): r for r in records}
+    canonical_doc = {
+        "run_id": run_id,
+        "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "entries": [canonical[k] for k in sorted(canonical)],
+    }
+    out_dir.joinpath("canonical-manifest.json").write_text(
+        json.dumps(canonical_doc, indent=2, sort_keys=True))
     print(f"fetch pass complete: {done_syms} symbols -> {out_dir}")
+    return records
+
+
+def audit(out_dir: Path, candidates_path: Path,
+          current_symbols: set[str] | None = None) -> dict:
+    """Completeness audit over the canonical manifest. Classifies each
+    symbol's missing months as pre-listing (implicit), post-delisting
+    (tail after the last present month), or mid-lifecycle gaps. Kline
+    mid-gaps or a missing tail on a currently-trading symbol FAIL the
+    audit; funding mid-gaps are warnings. PASS gates raw->validated->curated."""
+    if current_symbols is None:
+        current_symbols = current_perp_usdt()
+    spec = json.loads(candidates_path.read_text())
+    canonical = json.loads((out_dir / "canonical-manifest.json").read_text())
+    ok: dict[tuple[str, str], list[str]] = {}
+    for e in canonical["entries"]:
+        if e.get("status") in ("ok", "cached", "replaced"):
+            ok.setdefault((e["symbol"], e["kind"]), []).append(e["month"])
+    problems: list[str] = []
+    warnings: list[str] = []
+    per_symbol: dict[str, dict] = {}
+    for sym in sorted(spec["first_bar_by_symbol"]):
+        kmonths = sorted(ok.get((sym, "kline"), []))
+        fmonths = sorted(ok.get((sym, "funding"), []))
+        info: dict = {"kline_months": len(kmonths), "funding_months": len(fmonths)}
+        if not kmonths:
+            problems.append(f"{sym}: no kline data at all")
+            per_symbol[sym] = info
+            continue
+        expected = month_range(kmonths[0], kmonths[-1])
+        kgaps = [m for m in expected if m not in kmonths]
+        if kgaps:
+            problems.append(f"{sym}: kline mid-lifecycle gaps {kgaps}")
+        if kmonths[-1] < "2023-12" and sym in current_symbols:
+            problems.append(
+                f"{sym}: missing tail after {kmonths[-1]} but currently trading")
+        elif kmonths[-1] < "2023-12":
+            info["post_delisting_after"] = kmonths[-1]
+        if fmonths:
+            fexpected = month_range(fmonths[0], fmonths[-1])
+            fgaps = [m for m in fexpected if m not in fmonths]
+            if fgaps:
+                warnings.append(f"{sym}: funding mid-gaps {fgaps}")
+        per_symbol[sym] = info
+    report = {
+        "canonical_run_id": canonical.get("run_id"),
+        "symbols_audited": len(per_symbol),
+        "verdict": "PASS" if not problems else "FAIL",
+        "problems": problems,
+        "warnings": warnings,
+        "per_symbol": per_symbol,
+        "gate": "PASS gates raw->validated->curated; FAIL blocks V1",
+    }
+    (out_dir / "audit-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True))
+    print(f"audit {report['verdict']}: {len(problems)} problems, "
+          f"{len(warnings)} warnings, {report['symbols_audited']} symbols")
+    return report
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["enumerate", "smoke", "fetch"])
+    parser.add_argument("mode", choices=["enumerate", "smoke", "fetch", "audit"])
     parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument("--months", default="2023-10,2023-11,2023-12")
+    parser.add_argument("--months", default=None,
+                        help="fetch/smoke month filter; fetch defaults to ALL months")
     parser.add_argument("--out", default="/Users/ASUS/Desktop/gmaq-data/snapshots/"
                                           "pre2024-usdm-current-survivors/raw")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--run-id", default="unassigned")
     args = parser.parse_args()
     here = Path(__file__).parent
     if args.mode == "enumerate":
         enumerate_candidates()
         return 0
     if args.mode == "smoke":
+        months = args.months.split(",") if args.months else \
+            ["2023-10", "2023-11", "2023-12"]
         curated = Path(
             "/Users/ASUS/Desktop/gmaq-data/snapshots/btceth-weekly-tsmom/curated/"
             "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615/data/"
             f"{args.symbol}-1d.jsonl")
-        report = smoke(args.symbol, args.months.split(","), curated)
+        report = smoke(args.symbol, months, curated)
         here.joinpath("pre2024-smoke-report.json").write_text(
             json.dumps(report, indent=2))
         failed = (any(not m["sha256_ok"] for m in report["months"].values())
@@ -355,9 +475,13 @@ def main() -> int:
             return 1
         print("SMOKE_GATE=PASS")
         return 0
+    if args.mode == "audit":
+        report = audit(Path(args.out), here / "pre2024-candidates.json")
+        return 0 if report["verdict"] == "PASS" else 1
     fetch(here / "pre2024-candidates.json", Path(args.out),
           only={args.symbol} if args.symbol != "ALL" else None, limit=args.limit,
-          months_filter=set(args.months.split(",")) if args.mode == "fetch" and args.months else None)
+          months_filter=set(args.months.split(",")) if args.months else None,
+          run_id=args.run_id)
     return 0
 
 

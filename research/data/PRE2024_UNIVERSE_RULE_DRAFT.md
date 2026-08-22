@@ -73,8 +73,10 @@ true prospective (forward) validation window.
   VERIFIED/PASS like existing datasets.
 - Cross-validation against existing VERIFIED data: BTC/ETH daily bars
   in the overlapping window compared over the FULL window, per bar, on
-  UTC timestamps and OHLC + quote volume as ORIGINAL decimal strings
-  (no float parsing anywhere in the comparison).
+  UTC timestamps and OHLC as ORIGINAL decimal strings (no float parsing
+  anywhere in the comparison). The reference dataset `88d9ff34` carries
+  no quote volume, so that field is validated per bar only by the range
+  invariant `volume x low <= quote volume <= volume x high`.
 
 ## Acceptance criteria (exact)
 
