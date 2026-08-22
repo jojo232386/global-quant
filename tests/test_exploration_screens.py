@@ -45,20 +45,27 @@ def test_buyhold_differs_from_daily_rebalanced():
 
 
 def test_target_vol_subtracts_cost_not_net():
-    # regression: a prior version returned NET from daily_rb_with_costs and
-    # the strategy subtracted it as if it were the cost, collapsing returns
-    # to ~ -cost. The cost series must enter as a small deduction only.
-    rets_b = [0.0, 1.0, 0.10]
-    gross, rb_costs = expl.daily_rb_with_costs(rets_b, [0.0, 0.0, 0.0], cost=0.01)
+    # regression, pinned with HAND-DERIVED constants only: expectations must
+    # not reference the helper's own returns, or a net-as-cost relapse
+    # contaminates both sides and the test still passes.
+    cost = 0.01
+    gross_expected = [0.0, 0.5, 0.05]          # hand-derived 50/50 gross
+    cost_expected = [0.0, (1.0 / 3.0) * cost, (1.0 / 21.0) * cost]  # two-leg
     series, traded, weights = expl.target_vol_series(
-        gross, rb_costs, target=1.0, band=10.0, cost=0.0, vol_window=30)
+        gross_expected, cost_expected, target=1.0, band=10.0, cost=0.0,
+        vol_window=30)
     # target=1.0 with a huge band -> weight stays 1, no vol trades; every
-    # day must equal gross - cost, NOT gross - (gross - cost)
+    # day must equal gross - cost, NOT gross - (gross - cost) = cost
     assert weights == [1.0, 1.0, 1.0]
     for i in range(3):
-        assert series[i] == pytest.approx(gross[i] - rb_costs[i])
-    for i in (1, 2):  # nonzero days: a net-as-cost bug collapses these to ~-cost
-        assert series[i] != pytest.approx(rb_costs[i])
+        assert series[i] == pytest.approx(gross_expected[i] - cost_expected[i])
+    for i in (1, 2):  # nonzero days collapse to ~-cost under the old bug
+        assert series[i] != pytest.approx(cost_expected[i])
+    # independently pin the helper's own contract against the same constants
+    gross, rb_costs = expl.daily_rb_with_costs(
+        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=cost)
+    assert gross == pytest.approx(gross_expected)
+    assert rb_costs == pytest.approx(cost_expected)
 
 
 def test_rs_momentum_first_legal_signal_boundary():
