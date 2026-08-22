@@ -23,23 +23,51 @@ spec.loader.exec_module(expl)
 
 
 def test_buyhold_differs_from_daily_rebalanced():
-    # BTC doubles on day 2, ETH flat: buy-and-hold stays 100% BTC-relative
-    # after the move while daily rebalancing sells back to 50/50.
-    btc = [100.0, 100.0, 200.0]  # 3 closes -> 2 return days
-    eth = [100.0, 100.0, 100.0]
+    # BTC doubles on day 2 and rises again on day 3; ETH flat. Only from
+    # day 3 do the two constructions actually diverge: buy-and-hold now
+    # carries 2/3 BTC weight, the rebalanced book went back to 50/50.
+    btc = [100.0, 100.0, 200.0, 220.0]  # 4 closes -> 3 return days
+    eth = [100.0, 100.0, 100.0, 100.0]
     bh = expl.buyhold_returns(btc, eth)
-    # day 1: flat -> 0.0; day 2: (0.5*2 + 0.5*1) / 1 - 1 = 0.5
-    assert bh == pytest.approx([0.0, 0.5])
+    # day 1 flat -> 0.0; day 2: (0.5*2+0.5*1)/1 - 1 = 0.5;
+    # day 3: (0.5*2.2+0.5*1)/(0.5*2+0.5*1) - 1 = 1.6/1.5 - 1 = 1/15
+    assert bh == pytest.approx([0.0, 0.5, 1.0 / 15.0])
     gross, net = expl.daily_rb_with_costs(
-        [0.0, 1.0], [0.0, 0.0], cost=0.0)
-    # daily rebalanced: day 1 flat -> 0.0; day 2 gross 0.5*1 + 0.5*0 = 0.5
-    assert gross == pytest.approx([0.0, 0.5])
-    assert net == pytest.approx([0.0, 0.5])
-    # with costs, the rebalance back to 50/50 after BTC's move costs one
-    # side on the drift: weight drifts to 2/3, |2/3 - 1/2| = 1/6
-    _, net_costed = expl.daily_rb_with_costs([0.0, 1.0], [0.0, 0.0], cost=0.01)
-    assert net_costed[0] == pytest.approx(0.0)
-    assert net_costed[1] == pytest.approx(0.5 - (1 / 6) * 0.01)
+        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=0.0)
+    # daily rebalanced: day 3 earns only 0.5*10% = 0.05 -> diverges from bh
+    assert gross == pytest.approx([0.0, 0.5, 0.05])
+    assert bh[2] != pytest.approx(gross[2])  # the actual divergence pin
+    assert net == pytest.approx([0.0, 0.5, 0.05])
+    # restoring 50/50 after day 2's move trades BOTH legs: sell 1/6 BTC,
+    # buy 1/6 ETH -> traded notional 1/3, not 1/6
+    _, net_costed = expl.daily_rb_with_costs(
+        [0.0, 1.0, 0.10], [0.0, 0.0, 0.0], cost=0.01)
+    assert net_costed[1] == pytest.approx(0.5 - (1.0 / 3.0) * 0.01)
+    # day 3: both legs drift by 11/21 - 1/2 = 1/42 each -> traded 1/21 total
+    assert net_costed[2] == pytest.approx(0.05 - (1.0 / 21.0) * 0.01)
+
+
+def test_rs_momentum_first_legal_signal_boundary():
+    btc = [100.0 * (1.01 ** i) for i in range(20)]  # steadily rising
+    eth = [100.0] * 20
+    rs = expl.rs_momentum(btc, eth, lookback=3)
+    assert rs[1] is None      # j = lookback - 2: interval incomplete
+    assert rs[2] is not None  # j = lookback - 1: first legal slot
+    assert rs[2] == pytest.approx((btc[3] / eth[3]) / (btc[0] / eth[0]) - 1.0)
+
+
+def test_first_tradeable_bar_end_to_end():
+    btc = [100.0 * (1.01 ** i) for i in range(10)]
+    eth = [100.0] * 10
+    rets_b = expl.daily_returns(btc)
+    rets_e = expl.daily_returns(eth)
+    rs = expl.rs_momentum(btc, eth, lookback=3)
+    series, switches = expl.rotation_series(rets_b, rets_e, rs, band=0.01, cost=0.0)
+    # rs[lookback-1] gates bar `lookback`: the switch is felt on bar 3,
+    # never on bar 2
+    assert switches >= 1
+    assert series[2] == pytest.approx(0.5 * rets_b[2])  # still 50/50
+    assert series[3] == pytest.approx(rets_b[3])        # switched to BTC
 
 
 def test_warm_window_alignment_no_off_by_one():

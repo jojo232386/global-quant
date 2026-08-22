@@ -127,14 +127,16 @@ def buyhold_returns(btc_warm: list[float], eth_warm: list[float]) -> list[float]
 def daily_rb_with_costs(btc_ret: list[float], eth_ret: list[float],
                         cost: float) -> tuple[list[float], list[float]]:
     """Daily-rebalanced 50/50: gross returns plus per-day internal
-    rebalancing cost (the drift back to 50/50 costs one side per unit)."""
+    rebalancing cost. Restoring 50/50 sells |drift| of the winner and buys
+    |drift| of the loser, so the traded notional is the SUM of absolute
+    weight changes (2 x drift) and cost applies per side of that."""
     gross, net = [], []
     for b, e in zip(btc_ret, eth_ret):
         g = 0.5 * b + 0.5 * e
         wb = 0.5 * (1 + b) / (0.5 * (1 + b) + 0.5 * (1 + e))
-        drift = abs(wb - 0.5)
+        traded_notional = abs(wb - 0.5) + abs((1 - wb) - 0.5)
         gross.append(g)
-        net.append(g - drift * cost)
+        net.append(g - traded_notional * cost)
     return gross, net
 
 
@@ -169,6 +171,21 @@ def rotation_series(btc_ret: list[float], eth_ret: list[float],
     return series, switches
 
 
+def rs_momentum(btc_close: list[float], eth_close: list[float],
+                lookback: int) -> list[float | None]:
+    """RS-ratio momentum aligned to return bars: rs[j] uses closes[j+1]
+    and closes[j+1-lookback], so the first computable slot is
+    j = lookback - 1 (not lookback); earlier entries stay None. rs[j-1]
+    gates return bar j without lookahead."""
+    slots = len(btc_close) - 1
+    rs: list[float | None] = [None] * slots
+    for j in range(lookback - 1, slots):
+        now = btc_close[j + 1] / eth_close[j + 1]
+        then = btc_close[j + 1 - lookback] / eth_close[j + 1 - lookback]
+        rs[j] = now / then - 1.0
+    return rs
+
+
 def run_expl012(btc_ret: list[float], eth_ret: list[float], btc_close: list[float],
                 eth_close: list[float], cost: float) -> list[dict]:
     # closes MUST be the window-matched series: closes[i] is the start close
@@ -179,11 +196,7 @@ def run_expl012(btc_ret: list[float], eth_ret: list[float], btc_close: list[floa
     results = []
     for lookback in (14, 30):
         for band in (0.03, 0.05):
-            rs_mom = [None] * len(btc_ret)
-            for i in range(lookback, len(btc_ret)):
-                ratio_now = btc_close[i + 1] / eth_close[i + 1]
-                ratio_then = btc_close[i + 1 - lookback] / eth_close[i + 1 - lookback]
-                rs_mom[i] = ratio_now / ratio_then - 1.0
+            rs_mom = rs_momentum(btc_close, eth_close, lookback)
             series, switches = rotation_series(btc_ret, eth_ret, rs_mom, band, cost)
             results.append({
                 "lookback": lookback, "band": band, "switches": switches,
