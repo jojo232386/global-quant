@@ -23,23 +23,27 @@ with conditioning.
   averaged) return rank across the top-N (N=30) PIT-by-dollar-volume
   universe, rebalanced weekly, only when cross-sectional rank dispersion is
   above its train median.
-- Data: existing PIT universe + klines snapshots (V1 preferred, legacy
-  continuation acceptable for screening).
+- Data: curated price V1 `a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b`;
+  archive-extended, survivor-biased, exploration-only.
 - Fixed grid: N ∈ {20, 30, 50}; rebalance ∈ {w, 2w}. Nothing else.
 - Delta vs closed: dispersion gating + multi-horizon averaging + real N≥20
   universe, vs unconditional 24h momentum on top-100.
 
-### EXPL-002 · short-term reversal conditioned on funding pressure · DRAFT
+### EXPL-002 · short-term reversal conditioned on funding pressure · BLOCKED_ON_DATA
 - Hypothesis: 1–3 day reversal within the PIT universe, taken only in names
   whose funding z-score is extreme (crowded positioning unwinds harder).
 - Fixed grid: reversal lookback ∈ {1d, 2d, 3d}; funding z threshold ∈ {2, 3}.
 - Delta vs closed: funding as a conditioning gate, never as the signal; the
   closed funding cross-section used funding itself as the ranking signal.
+- Data blocker: price V1 is ready, but `funding_verdict=FAIL`; this card does
+  not run until a funding-complete snapshot exists.
 
 ### EXPL-003 · low-volatility anomaly cross-section · DRAFT
 - Hypothesis: long bottom realized-vol tercile / short top tercile of the PIT
   universe, monthly, vol computed on trailing 30d.
 - Fixed grid: vol window ∈ {14d, 30d}; rebalance ∈ {m, 2m}.
+- Data: curated price V1 `a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b`;
+  archive-extended, survivor-biased, exploration-only.
 - Delta vs closed: equities-style low-vol anomaly was never formally tested
   in GMAQ; single-symbol vol-filtered momentum is a different family.
 
@@ -48,6 +52,8 @@ with conditioning.
   deciles within the universe (slower crowding), with cost model penalizing
   the tilt honestly.
 - Fixed grid: tilt ∈ {none, bottom-3-decays-only}.
+- Data: curated price V1 `a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b`;
+  archive-extended, survivor-biased, exploration-only.
 - Delta vs closed: liquidity as a portfolio construction axis is untested;
   explicitly cost-lens-first.
 
@@ -147,9 +153,9 @@ vol as a gate or target, not as a signal direction.
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
 
-### EXPL-010 · target-vol portfolio of the universe · SCREENED 2026-08-22 · BLOCKED_ON_DATA
-- `EXPL-010_FULL = BLOCKED_ON_DATA`: pre-2024 top-N universe data absent;
-  the registered card has not run.
+### EXPL-010 · target-vol portfolio of the universe · DRAFT
+- `EXPL-010_FULL`: price data is ready in curated V1 `a7d65a92`; the
+  registered full card has not run.
 - `EXPL-010_N2_DIAGNOSTIC = DROPPED`: N=2 BTC/ETH diagnostic fails the
   card's Calmar/MDD graduation bar at every grid point. Direction consistent
   with the ASQ A5-1 outcome; directional consistency only, no
@@ -158,21 +164,22 @@ vol as a gate or target, not as a signal direction.
   rebalance bands vs unscaled buy-and-hold; graduation bar Calmar/MDD.
   Grid target ∈ {15%, 20%, 30%}; band ∈ {±10%, ±20%}.
 
-## DATA BLOCKERS (2026-08-22 inventory)
+## DATA AVAILABILITY (updated 2026-08-23)
 
-- PIT universe files (`global-quant-continuation/user_data/data/pit/`, 82
-  symbols, 15m klines + funding) cover **2026-02..2026-08 only** — entirely
-  inside the tainted region. Family A cards (EXPL-001..004), EXPL-013, and
-  the full-breadth EXPL-010 cannot be screened on the train window.
+- Price breadth is ready: curated V1
+  `a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b`,
+  labeled archive-extended, survivor-biased, exploration-only. It unlocks
+  price-only Family A cards, EXPL-013, and full-breadth EXPL-010.
+- Funding remains blocked by `funding_verdict=FAIL`; EXPL-002 and all other
+  funding-conditioned breadth cards remain blocked.
 - Clean pre-2024 data available: curated `88d9ff34` (BTC/ETH 1d + funding +
   mark-8h, 2020-01..2026-08) and curated `9601a8ff` (BTC/ETH spot/perp 8h).
-- Implication: screening proceeds on BTC/ETH cards until the data-layer
-  scope decision (protocol escalation path) delivers a pre-2024 multi-symbol
-  dataset through the raw → validated → curated V1 flow.
+- The prior 2026-only continuation PIT files remain tainted and are not used
+  for these train-window screens.
 
 ## Family E — Portfolio construction
 
-### EXPL-013 · banded inverse-vol universe portfolio · BLOCKED_ON_DATA
+### EXPL-013 · banded inverse-vol universe portfolio · DRAFT
 - Hypothesis: inverse-vol weights across the top-N universe with wide
   rebalance bands (trade only when weight drift > band) retains the
   diversification benefit at a fraction of the turnover.
@@ -180,6 +187,8 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: the dead two-asset inverse-vol test (ASQ A5-1) and the
   9-symbol-week carry both suffered tiny breadth; this is N≥10 with an
   explicit turnover budget.
+- Data: curated price V1 `a7d65a92`; archive-extended, survivor-biased,
+  exploration-only.
 
 ### EXPL-014 · rank momentum with vol scaling · DRAFT
 - Hypothesis: EXPL-001 base with per-name vol-scaled position sizes
@@ -234,16 +243,15 @@ vol as a gate or target, not as a signal direction.
 
 ## Screening order
 
-1. EXPL-010: BLOCKED_ON_DATA (full card never ran; N2 diagnostic DROPPED
-   on unified semantics).
+1. Queue EXPL-001, EXPL-003, and EXPL-004 on the verified price V1.
 2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
-3. EXPL-013: BLOCKED_ON_DATA (needs top-N universe).
+3. Queue EXPL-010_FULL and EXPL-013 after the first Family A price batch.
 4. EXPL-008: DROPPED_COST_FRAGILE (2026-08-22 screen).
 5. EXPL-015: DROPPED_COST_FRAGILE (2026-08-22 screen).
 6. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
    force-run on two symbols).
-7. Family A cards wait on the pre-2024 universe data decision (see DATA
-   BLOCKERS).
+7. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
+   unlock a funding-conditioned card).
 
 ## Escalation note
 

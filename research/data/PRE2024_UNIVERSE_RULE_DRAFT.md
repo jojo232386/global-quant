@@ -1,10 +1,9 @@
-# Pre-2024 Multi-Symbol Universe Rule (DRAFT for review)
+# Pre-2024 Multi-Symbol Universe Rule
 
-Status: `DRAFT` — awaiting user + Codex-App review. Fetching starts only
-after this rule is approved and the user separately authorizes network
-access to Binance public endpoints. This document freezes the selection
-rule BEFORE any data is pulled (the selection-bias lesson: the rule must
-not be informed by the data it selects on).
+Status: `APPROVED_FOR_EXPLORATION_DATA` — public archive acquisition was
+authorized and `acquisition-attempt-001` completed on 2026-08-22. The price
+V1 remains gated on the repair and acceptance rules below; funding remains
+blocked by its separate audit verdict.
 
 ## Purpose
 
@@ -15,13 +14,23 @@ data source, no new governance.
 
 ## Scope of the fetch
 
-- Instruments: Binance USD-M perpetuals from the CURRENT `exchangeInfo`,
-  frozen filter `contractType=PERPETUAL AND status=TRADING AND
-  quoteAsset=USDT` (official docs: exchangeInfo describes CURRENT trading
-  rules and symbols — it is not a historical PIT universe).
-- Dataset id: `pre2024-usdm-current-survivors-1d` — the survivorship
-  limitation is encoded in the name.
-- Bars: 1d klines ONLY (breadth over granularity). Funding: the COMPLETE
+- Instruments: the frozen 209-symbol candidate set: 138 symbols included from
+  the CURRENT `exchangeInfo` filter (`PERPETUAL`, `TRADING`, `USDT`) plus 71
+  archive-only USDT-like symbols with a first monthly 1d file no later than
+  2023-06. This is broader than today's survivors but is not a complete
+  historical contract master.
+- Acquisition id: `pre2024-usdm-current-survivors`; curated price dataset id:
+  `pre2024-usdm-archive-extended-1d`. Every snapshot and consumer retains an
+  explicit survivor-bias label.
+- Curated bars: 1d klines ONLY (breadth over granularity). The monthly 1d
+  archive remains immutable. If it has an intra-month missing day, the exact
+  checksum-verified official daily 1d object may fill that day. If a 1d row's
+  archived base volume makes its quote-volume range invariant fail, the
+  checksum-verified official daily 1m object may be fetched solely as
+  repair evidence: its 1440 UTC minutes must aggregate exactly to the 1d OHLC;
+  their summed base and quote volume replace only the disputed 1d volume
+  fields. No individual 1m field enters curated data or a strategy.
+  Funding: the COMPLETE
   funding event stream as returned by the API — every `fundingTime` and
   `fundingRate`, sorted and deduplicated; no fixed 8h interval is assumed
   (`fundingIntervalHours` officially varies). Mark price: NOT fetched.
@@ -29,9 +38,10 @@ data source, no new governance.
   bar data is fetched. This does NOT make the dataset PIT-clean by itself:
   the candidate list comes from today's `exchangeInfo`, so 2026 listing
   status participates in pool construction.
-- Honest labeling: the candidate set cannot cover contracts delisted
-  before today (public endpoints expose no delisting archive). The
-  dataset is therefore a **survivor-biased exploration set** and every
+- Honest labeling: the archive recovers some contracts delisted before today,
+  but symbol-name inference and archive availability cannot prove a complete
+  historical domain. The dataset is therefore a **survivor-biased exploration
+  set** and every
   consuming artifact must carry that label; it must not be described as
   a structurally taint-free or complete historical domain. The prior PIT
   studies carried the same limitation.
@@ -65,12 +75,12 @@ true prospective (forward) validation window.
 
 ## V1 pipeline integration
 
-- New curated dataset `pre2024-usdm-current-survivors-1d` through the
-  existing `gmaq_data` layer: raw jsonl per symbol (COMPLETE source
-  responses preserved in the raw layer; the field whitelist below
-  constrains the curated layer only) → validation → curated snapshot +
-  manifest + schema + file SHAs; registry replay must verify
-  VERIFIED/PASS like existing datasets.
+- New curated dataset `pre2024-usdm-archive-extended-1d` through the existing
+  `gmaq_data` layer. Complete source ZIPs remain preserved in the external raw
+  acquisition directory. The raw V1 snapshot binds the canonical acquisition
+  manifest, audit report, frozen candidate set, repair manifest, and every
+  consumed source SHA; validated and curated stages contain only whitelisted
+  JSONL. Registry replay must verify VERIFIED/PASS like existing datasets.
 - Cross-validation against existing VERIFIED data: BTC/ETH daily bars
   in the overlapping window compared over the FULL window, per bar, on
   UTC timestamps and OHLC as ORIGINAL decimal strings (no float parsing
@@ -82,18 +92,32 @@ true prospective (forward) validation window.
 
 - Symbol count and per-year pool sizes recorded; expected order of
   magnitude: tens of symbols eligible by 2022, NOT hundreds.
+  Empirical resolution (2026-08-23): the frozen $5M rule produces more than
+  100 eligible symbols before the end of 2022. Source hashes, repaired volume
+  evidence, continuous 90-calendar-day eligibility, and PIT timing were
+  rechecked; the earlier magnitude expectation was wrong. The threshold is
+  not changed after observing this result.
 - PIT pool membership is a pure function of the raw data: re-running the
   filter must reproduce identical pools (pipeline asserts set equality).
 - BTC/ETH full-window per-bar comparison against curated `88d9ff34`
   passes with zero mismatches; any mismatch fails the snapshot.
-- Registry replay must be `VERIFIED` with `quarantine = 0`. Missing,
+- Registry replay must be `VERIFIED` with `quarantine = 0` after applying only
+  the bounded same-source repair evidence above. Missing,
   duplicate, or out-of-window rows go to quarantine — zero-filling and
   silent gap interpolation are forbidden. If quarantine is nonzero the
   snapshot FAILS: investigate and re-curate; relaxing the check to force
   a pass is forbidden.
-- Curated field scope per symbol file: 1d bars (open_time, OHLC, quote
-  volume) and funding events (fundingTime, fundingRate); anything else
-  fails validation.
+- Pre-alpha domain exclusion: `ICPUSDT` is removed from the eligible price
+  domain as `EXCLUDED_INCOMPLETE_TRADE_HISTORY`. Official checksummed 1h trade
+  archives contain no bars for 2022-09-22..26 while the checksummed mark-price
+  archive continues. The whole symbol is excluded; those dates are not
+  zero-filled, interpolated, or replaced with mark prices. The original
+  209-symbol candidate set and the exclusion evidence remain hash-bound; the
+  eligible curated domain is 208 symbols. This rule was frozen before any
+  Family A alpha screen used the dataset.
+- Price-only curated field scope per symbol file: 1d bars (open_time, OHLC,
+  quote volume) plus the monthly PIT universe; anything else fails validation.
+  Funding events remain outside this snapshot until `funding_verdict=PASS`.
 
 ## Archive index probe (2026-08-22, metadata only, user-authorized)
 
@@ -115,17 +139,15 @@ true prospective (forward) validation window.
   The survivor-bias label is thereby REDUCED but not eliminated
   (pre-launch delistings with no archive folder, and the naming
   heuristic, remain).
-- The dataset id stays `pre2024-usdm-current-survivors-1d` until the
-  archive-extended candidate set is actually validated; if adopted, a
-  rename to `pre2024-usdm-archive-extended-1d` accompanies the revision
-  of this rule (naming must not outrun validation).
+- The archive-extended candidate set was frozen and the price-file acquisition
+  audit passed for 209 candidates (138 current, 71 archive-only); the curated
+  price dataset therefore uses `pre2024-usdm-archive-extended-1d`. This rename
+  does not remove the survivor-bias or exploration-only graduation boundary.
 - Per the user's decision (2026-08-22): with this probe recorded, the
   bulk public fetch is GO without a further CLI review round.
 
 ## Cost and authorization
 
-- One-time fetch: public API, rate-limited, estimated 1–3 hours wall
-  clock; size roughly a few hundred MB raw for 1d + funding across all
-  eligible symbols.
-- Execution requires the user's explicit go (network access), given
-  AFTER this rule is approved.
+- The bulk public fetch was user-authorized and completed. The bounded repair
+  pass uses only the same official public archive, no credentials, and never
+  mutates the acquired monthly files.

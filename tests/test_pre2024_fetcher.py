@@ -10,11 +10,13 @@ the completeness audit verdicts.
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
 import pathlib
 import sys
 import urllib.error
+import zipfile
 
 import pytest
 
@@ -57,6 +59,28 @@ def make_server(tmp_path: pathlib.Path) -> tuple[dict, pathlib.Path]:
         return path.read_bytes()
 
     return {"put": put, "get": get}, site
+
+
+def make_zip(name: str, rows: list[list[str]], *, header: bool = False) -> bytes:
+    body_rows = []
+    if header:
+        body_rows.append([
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_volume", "count", "taker_buy_volume",
+            "taker_buy_quote_volume", "ignore",
+        ])
+    body_rows.extend(rows)
+    payload = "\n".join(",".join(row) for row in body_rows).encode() + b"\n"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(name, payload)
+    return buffer.getvalue()
+
+
+def kline_row(timestamp: int, *, volume: str = "10",
+              quote: str = "1000") -> list[str]:
+    return [str(timestamp), "100", "110", "90", "105", volume,
+            str(timestamp + fx.DAY_MS - 1), quote, "1", "5", "500", "0"]
 
 
 def test_cached_file_reverified_and_atomically_replaced(tmp_path):
@@ -155,6 +179,67 @@ def test_smoke_gate_fails_on_quote_volume_invariant_violation():
            "cross_check": {"overlap_days": 30, "decimal_mismatches": 0,
                            "quote_volume_invariant_violations": 2}}
     assert fx.smoke_gate_ok(bad) is False
+
+
+def test_repair_mode_discovers_and_binds_daily_evidence(tmp_path):
+    server, _ = make_server(tmp_path)
+    out = tmp_path / "raw"
+    out.mkdir()
+    symbol = "AAAUSDT"
+    day0 = 1_704_067_200_000
+    day1 = day0 + fx.DAY_MS
+    day2 = day1 + fx.DAY_MS
+
+    # Monthly source has one missing day and a corrupt base-volume field on
+    # day0; its OHLC and quote volume remain the values to validate.
+    monthly = make_zip(
+        f"{symbol}-1d-2024-01.zip",
+        [kline_row(day0, volume="1", quote="144000"), kline_row(day2)],
+        header=True,
+    )
+    monthly_path = out / "klines" / symbol / "kline-2024-01.zip"
+    monthly_path.parent.mkdir(parents=True)
+    monthly_path.write_bytes(monthly)
+    out.joinpath("canonical-manifest.json").write_text(json.dumps({
+        "run_id": "acquisition-attempt-001",
+        "entries": [{
+            "symbol": symbol, "month": "2024-01", "kind": "kline",
+            "status": "cached", "path": str(monthly_path),
+            "sha256": hashlib.sha256(monthly).hexdigest(),
+        }],
+    }))
+
+    missing_key = (
+        f"{fx.DAILY_KLINE_PREFIX}{symbol}/1d/{symbol}-1d-2024-01-02.zip")
+    server["put"](missing_key, make_zip(
+        f"{symbol}-1d-2024-01-02.csv", [kline_row(day1)], header=True))
+    minute_rows = []
+    for offset in range(1440):
+        timestamp = day0 + offset * fx.MINUTE_MS
+        minute_rows.append([
+            str(timestamp), "100", "110", "90", "105", "1",
+            str(timestamp + fx.MINUTE_MS - 1), "100", "1", "0.5", "50", "0",
+        ])
+    validation_key = (
+        f"{fx.DAILY_KLINE_PREFIX}{symbol}/1m/{symbol}-1m-2024-01-01.zip")
+    server["put"](validation_key, make_zip(
+        f"{symbol}-1m-2024-01-01.csv", minute_rows, header=True))
+
+    manifest = fx.repair_kline_archive(
+        out, run_id="repair-test", get=server["get"])
+    assert manifest["monthly_files_mutated"] is False
+    assert manifest["curated_1m_fields"] is False
+    assert {(entry["kind"], entry["date"]) for entry in manifest["missing_1d"]} == {
+        ("1d", "2024-01-02"),
+    }
+    assert {(entry["kind"], entry["date"])
+            for entry in manifest["volume_validation_1m"]} == {
+        ("1m", "2024-01-01"),
+    }
+    all_entries = manifest["missing_1d"] + manifest["volume_validation_1m"]
+    assert all(pathlib.Path(entry["path"]).is_file() for entry in all_entries)
+    persisted = json.loads((out / "repair-manifest.json").read_text())
+    assert persisted["run_id"] == "repair-test"
 
 
 def test_audit_first_month_and_funding_verdicts(tmp_path):

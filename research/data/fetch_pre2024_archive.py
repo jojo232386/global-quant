@@ -11,6 +11,9 @@ Modes:
                against curated 88d9ff34 (no floats anywhere).
   fetch      - full download for every candidate (NOT run in this commit;
                wall clock 1-3 h).
+  repair     - preserve the monthly archive and add checksum-verified daily
+               evidence for missing 1d bars plus 1m validation evidence for
+               the small set of 1d rows whose archived base volume is bad.
 
 Security posture: https only, hard allowlisted hosts, resolved IPs must
 be public (blocks loopback/private/link-local/metadata ranges), redirects
@@ -21,6 +24,8 @@ declarations and caps input size. No credentials.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import datetime as dt
 import hashlib
 import io
 import ipaddress
@@ -40,6 +45,7 @@ INFO_HOST = "fapi.binance.com"
 INFO_URL = f"https://{INFO_HOST}/fapi/v1/exchangeInfo"
 KLINE_PREFIX = "data/futures/um/monthly/klines/"  # .../{SYMBOL}/{interval}/{SYMBOL}-{interval}-{Y}-{M}.zip
 FUNDING_PREFIX = "data/futures/um/monthly/fundingRate/"  # .../{SYMBOL}/{SYMBOL}-fundingRate-{Y}-{M}.zip
+DAILY_KLINE_PREFIX = "data/futures/um/daily/klines/"
 TRAIN_END_MONTH = "2023-06"   # first monthly file must be <= this
 ALLOWED_HOSTS = {ARCHIVE_HOST, INFO_HOST}
 MAX_XML_BYTES = 8 * 1024 * 1024
@@ -220,6 +226,207 @@ def parse_zip_rows(zip_bytes: bytes) -> list[list[str]]:
     if rows and rows[0][0].strip().lower() == "open_time":  # header row
         rows = rows[1:]
     return rows
+
+
+DAY_MS = 86_400_000
+MINUTE_MS = 60_000
+PRESENT_STATUSES = {"ok", "cached", "replaced"}
+
+
+def _read_verified_manifest_zip(entry: dict) -> list[list[str]]:
+    """Read a locally acquired archive only after binding it to canonical SHA."""
+    path = Path(entry["path"])
+    blob = path.read_bytes()
+    actual = hashlib.sha256(blob).hexdigest()
+    if actual != entry.get("sha256"):
+        raise RuntimeError(f"canonical SHA mismatch while discovering repairs: {path}")
+    return parse_zip_rows(blob)
+
+
+def discover_kline_repairs(out_dir: Path) -> dict[str, list[dict]]:
+    """Find daily gaps and invalid 1d base/quote-volume relationships.
+
+    The monthly files remain immutable. Missing daily bars are repaired from
+    official daily 1d objects. Rows with an invalid base-volume relationship
+    retain their archived 1d OHLC/quote volume and are validated against a
+    checksum-verified aggregation of the corresponding daily 1m object.
+    """
+    canonical = json.loads((out_dir / "canonical-manifest.json").read_text())
+    rows_by_symbol: dict[str, dict[int, list[str]]] = {}
+    for entry in canonical["entries"]:
+        if entry.get("kind") != "kline" or entry.get("status") not in PRESENT_STATUSES:
+            continue
+        for row in _read_verified_manifest_zip(entry):
+            if len(row) != 12:
+                raise RuntimeError(f"unexpected kline column count for {entry['symbol']}")
+            timestamp = int(row[0])
+            previous = rows_by_symbol.setdefault(entry["symbol"], {}).get(timestamp)
+            if previous is not None and previous != row:
+                raise RuntimeError(
+                    f"conflicting duplicate kline for {entry['symbol']} at {timestamp}")
+            rows_by_symbol[entry["symbol"]][timestamp] = row
+
+    missing_1d: list[dict] = []
+    volume_validation_1m: list[dict] = []
+    for symbol, indexed in sorted(rows_by_symbol.items()):
+        timestamps = sorted(indexed)
+        for previous, current in zip(timestamps, timestamps[1:]):
+            for timestamp in range(previous + DAY_MS, current, DAY_MS):
+                missing_1d.append({
+                    "symbol": symbol,
+                    "date": dt.datetime.fromtimestamp(
+                        timestamp / 1000, dt.timezone.utc).date().isoformat(),
+                    "open_time_utc_ms": timestamp,
+                })
+        for timestamp, row in sorted(indexed.items()):
+            low, high = Decimal(row[3]), Decimal(row[2])
+            volume, quote = Decimal(row[5]), Decimal(row[7])
+            if not volume * low <= quote <= volume * high:
+                volume_validation_1m.append({
+                    "symbol": symbol,
+                    "date": dt.datetime.fromtimestamp(
+                        timestamp / 1000, dt.timezone.utc).date().isoformat(),
+                    "open_time_utc_ms": timestamp,
+                    "monthly_1d_ohlc": row[1:5],
+                    "monthly_1d_quote_volume": row[7],
+                })
+    return {
+        "missing_1d": missing_1d,
+        "volume_validation_1m": volume_validation_1m,
+    }
+
+
+def _fetch_verified_archive_object(key: str, dest: Path, get=http_get) -> tuple[str, str]:
+    try:
+        expected = official_checksum(key, get)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"repair object unavailable (HTTP {error.code}): {key}") from error
+    if dest.exists() and hashlib.sha256(dest.read_bytes()).hexdigest() == expected:
+        return "cached", expected
+    blob = get(f"{ARCHIVE_BASE}/{key}")
+    actual = hashlib.sha256(blob).hexdigest()
+    if actual != expected:
+        raise RuntimeError(f"repair object does not match official checksum: {key}")
+    status = "replaced" if dest.exists() else "ok"
+    atomic_write(dest, blob)
+    return status, expected
+
+
+def _validate_missing_daily_blob(blob: bytes, expected_timestamp: int) -> None:
+    rows = parse_zip_rows(blob)
+    if len(rows) != 1 or len(rows[0]) != 12 or int(rows[0][0]) != expected_timestamp:
+        raise RuntimeError("daily 1d repair must contain exactly the expected UTC bar")
+
+
+def _validate_minute_evidence(blob: bytes, expected_timestamp: int,
+                              expected_ohlc: list[str]) -> tuple[str, str]:
+    rows = parse_zip_rows(blob)
+    expected_times = [expected_timestamp + offset * MINUTE_MS for offset in range(1440)]
+    if len(rows) != 1440 or [int(row[0]) for row in rows] != expected_times:
+        raise RuntimeError("daily 1m validation evidence is not 1440 contiguous UTC minutes")
+    if any(len(row) != 12 for row in rows):
+        raise RuntimeError("daily 1m validation evidence has an unexpected schema")
+    quote = sum((Decimal(row[7]) for row in rows), Decimal(0))
+    aggregate_ohlc = [Decimal(rows[0][1]),
+                      max(Decimal(row[2]) for row in rows),
+                      min(Decimal(row[3]) for row in rows),
+                      Decimal(rows[-1][4])]
+    if aggregate_ohlc != [Decimal(value) for value in expected_ohlc]:
+        raise RuntimeError("1m aggregate OHLC disagrees with archived 1d OHLC")
+    volume = sum((Decimal(row[5]) for row in rows), Decimal(0))
+    low = min(Decimal(row[3]) for row in rows)
+    high = max(Decimal(row[2]) for row in rows)
+    if not volume * low <= quote <= volume * high:
+        raise RuntimeError("1m aggregate does not repair the base/quote-volume invariant")
+    return format(volume, "f"), format(quote, "f")
+
+
+def repair_kline_archive(out_dir: Path, *, run_id: str, get=http_get,
+                         workers: int = 8,
+                         exclusions_path: Path | None = None) -> dict:
+    """Acquire bounded same-source evidence without mutating monthly files."""
+    discovered = discover_kline_repairs(out_dir)
+    excluded_symbols: set[str] = set()
+    exclusions_digest: str | None = None
+    if exclusions_path is not None:
+        exclusions_blob = exclusions_path.read_bytes()
+        exclusions = json.loads(exclusions_blob)
+        excluded_symbols = {entry["symbol"] for entry in exclusions["exclusions"]}
+        exclusions_digest = hashlib.sha256(exclusions_blob).hexdigest()
+        discovered["missing_1d"] = [
+            item for item in discovered["missing_1d"]
+            if item["symbol"] not in excluded_symbols]
+        discovered["volume_validation_1m"] = [
+            item for item in discovered["volume_validation_1m"]
+            if item["symbol"] not in excluded_symbols]
+    if workers < 1 or workers > 16:
+        raise ValueError("repair workers must be between 1 and 16")
+
+    def fetch_missing(item: dict) -> dict:
+        symbol, day = item["symbol"], item["date"]
+        key = f"{DAILY_KLINE_PREFIX}{symbol}/1d/{symbol}-1d-{day}.zip"
+        dest = out_dir / "repairs" / "missing-1d" / symbol / f"{day}.zip"
+        status, digest = _fetch_verified_archive_object(key, dest, get)
+        _validate_missing_daily_blob(dest.read_bytes(), item["open_time_utc_ms"])
+        return {**item, "kind": "1d", "key": key,
+                "path": str(dest), "sha256": digest, "status": status}
+
+    def fetch_volume_validation(item: dict) -> dict:
+        symbol, day = item["symbol"], item["date"]
+        key = f"{DAILY_KLINE_PREFIX}{symbol}/1m/{symbol}-1m-{day}.zip"
+        dest = out_dir / "repairs" / "volume-validation-1m" / symbol / f"{day}.zip"
+        status, digest = _fetch_verified_archive_object(key, dest, get)
+        try:
+            replacement_base, replacement_quote = _validate_minute_evidence(
+                dest.read_bytes(), item["open_time_utc_ms"], item["monthly_1d_ohlc"])
+        except RuntimeError as error:
+            raise RuntimeError(f"{symbol} {day}: {error}") from error
+        return {**item, "kind": "1m", "key": key,
+                "path": str(dest), "sha256": digest, "status": status,
+                "replacement_base_volume": replacement_base,
+                "replacement_quote_volume": replacement_quote}
+
+    records: list[dict] = []
+    jobs = [(fetch_missing, item) for item in discovered["missing_1d"]]
+    jobs.extend((fetch_volume_validation, item)
+                for item in discovered["volume_validation_1m"])
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(function, item) for function, item in jobs]
+        errors: list[str] = []
+        for completed, future in enumerate(concurrent.futures.as_completed(futures), 1):
+            try:
+                records.append(future.result())
+            except Exception as error:  # collect every bounded repair failure
+                errors.append(str(error))
+            if completed % 50 == 0 or completed == len(futures):
+                print(f"  repair verified {completed}/{len(futures)}", file=sys.stderr)
+    if errors:
+        raise RuntimeError(
+            f"repair FAIL: {len(errors)} object(s) unavailable or invalid:\n"
+            + "\n".join(sorted(errors)))
+    missing_records = sorted(
+        (record for record in records if record["kind"] == "1d"),
+        key=lambda row: (row["symbol"], row["date"]),
+    )
+    volume_records = sorted(
+        (record for record in records if record["kind"] == "1m"),
+        key=lambda row: (row["symbol"], row["date"]),
+    )
+    manifest = {
+        "run_id": run_id,
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "monthly_files_mutated": False,
+        "curated_1m_fields": False,
+        "domain_exclusions_sha256": exclusions_digest,
+        "excluded_symbols": sorted(excluded_symbols),
+        "missing_1d": missing_records,
+        "volume_validation_1m": volume_records,
+    }
+    out_dir.joinpath("repair-manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True))
+    print(f"repair evidence complete: {len(discovered['missing_1d'])} missing 1d, "
+          f"{len(discovered['volume_validation_1m'])} volume validations")
+    return manifest
 
 
 def smoke(symbol: str, months: list[str], curated_path: Path) -> dict:
@@ -491,7 +698,7 @@ def smoke_gate_ok(report: dict) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["enumerate", "smoke", "fetch", "audit"])
+    parser.add_argument("mode", choices=["enumerate", "smoke", "fetch", "audit", "repair"])
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--months", default=None,
                         help="fetch/smoke month filter; fetch defaults to ALL months")
@@ -522,6 +729,13 @@ def main() -> int:
     if args.mode == "audit":
         report = audit(Path(args.out), here / "pre2024-candidates.json")
         return 0 if report["verdict"] == "PASS" else 1
+    if args.mode == "repair":
+        run_id = args.run_id if args.run_id != "unassigned" else \
+            "acquisition-attempt-001-repair-001"
+        repair_kline_archive(
+            Path(args.out), run_id=run_id,
+            exclusions_path=here / "pre2024-domain-exclusions.json")
+        return 0
     fetch(here / "pre2024-candidates.json", Path(args.out),
           only={args.symbol} if args.symbol != "ALL" else None, limit=args.limit,
           months_filter=set(args.months.split(",")) if args.months else None,

@@ -1,0 +1,32 @@
+{
+  "dataset": "pre2024-usdm-archive-extended-1d",
+  "domain_excluded_symbols": [
+    "ICPUSDT"
+  ],
+  "inputs": {
+    "acquisition_audit_sha256": "a8b78184abe199ae4cebb61d991d081f5ea8dbc54a8162e892975dd819f1ea22",
+    "canonical_manifest_sha256": "1644a236766be0774bdd29a7a2d71e2d697f112f7850a5498e59b804100ecb43",
+    "candidate_set_sha256": "98f6cb4562f8f75b4d485c5f04951297c65ebdb9ae41b218326e8a6f1f112956",
+    "domain_exclusions_sha256": "87a52c053fd9ba3190b5f6acd19ffa09a5098e87aa15bec140762ac41a43176b",
+    "repair_manifest_sha256": "a3ca228d26506a0bba1f4fb2a20f2216a30bbba593a377f0e54e92b606256130",
+    "schema_sha256": "bf0ca62cfa3305ee6512f0c32bb95b49c0212205b1a5104ad21ab6bc722f61aa"
+  },
+  "labels": [
+    "archive-extended",
+    "survivor-biased",
+    "exploration-only"
+  ],
+  "quality": {
+    "domain_exclusions": 1,
+    "missing_1d_repairs": 297,
+    "quarantine": 0,
+    "symbols_curated": 208,
+    "volume_validation_1m_repairs": 24
+  },
+  "snapshots": {
+    "curated": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "raw": "7dda814dcec63b72eb0703e7a7631540e959c1c989ba25f52cd294a1d73135d0",
+    "validated": "35748e9335118346ac0c598e6ef291099e0a033a9625b5e4416efe2f23f7152a"
+  },
+  "verdict": "VERIFIED_PASS"
+}
