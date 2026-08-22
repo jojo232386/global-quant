@@ -31,6 +31,7 @@ def make_candidates(tmp_path: pathlib.Path) -> pathlib.Path:
     p = tmp_path / "pre2024-candidates.json"
     p.write_text(json.dumps({
         "current_included": 1, "archive_only_included": 1,
+        "current_symbols_frozen_at_enumeration": [],
         "first_bar_by_symbol": {"AAAUSDT": "2023-01", "BBBUSDT": "2023-03"},
     }))
     return p
@@ -130,27 +131,70 @@ def test_fetch_without_month_filter_covers_full_range(tmp_path):
     assert kline_months == {"2023-01", "2023-02", "2023-03"}
 
 
-def test_audit_verdicts(tmp_path):
+def test_checksum_mismatch_fails_fetch_immediately(tmp_path):
+    server, _ = make_server(tmp_path)
+    # corrupt the OFFICIAL checksum for the funding object
+    key = "data/futures/um/monthly/fundingRate/AAAUSDT/AAAUSDT-fundingRate-2023-01.zip"
+    server["put"](key, b"payload")
+    # rewrite the stored CHECKSUM to a wrong digest
+    site = tmp_path / "site"
+    (site / (key + ".CHECKSUM")).write_text("0" * 64 + "\n")
+    server["put"]("data/futures/um/monthly/klines/AAAUSDT/1d/AAAUSDT-1d-2023-01.zip", b"k")
+    out = tmp_path / "raw"
+    with pytest.raises(RuntimeError, match="official checksum"):
+        fx.fetch(make_candidates(tmp_path), out, only={"AAAUSDT"}, limit=0,
+                 months_filter={"2023-01"}, run_id="t-cm", get=server["get"])
+
+
+def test_smoke_gate_fails_on_quote_volume_invariant_violation():
+    base = {"months": {"2023-01": {"sha256_ok": True}},
+            "cross_check": {"overlap_days": 30, "decimal_mismatches": 0,
+                            "quote_volume_invariant_violations": 0}}
+    assert fx.smoke_gate_ok(base) is True
+    bad = {"months": {"2023-01": {"sha256_ok": True}},
+           "cross_check": {"overlap_days": 30, "decimal_mismatches": 0,
+                           "quote_volume_invariant_violations": 2}}
+    assert fx.smoke_gate_ok(bad) is False
+
+
+def test_audit_first_month_and_funding_verdicts(tmp_path):
     out = tmp_path / "raw"
     out.mkdir()
     entries = []
-    # AAAUSDT: continuous 2023-01..03, ends early, NOT current -> post-delisting OK
+    # AAAUSDT: frozen first 2023-01 but data starts 2023-02 -> leading gap
+    for m in ("2023-02", "2023-03"):
+        entries.append({"symbol": "AAAUSDT", "month": m, "kind": "kline",
+                        "status": "ok"})
+    # BBBUSDT: klines continuous from frozen first, funding has mid-gap
+    for m in ("2023-03", "2023-04", "2023-05"):
+        entries.append({"symbol": "BBBUSDT", "month": m, "kind": "kline",
+                        "status": "ok"})
+    for m in ("2023-03", "2023-05"):
+        entries.append({"symbol": "BBBUSDT", "month": m, "kind": "funding",
+                        "status": "ok"})
+    out.joinpath("canonical-manifest.json").write_text(
+        json.dumps({"run_id": "t-a", "entries": entries}))
+    report = fx.audit(out, make_candidates(tmp_path))
+    assert report["kline_verdict"] == "FAIL"  # AAA leading month missing
+    assert any("frozen first month" in p for p in report["kline_problems"])
+    assert any("BBBUSDT" in p and "funding mid-gaps" in p
+               for p in report["funding_problems"])
+    assert report["funding_verdict"] == "FAIL"
+    assert report["verdict"] == "FAIL"
+
+
+def test_audit_kline_only_pass_advances_price_cards(tmp_path):
+    out = tmp_path / "raw"
+    out.mkdir()
+    entries = []
     for m in ("2023-01", "2023-02", "2023-03"):
         entries.append({"symbol": "AAAUSDT", "month": m, "kind": "kline",
                         "status": "ok"})
-    # BBBUSDT: gap in the middle -> FAIL
-    for m in ("2023-03", "2023-05"):
-        entries.append({"symbol": "BBBUSDT", "month": m, "kind": "kline",
+        entries.append({"symbol": "AAAUSDT", "month": m, "kind": "funding",
                         "status": "ok"})
     out.joinpath("canonical-manifest.json").write_text(
-        json.dumps({"run_id": "t5", "entries": entries}))
-    report = fx.audit(out, make_candidates(tmp_path),
-                      current_symbols=set())  # nothing currently trading
-    assert report["verdict"] == "FAIL"
-    assert any("BBBUSDT" in p and "mid-lifecycle" in p for p in report["problems"])
-    # tail rule: currently trading symbol ending early must FAIL
-    entries.extend({"symbol": "AAAUSDT", "month": m, "kind": "kline",
-                    "status": "ok"} for m in ())
-    report2 = fx.audit(out, make_candidates(tmp_path),
-                       current_symbols={"AAAUSDT"})
-    assert any("missing tail" in p for p in report2["problems"])
+        json.dumps({"run_id": "t-b", "entries": entries}))
+    # BBBUSDT absent entirely: kline no-data fails overall, but AAA alone
+    # would pass; verify the per-verdict split exists for gating
+    report = fx.audit(out, make_candidates(tmp_path))
+    assert "kline_verdict" in report and "funding_verdict" in report

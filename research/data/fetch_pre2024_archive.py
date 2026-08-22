@@ -198,6 +198,7 @@ def enumerate_candidates() -> dict:
             print(f"  checked {checked}, candidates so far {len(candidates)}", file=sys.stderr)
     out = {"current_included": len(current & set(candidates)),
            "archive_only_included": len(set(candidates) - current),
+           "current_symbols_frozen_at_enumeration": sorted(current),
            "first_bar_by_symbol": candidates}
     Path(__file__).parent.joinpath("pre2024-candidates.json").write_text(
         json.dumps(out, indent=2, sort_keys=True))
@@ -347,18 +348,26 @@ def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
                                 blob = get(f"{ARCHIVE_BASE}/{key}")
                                 if hashlib.sha256(blob).hexdigest() != expected:
                                     record.update(status="checksum_mismatch")
-                                else:
-                                    atomic_write(dest, blob)
-                                    record.update(status="replaced",
-                                                  sha256=expected, bytes=len(blob))
+                                    manifest.write(json.dumps(record, sort_keys=True) + "\n")
+                                    raise RuntimeError(
+                                        f"fetch run FAIL ({sym} {m} {kind}): "
+                                        f"re-downloaded content does not match "
+                                        f"the official checksum")
+                                atomic_write(dest, blob)
+                                record.update(status="replaced",
+                                              sha256=expected, bytes=len(blob))
                         else:
                             blob = get(f"{ARCHIVE_BASE}/{key}")
                             if hashlib.sha256(blob).hexdigest() != expected:
                                 record.update(status="checksum_mismatch")
-                            else:
-                                atomic_write(dest, blob)
-                                record.update(status="ok", sha256=expected,
-                                              bytes=len(blob))
+                                manifest.write(json.dumps(record, sort_keys=True) + "\n")
+                                raise RuntimeError(
+                                    f"fetch run FAIL ({sym} {m} {kind}): "
+                                    f"downloaded content does not match the "
+                                    f"official checksum")
+                            atomic_write(dest, blob)
+                            record.update(status="ok", sha256=expected,
+                                          bytes=len(blob))
                     except urllib.error.HTTPError as exc:
                         if exc.code == 404:
                             record.update(status="missing", http=404)
@@ -385,61 +394,93 @@ def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
     return records
 
 
-def audit(out_dir: Path, candidates_path: Path,
-          current_symbols: set[str] | None = None) -> dict:
-    """Completeness audit over the canonical manifest. Classifies each
-    symbol's missing months as pre-listing (implicit), post-delisting
-    (tail after the last present month), or mid-lifecycle gaps. Kline
-    mid-gaps or a missing tail on a currently-trading symbol FAIL the
-    audit; funding mid-gaps are warnings. PASS gates raw->validated->curated."""
-    if current_symbols is None:
-        current_symbols = current_perp_usdt()
+def audit(out_dir: Path, candidates_path: Path) -> dict:
+    """Completeness audit over the canonical manifest.
+
+    Uses the current-symbols set FROZEN at enumeration time (no network)
+    so the result is reproducible. Requires each symbol's first ok kline
+    month to equal the candidate list's frozen first month; classifies
+    other missing months as post-delisting or mid-lifecycle. Emits
+    separate kline_verdict and funding_verdict: kline_verdict=PASS may
+    advance price-only cards; funding cards require funding_verdict=PASS;
+    entering raw->validated->curated requires both."""
     spec = json.loads(candidates_path.read_text())
+    if "current_symbols_frozen_at_enumeration" not in spec:
+        raise RuntimeError(
+            "candidates file lacks the frozen current set; re-run enumerate")
+    current_symbols = set(spec["current_symbols_frozen_at_enumeration"])
     canonical = json.loads((out_dir / "canonical-manifest.json").read_text())
     ok: dict[tuple[str, str], list[str]] = {}
     for e in canonical["entries"]:
         if e.get("status") in ("ok", "cached", "replaced"):
             ok.setdefault((e["symbol"], e["kind"]), []).append(e["month"])
-    problems: list[str] = []
+    kline_problems: list[str] = []
+    funding_problems: list[str] = []
     warnings: list[str] = []
     per_symbol: dict[str, dict] = {}
     for sym in sorted(spec["first_bar_by_symbol"]):
+        frozen_first = spec["first_bar_by_symbol"][sym]
         kmonths = sorted(ok.get((sym, "kline"), []))
         fmonths = sorted(ok.get((sym, "funding"), []))
         info: dict = {"kline_months": len(kmonths), "funding_months": len(fmonths)}
         if not kmonths:
-            problems.append(f"{sym}: no kline data at all")
+            kline_problems.append(f"{sym}: no kline data at all")
             per_symbol[sym] = info
             continue
+        if kmonths[0] != frozen_first:
+            kline_problems.append(
+                f"{sym}: first ok month {kmonths[0]} != frozen first month "
+                f"{frozen_first} (leading months missing)")
         expected = month_range(kmonths[0], kmonths[-1])
         kgaps = [m for m in expected if m not in kmonths]
         if kgaps:
-            problems.append(f"{sym}: kline mid-lifecycle gaps {kgaps}")
+            kline_problems.append(f"{sym}: kline mid-lifecycle gaps {kgaps}")
         if kmonths[-1] < "2023-12" and sym in current_symbols:
-            problems.append(
+            kline_problems.append(
                 f"{sym}: missing tail after {kmonths[-1]} but currently trading")
         elif kmonths[-1] < "2023-12":
             info["post_delisting_after"] = kmonths[-1]
-        if fmonths:
+        if not fmonths:
+            funding_problems.append(f"{sym}: no funding data")
+        else:
             fexpected = month_range(fmonths[0], fmonths[-1])
             fgaps = [m for m in fexpected if m not in fmonths]
             if fgaps:
-                warnings.append(f"{sym}: funding mid-gaps {fgaps}")
+                funding_problems.append(f"{sym}: funding mid-gaps {fgaps}")
         per_symbol[sym] = info
+    kline_verdict = "PASS" if not kline_problems else "FAIL"
+    funding_verdict = "PASS" if not funding_problems else "FAIL"
     report = {
         "canonical_run_id": canonical.get("run_id"),
         "symbols_audited": len(per_symbol),
-        "verdict": "PASS" if not problems else "FAIL",
-        "problems": problems,
+        "kline_verdict": kline_verdict,
+        "funding_verdict": funding_verdict,
+        "verdict": "PASS" if kline_verdict == "PASS" and funding_verdict == "PASS" else "FAIL",
+        "kline_problems": kline_problems,
+        "funding_problems": funding_problems,
         "warnings": warnings,
         "per_symbol": per_symbol,
-        "gate": "PASS gates raw->validated->curated; FAIL blocks V1",
+        "gate": "entering raw->validated->curated requires verdict=PASS; "
+                "price-only cards may advance on kline_verdict=PASS; "
+                "funding cards require funding_verdict=PASS",
     }
     (out_dir / "audit-report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True))
-    print(f"audit {report['verdict']}: {len(problems)} problems, "
-          f"{len(warnings)} warnings, {report['symbols_audited']} symbols")
+    print(f"audit {report['verdict']} (kline {kline_verdict}, "
+          f"funding {funding_verdict}): {len(kline_problems)} kline problems, "
+          f"{len(funding_problems)} funding problems, "
+          f"{report['symbols_audited']} symbols")
     return report
+
+
+def smoke_gate_ok(report: dict) -> bool:
+    """Gate: every checksum verified, real overlap, zero decimal
+    mismatches, zero quote-volume invariant violations."""
+    cc = report["cross_check"]
+    return (all(m["sha256_ok"] for m in report["months"].values())
+            and cc["overlap_days"] > 0
+            and cc["decimal_mismatches"] == 0
+            and cc["quote_volume_invariant_violations"] == 0)
 
 
 def main() -> int:
@@ -467,10 +508,7 @@ def main() -> int:
         report = smoke(args.symbol, months, curated)
         here.joinpath("pre2024-smoke-report.json").write_text(
             json.dumps(report, indent=2))
-        failed = (any(not m["sha256_ok"] for m in report["months"].values())
-                  or report["cross_check"]["overlap_days"] == 0
-                  or report["cross_check"]["decimal_mismatches"] > 0)
-        if failed:
+        if not smoke_gate_ok(report):
             print("SMOKE_GATE=FAIL", file=sys.stderr)
             return 1
         print("SMOKE_GATE=PASS")
