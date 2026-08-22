@@ -15,11 +15,16 @@ data source, no new governance.
 
 ## Scope of the fetch
 
-- Instruments: Binance USD-M perpetuals, all symbols listed TODAY
-  (public exchangeInfo), filtered by the PIT rule below.
-- Bars: 1d klines ONLY (breadth over granularity; cross-sectional cards
-  are daily/weekly). Funding: 8h rates (needed by Family B conditioning).
-  Mark price: NOT fetched (no queued card needs it).
+- Instruments: Binance USD-M perpetuals from the CURRENT `exchangeInfo`,
+  frozen filter `contractType=PERPETUAL AND status=TRADING AND
+  quoteAsset=USDT` (official docs: exchangeInfo describes CURRENT trading
+  rules and symbols — it is not a historical PIT universe).
+- Dataset id: `pre2024-usdm-current-survivors-1d` — the survivorship
+  limitation is encoded in the name.
+- Bars: 1d klines ONLY (breadth over granularity). Funding: the COMPLETE
+  funding event stream as returned by the API — every `fundingTime` and
+  `fundingRate`, sorted and deduplicated; no fixed 8h interval is assumed
+  (`fundingIntervalHours` officially varies). Mark price: NOT fetched.
 - Window: exchange launch (2019-09) .. 2023-12-31 inclusive. No 2024+
   bar data is fetched. This does NOT make the dataset PIT-clean by itself:
   the candidate list comes from today's `exchangeInfo`, so 2026 listing
@@ -39,27 +44,37 @@ data source, no new governance.
    First-bar date is the listing proxy — computed from the fetched data
    itself, never from today's rankings.
 2. **PIT liquidity floor**: at each calendar month-end m in the window, a
-   symbol is IN the pool for the following month iff its median daily
-   dollar volume over the trailing 90d (data up to m only) is ≥ $5M.
-   Rationale: the cost baseline's 10bps slippage assumption is not
-   defensible for thinner books; $5M median keeps breadth while excluding
-   micro-caps. The floor is computed inside the pipeline from history,
-   reproducibly.
+   symbol is IN the pool for the following month iff the median of its
+   `quote asset volume` (the klines quote-volume field, never base
+   volume) over the 90 COMPLETED UTC daily bars ending at m is ≥ $5M.
+   The floor is an exploratory screening heuristic only: daily volume
+   does not evidence order-book execution cost, and no slippage claim
+   may cite it. Computed inside the pipeline from history, reproducibly.
 3. **Known limitation, recorded not hidden**: symbols delisted before
-   today cannot be recovered from public endpoints (survivorship bias in
+   today cannot be recovered from current endpoints (survivorship bias in
    the pool). Every artifact consuming this dataset must carry that caveat.
    The prior PIT studies had the same limitation, honestly disclosed.
 
+## Graduation boundary (hard)
+
+This survivor-biased dataset screens exploration hypotheses ONLY. It
+can never produce a formal Family A PASS, and nothing screened on it
+promotes toward live trading. A survivor must either (a) re-confirm on
+an unbiased historical instrument domain once one exists, or (b) pass a
+true prospective (forward) validation window.
+
 ## V1 pipeline integration
 
-- New curated dataset `pre2024-usdm-universe-1d` through the existing
-  `gmaq_data` layer: raw jsonl per symbol → validation (gap/monotonic
-  timestamp checks per symbol) → curated snapshot + manifest + schema +
-  file SHAs; registry replay must verify VERIFIED/PASS like existing
-  datasets.
-- Cross-validation against existing VERIFIED data: BTC/ETH daily bars in
-  the overlapping window must match curated `88d9ff34` values exactly
-  (spot-check in validation).
+- New curated dataset `pre2024-usdm-current-survivors-1d` through the
+  existing `gmaq_data` layer: raw jsonl per symbol (COMPLETE source
+  responses preserved in the raw layer; the field whitelist below
+  constrains the curated layer only) → validation → curated snapshot +
+  manifest + schema + file SHAs; registry replay must verify
+  VERIFIED/PASS like existing datasets.
+- Cross-validation against existing VERIFIED data: BTC/ETH daily bars
+  in the overlapping window compared over the FULL window, per bar, on
+  UTC timestamps and OHLC + quote volume as ORIGINAL decimal strings
+  (no float parsing anywhere in the comparison).
 
 ## Acceptance criteria (exact)
 
@@ -67,14 +82,16 @@ data source, no new governance.
   magnitude: tens of symbols eligible by 2022, NOT hundreds.
 - PIT pool membership is a pure function of the raw data: re-running the
   filter must reproduce identical pools (pipeline asserts set equality).
-- Cross-validation against curated `88d9ff34` (BTC/ETH 1d): every
-  overlapping bar must match on close after float parsing with tolerance
-  0 (exact string-to-float equality); any mismatch fails the snapshot.
-- Registry replay must be `VERIFIED` with `quarantine = 0`. If quarantine
-  is nonzero the snapshot FAILS: investigate the offending rows and
-  re-curate; forcing a pass by relaxing the check is forbidden.
-- Field scope per symbol file: 1d bars (open_time, OHLC, volume) and 8h
-  funding (fundingTime, fundingRate) only; anything else fails validation.
+- BTC/ETH full-window per-bar comparison against curated `88d9ff34`
+  passes with zero mismatches; any mismatch fails the snapshot.
+- Registry replay must be `VERIFIED` with `quarantine = 0`. Missing,
+  duplicate, or out-of-window rows go to quarantine — zero-filling and
+  silent gap interpolation are forbidden. If quarantine is nonzero the
+  snapshot FAILS: investigate and re-curate; relaxing the check to force
+  a pass is forbidden.
+- Curated field scope per symbol file: 1d bars (open_time, OHLC, quote
+  volume) and funding events (fundingTime, fundingRate); anything else
+  fails validation.
 
 ## Cost and authorization
 
