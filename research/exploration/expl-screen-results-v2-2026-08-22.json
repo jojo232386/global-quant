@@ -1,0 +1,264 @@
+{
+  "screen": "EXPL-008 + EXPL-015 (specs frozen 2026-08-22)",
+  "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
+  "claim_status": "NOT EVIDENCE - exploration tier screen only",
+  "data": {
+    "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
+    "files": {
+      "BTCUSDT-1d.jsonl": "124ab7650b0cd1f4f0b7a7c442ebb857ba6085ef449cd10b52f3b44506ca6feb",
+      "ETHUSDT-1d.jsonl": "f17168b40ebbff533b7a6d99231c7d22621885b8341f67d0c32a4f5812b18c89",
+      "BTCUSDT-funding.jsonl": "2886a5b621e9207bf6cc1da9c3490abd6bb183b512f9a9b7b0f21269373cd35c",
+      "ETHUSDT-funding.jsonl": "d414437905c5528d31e24eca77e6e751063827a2984a545b3c9b2ab2b07020ff"
+    },
+    "window": "2020-01-01..2023-12-31 (train only)",
+    "funding": "applied as position x daily rate sum (longs pay positive)",
+    "formal_layer_note": "5x funding stress is NOT applied here; the formal gate retains it"
+  },
+  "expl008_judgment": {
+    "verdict": "DROPPED_COST_FRAGILE",
+    "baseline_beats_count": "0/4",
+    "stress_survivors_count": "0/4"
+  },
+  "expl008_benchmark": {
+    "ungated_tsmom": {
+      "net_total_return": 5.7378,
+      "annualized_return": 0.6444,
+      "sharpe": 1.057,
+      "calmar": 1.3054,
+      "max_drawdown": -0.4936
+    }
+  },
+  "expl008_baseline": [
+    {
+      "vol_window": 14,
+      "gate": "median",
+      "net": {
+        "net_total_return": 4.0139,
+        "annualized_return": 0.5225,
+        "sharpe": 1.1842,
+        "calmar": 1.149,
+        "max_drawdown": -0.4547
+      }
+    },
+    {
+      "vol_window": 14,
+      "gate": "tercile",
+      "net": {
+        "net_total_return": 1.2883,
+        "annualized_return": 0.2409,
+        "sharpe": 0.7997,
+        "calmar": 0.7253,
+        "max_drawdown": -0.3321
+      }
+    },
+    {
+      "vol_window": 30,
+      "gate": "median",
+      "net": {
+        "net_total_return": 2.6346,
+        "annualized_return": 0.4,
+        "sharpe": 0.9923,
+        "calmar": 0.7872,
+        "max_drawdown": -0.5081
+      }
+    },
+    {
+      "vol_window": 30,
+      "gate": "tercile",
+      "net": {
+        "net_total_return": 2.2209,
+        "annualized_return": 0.3566,
+        "sharpe": 1.0275,
+        "calmar": 1.054,
+        "max_drawdown": -0.3383
+      }
+    }
+  ],
+  "expl008_cost_stress_2x": [
+    {
+      "vol_window": 14,
+      "gate": "median",
+      "net": {
+        "net_total_return": 2.617,
+        "annualized_return": 0.3982,
+        "sharpe": 0.9882,
+        "calmar": 0.7512,
+        "max_drawdown": -0.5301
+      }
+    },
+    {
+      "vol_window": 14,
+      "gate": "tercile",
+      "net": {
+        "net_total_return": 0.7231,
+        "annualized_return": 0.1524,
+        "sharpe": 0.584,
+        "calmar": 0.3841,
+        "max_drawdown": -0.3968
+      }
+    },
+    {
+      "vol_window": 30,
+      "gate": "median",
+      "net": {
+        "net_total_return": 1.7411,
+        "annualized_return": 0.3007,
+        "sharpe": 0.8223,
+        "calmar": 0.5199,
+        "max_drawdown": -0.5784
+      }
+    },
+    {
+      "vol_window": 30,
+      "gate": "tercile",
+      "net": {
+        "net_total_return": 1.549,
+        "annualized_return": 0.2763,
+        "sharpe": 0.8575,
+        "calmar": 0.6989,
+        "max_drawdown": -0.3953
+      }
+    }
+  ],
+  "expl015_judgment": {
+    "verdict": "DROPPED_COST_FRAGILE",
+    "baseline_beats_count": "1/6",
+    "stress_survivors_count": "0/6"
+  },
+  "expl015_baseline": [
+    {
+      "k_sigma": 3,
+      "horizon": 1,
+      "net": {
+        "net_total_return": -0.3411,
+        "annualized_return": -0.103,
+        "sharpe": -0.5155,
+        "calmar": -0.2891,
+        "max_drawdown": -0.3564
+      }
+    },
+    {
+      "k_sigma": 3,
+      "horizon": 3,
+      "net": {
+        "net_total_return": -0.0737,
+        "annualized_return": -0.0198,
+        "sharpe": 0.0223,
+        "calmar": -0.0644,
+        "max_drawdown": -0.3067
+      }
+    },
+    {
+      "k_sigma": 3,
+      "horizon": 5,
+      "net": {
+        "net_total_return": -0.1685,
+        "annualized_return": -0.047,
+        "sharpe": -0.0465,
+        "calmar": -0.1322,
+        "max_drawdown": -0.3553
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 1,
+      "net": {
+        "net_total_return": -0.2188,
+        "annualized_return": -0.0623,
+        "sharpe": -0.3043,
+        "calmar": -0.2181,
+        "max_drawdown": -0.2858
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 3,
+      "net": {
+        "net_total_return": -0.105,
+        "annualized_return": -0.0285,
+        "sharpe": -0.0631,
+        "calmar": -0.0953,
+        "max_drawdown": -0.2991
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 5,
+      "net": {
+        "net_total_return": -0.1583,
+        "annualized_return": -0.0439,
+        "sharpe": -0.1113,
+        "calmar": -0.1334,
+        "max_drawdown": -0.3295
+      }
+    }
+  ],
+  "expl015_cost_stress_2x": [
+    {
+      "k_sigma": 3,
+      "horizon": 1,
+      "net": {
+        "net_total_return": -0.3963,
+        "annualized_return": -0.1233,
+        "sharpe": -0.6414,
+        "calmar": -0.3024,
+        "max_drawdown": -0.4077
+      }
+    },
+    {
+      "k_sigma": 3,
+      "horizon": 3,
+      "net": {
+        "net_total_return": -0.1513,
+        "annualized_return": -0.0419,
+        "sharpe": -0.0813,
+        "calmar": -0.1282,
+        "max_drawdown": -0.3266
+      }
+    },
+    {
+      "k_sigma": 3,
+      "horizon": 5,
+      "net": {
+        "net_total_return": -0.237,
+        "annualized_return": -0.0681,
+        "sharpe": -0.1313,
+        "calmar": -0.1786,
+        "max_drawdown": -0.3813
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 1,
+      "net": {
+        "net_total_return": -0.2465,
+        "annualized_return": -0.0711,
+        "sharpe": -0.3614,
+        "calmar": -0.2405,
+        "max_drawdown": -0.2958
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 3,
+      "net": {
+        "net_total_return": -0.1368,
+        "annualized_return": -0.0376,
+        "sharpe": -0.1148,
+        "calmar": -0.122,
+        "max_drawdown": -0.3084
+      }
+    },
+    {
+      "k_sigma": 4,
+      "horizon": 5,
+      "net": {
+        "net_total_return": -0.1883,
+        "annualized_return": -0.0529,
+        "sharpe": -0.1571,
+        "calmar": -0.1542,
+        "max_drawdown": -0.3432
+      }
+    }
+  ]
+}

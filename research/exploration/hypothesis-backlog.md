@@ -86,7 +86,11 @@ REJECTED with materially negative OOS return and extreme short-side
 adverse excursion (figures in the formal study artifacts). Family C uses
 vol as a gate or target, not as a signal direction.
 
-### EXPL-008 · vol-regime gated trend · DRAFT · SPEC FROZEN 2026-08-22
+### EXPL-008 · vol-regime gated trend · SCREENED 2026-08-22 · DROPPED_COST_FRAGILE
+- Screen result: the gate never beats the ungated benchmark on Sharpe and
+  Calmar jointly at any grid point, baseline or stressed; the calm-regime
+  concentration it buys costs more return than risk it saves. Numbers in
+  `expl-screen-results-v2-2026-08-22.json`.
 - Comparison spec (frozen before code; deviations may only be labeled
   diagnostic):
   - Universe: BTC/ETH per-asset diagnostic breadth (no cross-sectional
@@ -186,7 +190,11 @@ vol as a gate or target, not as a signal direction.
 
 ## Family F — Event behavior
 
-### EXPL-015 · post-jump conditional drift · DRAFT · SPEC FROZEN 2026-08-22
+### EXPL-015 · post-jump conditional drift · SCREENED 2026-08-22 · DROPPED_COST_FRAGILE
+- Screen result: only a minority of grid points beat cash at baseline and
+  none survive 2x costs; the funding-conditioned jump drift is not
+  extractable after realistic trading costs. Numbers in
+  `expl-screen-results-v2-2026-08-22.json`.
 - Comparison spec (frozen before code; deviations may only be labeled
   diagnostic):
   - Universe: BTC/ETH per-asset event study (no breadth claim). Data:
@@ -230,10 +238,11 @@ vol as a gate or target, not as a signal direction.
    on unified semantics).
 2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
 3. EXPL-013: BLOCKED_ON_DATA (needs top-N universe).
-4. Queue (DRAFT, next screenable on clean BTC/ETH data): EXPL-008, EXPL-015.
-5. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
+4. EXPL-008: DROPPED_COST_FRAGILE (2026-08-22 screen).
+5. EXPL-015: DROPPED_COST_FRAGILE (2026-08-22 screen).
+6. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
    force-run on two symbols).
-6. Family A cards wait on the pre-2024 universe data decision (see DATA
+7. Family A cards wait on the pre-2024 universe data decision (see DATA
    BLOCKERS).
 
 ## Escalation note
