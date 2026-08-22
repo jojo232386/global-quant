@@ -93,6 +93,33 @@ true prospective (forward) validation window.
   volume) and funding events (fundingTime, fundingRate); anything else
   fails validation.
 
+## Archive index probe (2026-08-22, metadata only, user-authorized)
+
+- Method: S3-style directory listing of
+  `s3.ap-northeast-1.amazonaws.com/data.binance.vision` under
+  `data/futures/um/daily/klines/` (2 listing rounds), diffed against
+  current `fapi.binance.com/fapi/v1/exchangeInfo` with the frozen filter.
+  No data files downloaded.
+- Findings: the archive retains **1007** symbol folders; all **527**
+  current TRADING PERPETUAL USDT symbols are present; **480** are
+  archive-only (delisted USDT perps such as `1000BTTCUSDT`/`AERGOUSDT`,
+  plus USDC/BUSD-quoted pairs, stock perps, and `*SETTLED` variants the
+  filter excludes anyway).
+- Consequence for this rule: the candidate set should be
+  **current 527 ∪ archive-only USDT-like symbols** whose archive shows
+  monthly 1d klines starting ≤ 2023-06-30. Archive-only symbols lack a
+  current `contractType`; treat symbol naming (USDT quote suffix, no
+  `SETTLED`) as the working filter and flag the residual uncertainty.
+  The survivor-bias label is thereby REDUCED but not eliminated
+  (pre-launch delistings with no archive folder, and the naming
+  heuristic, remain).
+- The dataset id stays `pre2024-usdm-current-survivors-1d` until the
+  archive-extended candidate set is actually validated; if adopted, a
+  rename to `pre2024-usdm-archive-extended-1d` accompanies the revision
+  of this rule (naming must not outrun validation).
+- Per the user's decision (2026-08-22): with this probe recorded, the
+  bulk public fetch is GO without a further CLI review round.
+
 ## Cost and authorization
 
 - One-time fetch: public API, rate-limited, estimated 1–3 hours wall
