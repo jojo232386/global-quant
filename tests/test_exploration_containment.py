@@ -67,27 +67,29 @@ def test_screening_order_matches_card_verdicts():
     order_section = order_match.group(1)
     problems = []
     for card, header_verdict in header_verdicts.items():
-        if header_verdict == "DRAFT":
-            continue  # unscreened cards carry no verdict to sync
         mentions = [
             line for line in order_section.splitlines() if card in line
         ]
         if not mentions:
             continue  # cards absent from the order section are not checked
-        verdict_in_order = [
-            token for token in VERDICT_TOKENS if token in mentions[0]
-        ]
+        line = mentions[0]
+        verdict_in_order = [token for token in VERDICT_TOKENS if token in line]
         if verdict_in_order:
             # a split-status line may name several tokens; the CARD verdict
             # is the one that appears first in the line
-            verdict_in_order = [
-                min(verdict_in_order, key=lambda t: mentions[0].index(t))
-            ]
-        if not verdict_in_order:
-            problems.append(f"{card}: no verdict token in screening order")
-        elif verdict_in_order[0] != header_verdict:
+            first = min(verdict_in_order, key=lambda t: line.index(t))
+            if first != header_verdict:
+                problems.append(
+                    f"{card}: screening order says {first}, "
+                    f"card header says {header_verdict}"
+                )
+        elif "Queue" not in line or header_verdict != "DRAFT":
+            # mentioning a card with a conclusion requires classification
+            # first; unclassified mentions are only allowed on explicitly
+            # queued lines of still-DRAFT cards
             problems.append(
-                f"{card}: screening order says {verdict_in_order[0]}, "
-                f"card header says {header_verdict}"
+                f"{card}: mentioned in screening order without a verdict "
+                f"(header {header_verdict}); classify the card or move it "
+                f"to a Queue line"
             )
     assert not problems, "stale screening-order verdicts: " + "; ".join(problems)
