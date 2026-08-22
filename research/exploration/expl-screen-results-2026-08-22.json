@@ -36,11 +36,11 @@
       "max_drawdown": -0.7935
     },
     "static_5050_buyhold_primary": {
-      "net_total_return": 7.4647,
-      "annualized_return": 0.7256,
-      "sharpe": 1.096,
-      "calmar": 0.933,
-      "max_drawdown": -0.7776
+      "net_total_return": 7.5984,
+      "annualized_return": 0.7318,
+      "sharpe": 1.1,
+      "calmar": 0.941,
+      "max_drawdown": -0.7778
     },
     "daily_rebalanced_5050_diagnostic": {
       "net_total_return": 7.4704,
@@ -57,7 +57,7 @@
       "band": 0.03
     },
     "baseline_beats_count": "4/4",
-    "stress_survivors_count": "4/4"
+    "stress_survivors_count": "3/4"
   },
   "expl012_baseline": [
     {

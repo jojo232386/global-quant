@@ -81,9 +81,10 @@ REJECTED. Family B never trades funding level as a standalone signal.
 
 ## Family C — Volatility structure
 
-Prior closure context: unconditional vol-scaled LS-TSMOM REJECTED (OOS
--11%, worst short adverse excursion 92%). Family C uses vol as a gate or
-target, not as a signal direction.
+Prior closure context: unconditional vol-scaled LS-TSMOM was formally
+REJECTED with materially negative OOS return and extreme short-side
+adverse excursion (figures in the formal study artifacts). Family C uses
+vol as a gate or target, not as a signal direction.
 
 ### EXPL-008 · vol-regime gated trend · DRAFT
 - Hypothesis: LS-TSMOM exposure only in below-median realized-vol regimes
@@ -110,10 +111,11 @@ target, not as a signal direction.
 ### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 (corrected) · KEPT_PRIMARY_SELECTED
 - Status: kept under the frozen judgment rule; primary config selected and
   recorded in the results JSON. All grid points beat the true static
-  buy-and-hold benchmark at baseline and under 2x cost stress; the margin
-  is thin at the weakest points. Formal confirmation, if any, tests the
-  primary config only; the remaining grid is sensitivity diagnostics that
-  cannot rescue the primary result. Full numbers: `expl-screen-results-2026-08-22.json`.
+  buy-and-hold benchmark at baseline; all but the weakest point still beat
+  it under 2x cost stress. The margin at surviving points is thin. Formal
+  confirmation, if any, tests the primary config only; the remaining grid
+  is sensitivity diagnostics that cannot rescue the primary result. Full
+  numbers: `expl-screen-results-2026-08-22.json`.
 - Original card: rotate between BTC and ETH by relative strength with
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
@@ -179,7 +181,8 @@ target, not as a signal direction.
 
 1. ~~EXPL-010 and EXPL-013 first~~ — EXPL-010 screened (dropped at N=2,
    full breadth blocked on data); EXPL-013 blocked on data (needs top-N).
-2. EXPL-012 screened 2026-08-22: KEPT_THIN.
+2. EXPL-012 screened 2026-08-22: KEPT_PRIMARY_SELECTED (corrected same-day
+   after review; primary config and counts in the results JSON).
 3. Next screenable on clean BTC/ETH data: EXPL-008 (vol-regime gated
    trend), EXPL-015 (post-jump conditional drift), EXPL-016 (session ×
    vol regime, 1d granularity only).

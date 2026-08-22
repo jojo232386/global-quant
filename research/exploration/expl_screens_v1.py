@@ -31,21 +31,20 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_aligned(symbol: str, ms: list[int] | None = None) -> tuple[list[int], list[float]]:
-    rows = {}
-    with open(DATA_DIR / f"{symbol}-1d.jsonl") as handle:
-        for line in handle:
-            row = json.loads(line)
-            if TRAIN_START_MS <= row["open_time_utc_ms"] < TRAIN_END_MS:
-                rows[row["open_time_utc_ms"]] = float(row["close"])
-    if ms is None:
-        ms = sorted(rows)
-    closes = [rows[m] for m in ms]  # raises KeyError on misalignment
-    return ms, closes
-
-
-def check_timestamp_alignment(btc_ms: list[int], eth_ms: list[int]) -> None:
-    assert btc_ms == eth_ms, "BTC/ETH timestamps misaligned"
+def load_closes_checked() -> tuple[list[int], list[float], list[float]]:
+    """Load both series independently; a strict timestamp-set equality
+    assert catches extra, missing, or misaligned bars in either file."""
+    btc_rows: dict[int, float] = {}
+    eth_rows: dict[int, float] = {}
+    for symbol, rows in (("BTCUSDT", btc_rows), ("ETHUSDT", eth_rows)):
+        with open(DATA_DIR / f"{symbol}-1d.jsonl") as handle:
+            for line in handle:
+                row = json.loads(line)
+                if TRAIN_START_MS <= row["open_time_utc_ms"] < TRAIN_END_MS:
+                    rows[row["open_time_utc_ms"]] = float(row["close"])
+    btc_ms, eth_ms = sorted(btc_rows), sorted(eth_rows)
+    assert btc_ms == eth_ms, "BTC/ETH timestamp sets differ"
+    return btc_ms, [btc_rows[m] for m in btc_ms], [eth_rows[m] for m in eth_ms]
 
 
 def daily_returns(closes: list[float]) -> list[float]:
@@ -182,17 +181,18 @@ def benchmark(btc_ret: list[float], eth_ret: list[float], cost: float,
 
 
 def main() -> None:
-    btc_ms, btc_close = load_aligned("BTCUSDT")
-    eth_ms, eth_close = load_aligned("ETHUSDT", btc_ms)
-    check_timestamp_alignment(btc_ms, eth_ms)
+    _, btc_close, eth_close = load_closes_checked()
     btc_ret_full = daily_returns(btc_close)
     eth_ret_full = daily_returns(eth_close)
-    # post-warmup window shared by every strategy and benchmark below
+    # post-warmup window shared by every strategy and benchmark below.
+    # R[i] spans C[i] -> C[i+1], so post-warmup returns R[30..] involve
+    # closes C[30..]: warm closes must start at index WARMUP_DAYS (no +1)
+    # or the buy-and-hold curve loses its first day (review finding).
     btc_ret = slice_warmup(btc_ret_full, WARMUP_DAYS)
     eth_ret = slice_warmup(eth_ret_full, WARMUP_DAYS)
-    btc_close_warm = btc_close[WARMUP_DAYS + 1:]
-    eth_close_warm = eth_close[WARMUP_DAYS + 1:]
-    assert len(btc_ret) == len(btc_close_warm), "window alignment broken"
+    btc_close_warm = btc_close[WARMUP_DAYS:]
+    eth_close_warm = eth_close[WARMUP_DAYS:]
+    assert len(btc_ret) == len(btc_close_warm) - 1, "window alignment broken"
 
     benchmarks = benchmark(btc_ret, eth_ret, COST_PER_SIDE,
                            btc_close_warm, eth_close_warm)
@@ -236,7 +236,9 @@ def main() -> None:
             "stress_survivors_count": "0/4",
         }
 
-    unscaled = benchmarks["daily_rebalanced_5050_diagnostic"]
+    # EXPL-010's card compares against unscaled buy-and-hold; use the
+    # primary static benchmark, not the daily-rebalanced diagnostic.
+    unscaled = bh
     calmar_improves = any(
         row["net"]["calmar"] > unscaled["calmar"] for row in expl010_base
     )
@@ -254,8 +256,9 @@ def main() -> None:
         b["net"]["net_total_return"] != s["net"]["net_total_return"]
         for b, s in zip(expl012_base, expl012_stress)
     ), "cost stress did not change results"
-    assert (bh["sharpe"] != unscaled["sharpe"]
-            or bh["max_drawdown"] != unscaled["max_drawdown"]), (
+    daily_rb_metrics = benchmarks["daily_rebalanced_5050_diagnostic"]
+    assert (bh["sharpe"] != daily_rb_metrics["sharpe"]
+            or bh["max_drawdown"] != daily_rb_metrics["max_drawdown"]), (
         "buy-and-hold and daily-rebalanced benchmarks are semantically "
         "identical - benchmark fix regressed"
     )
