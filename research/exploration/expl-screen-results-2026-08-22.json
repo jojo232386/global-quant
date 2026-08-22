@@ -1,8 +1,9 @@
 {
-  "screen": "EXPL-012 + EXPL-010 N2 diagnostic (corrected benchmarks)",
+  "screen": "EXPL-012 + EXPL-010 N2 diagnostic (unified semantics)",
   "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
   "claim_status": "NOT EVIDENCE - exploration tier screen only",
-  "correction": "supersedes the first run: true static buy-and-hold benchmark, EXPL-010 split into FULL vs N2 diagnostic, frozen judgment rule applied in code",
+  "comparison_spec": "see module docstring in expl_screens_v1.py",
+  "correction": "third correction: unified EXPL-010 N2 base/benchmark construction, full-precision judgments (rounding only in this serialized output)",
   "data": {
     "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
     "files": {
@@ -18,36 +19,37 @@
   "checks": {
     "timestamps_aligned": true,
     "cost_stress_changes_results": true,
-    "buyhold_and_daily_rb_differ": true
+    "buyhold_and_daily_rb_differ": true,
+    "buyhold_window_matches_strategy": true
   },
   "benchmarks": {
     "btc": {
       "net_total_return": 3.5185,
       "annualized_return": 0.4696,
-      "sharpe": 0.916,
-      "calmar": 0.612,
+      "sharpe": 0.9159,
+      "calmar": 0.6124,
       "max_drawdown": -0.7667
     },
     "eth": {
       "net_total_return": 11.6782,
       "annualized_return": 0.9123,
-      "sharpe": 1.186,
-      "calmar": 1.15,
+      "sharpe": 1.1857,
+      "calmar": 1.1497,
       "max_drawdown": -0.7935
     },
     "static_5050_buyhold_primary": {
       "net_total_return": 7.5984,
       "annualized_return": 0.7318,
-      "sharpe": 1.1,
-      "calmar": 0.941,
+      "sharpe": 1.1002,
+      "calmar": 0.9409,
       "max_drawdown": -0.7778
     },
     "daily_rebalanced_5050_diagnostic": {
-      "net_total_return": 7.4704,
+      "net_total_return": 7.4702,
       "annualized_return": 0.7252,
       "sharpe": 1.115,
-      "calmar": 0.951,
-      "max_drawdown": -0.7629
+      "calmar": 0.9499,
+      "max_drawdown": -0.7635
     }
   },
   "expl012_judgment": {
@@ -56,8 +58,8 @@
       "lookback": 14,
       "band": 0.03
     },
-    "baseline_beats_count": "4/4",
-    "stress_survivors_count": "3/4"
+    "baseline_beats_count": "3/4",
+    "stress_survivors_count": "1/4"
   },
   "expl012_baseline": [
     {
@@ -65,10 +67,10 @@
       "band": 0.03,
       "switches": 63,
       "net": {
-        "net_total_return": 11.9549,
-        "annualized_return": 0.9228,
-        "sharpe": 1.229,
-        "calmar": 1.236,
+        "net_total_return": 9.9833,
+        "annualized_return": 0.8435,
+        "sharpe": 1.1783,
+        "calmar": 1.1297,
         "max_drawdown": -0.7466
       }
     },
@@ -77,10 +79,10 @@
       "band": 0.05,
       "switches": 50,
       "net": {
-        "net_total_return": 9.3657,
-        "annualized_return": 0.8165,
-        "sharpe": 1.159,
-        "calmar": 1.044,
+        "net_total_return": 7.7881,
+        "annualized_return": 0.7415,
+        "sharpe": 1.108,
+        "calmar": 0.9482,
         "max_drawdown": -0.782
       }
     },
@@ -89,10 +91,10 @@
       "band": 0.03,
       "switches": 40,
       "net": {
-        "net_total_return": 9.1022,
-        "annualized_return": 0.8046,
-        "sharpe": 1.147,
-        "calmar": 1.15,
+        "net_total_return": 7.7903,
+        "annualized_return": 0.7416,
+        "sharpe": 1.1053,
+        "calmar": 1.0603,
         "max_drawdown": -0.6995
       }
     },
@@ -101,10 +103,10 @@
       "band": 0.05,
       "switches": 36,
       "net": {
-        "net_total_return": 8.6675,
-        "annualized_return": 0.7844,
-        "sharpe": 1.131,
-        "calmar": 1.082,
+        "net_total_return": 7.4121,
+        "annualized_return": 0.7222,
+        "sharpe": 1.09,
+        "calmar": 0.996,
         "max_drawdown": -0.7251
       }
     }
@@ -115,10 +117,10 @@
       "band": 0.03,
       "switches": 63,
       "net": {
-        "net_total_return": 9.7604,
-        "annualized_return": 0.8339,
-        "sharpe": 1.17,
-        "calmar": 1.089,
+        "net_total_return": 8.0947,
+        "annualized_return": 0.7568,
+        "sharpe": 1.1179,
+        "calmar": 0.9879,
         "max_drawdown": -0.7661
       }
     },
@@ -127,10 +129,10 @@
       "band": 0.05,
       "switches": 50,
       "net": {
-        "net_total_return": 7.9559,
-        "annualized_return": 0.7499,
-        "sharpe": 1.113,
-        "calmar": 0.939,
+        "net_total_return": 6.5695,
+        "annualized_return": 0.6764,
+        "sharpe": 1.0601,
+        "calmar": 0.8468,
         "max_drawdown": -0.7988
       }
     },
@@ -139,10 +141,10 @@
       "band": 0.03,
       "switches": 40,
       "net": {
-        "net_total_return": 7.9718,
-        "annualized_return": 0.7507,
-        "sharpe": 1.11,
-        "calmar": 1.066,
+        "net_total_return": 6.8052,
+        "annualized_return": 0.6896,
+        "sharpe": 1.0681,
+        "calmar": 0.9796,
         "max_drawdown": -0.704
       }
     },
@@ -151,10 +153,10 @@
       "band": 0.05,
       "switches": 36,
       "net": {
-        "net_total_return": 7.6784,
-        "annualized_return": 0.7359,
-        "sharpe": 1.098,
-        "calmar": 1.003,
+        "net_total_return": 6.55,
+        "annualized_return": 0.6753,
+        "sharpe": 1.0561,
+        "calmar": 0.9199,
         "max_drawdown": -0.7341
       }
     }
@@ -162,85 +164,85 @@
   "expl010_judgment": {
     "EXPL-010_FULL": "BLOCKED_ON_DATA (pre-2024 top-N universe data absent)",
     "EXPL-010_N2_DIAGNOSTIC": "DROPPED",
-    "note": "N=2 BTC/ETH diagnostic only; direction consistent with ASQ A5-1 but not a cross-market confirmation"
+    "note": "N=2 BTC/ETH diagnostic on unified daily-rebalanced construction; direction consistent with ASQ A5-1 but not a cross-market confirmation"
   },
   "expl010_n2_diagnostic_baseline": [
     {
       "target_vol": 0.15,
       "band": 0.1,
-      "avg_weight": 0.272,
-      "turnover_total": 8.06,
+      "avg_weight": 0.273,
+      "turnover_total": 7.93,
       "net": {
-        "net_total_return": 1.0076,
-        "annualized_return": 0.1947,
-        "sharpe": 1.115,
-        "calmar": 0.725,
-        "max_drawdown": -0.2686
+        "net_total_return": -0.0095,
+        "annualized_return": -0.0024,
+        "sharpe": -2.886,
+        "calmar": -0.2491,
+        "max_drawdown": -0.0098
       }
     },
     {
       "target_vol": 0.15,
       "band": 0.2,
-      "avg_weight": 0.278,
-      "turnover_total": 6.5,
+      "avg_weight": 0.279,
+      "turnover_total": 6.37,
       "net": {
-        "net_total_return": 0.9764,
-        "annualized_return": 0.1899,
-        "sharpe": 1.064,
-        "calmar": 0.684,
-        "max_drawdown": -0.2777
+        "net_total_return": -0.0071,
+        "annualized_return": -0.0018,
+        "sharpe": -2.0763,
+        "calmar": -0.2462,
+        "max_drawdown": -0.0074
       }
     },
     {
       "target_vol": 0.2,
       "band": 0.1,
       "avg_weight": 0.356,
-      "turnover_total": 9.8,
+      "turnover_total": 9.63,
       "net": {
-        "net_total_return": 1.5502,
-        "annualized_return": 0.2699,
-        "sharpe": 1.161,
-        "calmar": 0.781,
-        "max_drawdown": -0.3457
+        "net_total_return": -0.0113,
+        "annualized_return": -0.0029,
+        "sharpe": -3.4364,
+        "calmar": -0.2504,
+        "max_drawdown": -0.0116
       }
     },
     {
       "target_vol": 0.2,
       "band": 0.2,
       "avg_weight": 0.363,
-      "turnover_total": 7.72,
+      "turnover_total": 7.55,
       "net": {
-        "net_total_return": 1.4932,
-        "annualized_return": 0.2626,
-        "sharpe": 1.108,
-        "calmar": 0.736,
-        "max_drawdown": -0.357
+        "net_total_return": -0.0082,
+        "annualized_return": -0.0021,
+        "sharpe": -2.3178,
+        "calmar": -0.2474,
+        "max_drawdown": -0.0084
       }
     },
     {
       "target_vol": 0.3,
       "band": 0.1,
-      "avg_weight": 0.517,
-      "turnover_total": 12.01,
+      "avg_weight": 0.518,
+      "turnover_total": 11.75,
       "net": {
-        "net_total_return": 2.9296,
-        "annualized_return": 0.4181,
-        "sharpe": 1.205,
-        "calmar": 0.862,
-        "max_drawdown": -0.4853
+        "net_total_return": -0.0131,
+        "annualized_return": -0.0034,
+        "sharpe": -3.8037,
+        "calmar": -0.2513,
+        "max_drawdown": -0.0134
       }
     },
     {
       "target_vol": 0.3,
       "band": 0.2,
-      "avg_weight": 0.53,
-      "turnover_total": 9.2,
+      "avg_weight": 0.531,
+      "turnover_total": 8.95,
       "net": {
-        "net_total_return": 2.861,
-        "annualized_return": 0.4117,
-        "sharpe": 1.168,
-        "calmar": 0.836,
-        "max_drawdown": -0.4924
+        "net_total_return": -0.0088,
+        "annualized_return": -0.0023,
+        "sharpe": -2.3896,
+        "calmar": -0.2479,
+        "max_drawdown": -0.0091
       }
     }
   ],
@@ -248,80 +250,87 @@
     {
       "target_vol": 0.15,
       "band": 0.1,
-      "avg_weight": 0.272,
-      "turnover_total": 8.06,
+      "avg_weight": 0.273,
+      "turnover_total": 7.93,
       "net": {
-        "net_total_return": 0.9835,
-        "annualized_return": 0.191,
-        "sharpe": 1.097,
-        "calmar": 0.707,
-        "max_drawdown": -0.2702
+        "net_total_return": -0.0189,
+        "annualized_return": -0.0049,
+        "sharpe": -2.886,
+        "calmar": -0.25,
+        "max_drawdown": -0.0194
       }
     },
     {
       "target_vol": 0.15,
       "band": 0.2,
-      "avg_weight": 0.278,
-      "turnover_total": 6.5,
+      "avg_weight": 0.279,
+      "turnover_total": 6.37,
       "net": {
-        "net_total_return": 0.9573,
-        "annualized_return": 0.187,
-        "sharpe": 1.051,
-        "calmar": 0.67,
-        "max_drawdown": -0.279
+        "net_total_return": -0.0142,
+        "annualized_return": -0.0036,
+        "sharpe": -2.0763,
+        "calmar": -0.2469,
+        "max_drawdown": -0.0147
       }
     },
     {
       "target_vol": 0.2,
       "band": 0.1,
       "avg_weight": 0.356,
-      "turnover_total": 9.8,
+      "turnover_total": 9.63,
       "net": {
-        "net_total_return": 1.513,
-        "annualized_return": 0.2652,
-        "sharpe": 1.145,
-        "calmar": 0.763,
-        "max_drawdown": -0.3476
+        "net_total_return": -0.0226,
+        "annualized_return": -0.0058,
+        "sharpe": -3.4364,
+        "calmar": -0.2515,
+        "max_drawdown": -0.0231
       }
     },
     {
       "target_vol": 0.2,
       "band": 0.2,
       "avg_weight": 0.363,
-      "turnover_total": 7.72,
+      "turnover_total": 7.55,
       "net": {
-        "net_total_return": 1.4646,
-        "annualized_return": 0.2589,
-        "sharpe": 1.096,
-        "calmar": 0.722,
-        "max_drawdown": -0.3586
+        "net_total_return": -0.0163,
+        "annualized_return": -0.0042,
+        "sharpe": -2.3178,
+        "calmar": -0.2482,
+        "max_drawdown": -0.0168
       }
     },
     {
       "target_vol": 0.3,
       "band": 0.1,
-      "avg_weight": 0.517,
-      "turnover_total": 12.01,
+      "avg_weight": 0.518,
+      "turnover_total": 11.75,
       "net": {
-        "net_total_return": 2.8595,
-        "annualized_return": 0.4116,
-        "sharpe": 1.192,
-        "calmar": 0.845,
-        "max_drawdown": -0.4874
+        "net_total_return": -0.0261,
+        "annualized_return": -0.0067,
+        "sharpe": -3.8037,
+        "calmar": -0.2526,
+        "max_drawdown": -0.0266
       }
     },
     {
       "target_vol": 0.3,
       "band": 0.2,
-      "avg_weight": 0.53,
-      "turnover_total": 9.2,
+      "avg_weight": 0.531,
+      "turnover_total": 8.95,
       "net": {
-        "net_total_return": 2.8081,
-        "annualized_return": 0.4068,
-        "sharpe": 1.158,
-        "calmar": 0.823,
-        "max_drawdown": -0.4942
+        "net_total_return": -0.0176,
+        "annualized_return": -0.0045,
+        "sharpe": -2.3896,
+        "calmar": -0.2487,
+        "max_drawdown": -0.0182
       }
     }
-  ]
+  ],
+  "expl010_n2_unscaled_comparator": {
+    "net_total_return": 7.4702,
+    "annualized_return": 0.7252,
+    "sharpe": 1.115,
+    "calmar": 0.9499,
+    "max_drawdown": -0.7635
+  }
 }

@@ -108,14 +108,16 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: breadth is a market-level gate, unavailable to
   single-symbol studies; overlay on EXPL-010 base.
 
-### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 (corrected) · KEPT_PRIMARY_SELECTED
+### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 (corrected, tested) · KEPT_PRIMARY_SELECTED
 - Status: kept under the frozen judgment rule; primary config selected and
-  recorded in the results JSON. All grid points beat the true static
-  buy-and-hold benchmark at baseline; all but the weakest point still beat
-  it under 2x cost stress. The margin at surviving points is thin. Formal
+  recorded in the results JSON. Passes both the baseline and the 2x-cost
+  stress gate at the surviving points; the margin is thin. Formal
   confirmation, if any, tests the primary config only; the remaining grid
-  is sensitivity diagnostics that cannot rescue the primary result. Full
-  numbers: `expl-screen-results-2026-08-22.json`.
+  is sensitivity diagnostics that cannot rescue the primary result.
+  Implementation is covered by `tests/test_exploration_screens.py`
+  (benchmark semantics, window alignment, cost placement, full-precision
+  judgments, timestamp validation). Full numbers:
+  `expl-screen-results-2026-08-22.json`.
 - Original card: rotate between BTC and ETH by relative strength with
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
