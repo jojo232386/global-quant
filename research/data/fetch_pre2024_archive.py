@@ -38,7 +38,8 @@ ARCHIVE_HOST = "s3.ap-northeast-1.amazonaws.com"
 ARCHIVE_BASE = f"https://{ARCHIVE_HOST}/data.binance.vision"
 INFO_HOST = "fapi.binance.com"
 INFO_URL = f"https://{INFO_HOST}/fapi/v1/exchangeInfo"
-KLINE_PREFIX = "data/futures/um/monthly/klines/"  # .../{SYMBOL}/{SYMBOL}-{interval}-{Y}-{M}.zip
+KLINE_PREFIX = "data/futures/um/monthly/klines/"  # .../{SYMBOL}/{interval}/{SYMBOL}-{interval}-{Y}-{M}.zip
+FUNDING_PREFIX = "data/futures/um/monthly/fundingRate/"  # .../{SYMBOL}/{SYMBOL}-fundingRate-{Y}-{M}.zip
 TRAIN_END_MONTH = "2023-06"   # first monthly file must be <= this
 ALLOWED_HOSTS = {ARCHIVE_HOST, INFO_HOST}
 MAX_XML_BYTES = 8 * 1024 * 1024
@@ -70,17 +71,21 @@ def _assert_public_resolution(host: str) -> None:
 
 
 def http_get(url: str, retries: int = 3) -> bytes:
+    import time
     parsed = urllib.parse.urlparse(url)
-    assert parsed.scheme == "https", f"non-https scheme refused: {parsed.scheme}"
+    if parsed.scheme != "https":
+        raise RuntimeError(f"non-https scheme refused: {parsed.scheme}")
     host = parsed.hostname or ""
-    assert host in ALLOWED_HOSTS, f"host not allowlisted: {host}"
+    if host not in ALLOWED_HOSTS:
+        raise RuntimeError(f"host not allowlisted: {host}")
     _assert_public_resolution(host)
     req = urllib.request.Request(url, headers={"User-Agent": "gmaq-pre2024-fetch/1.0"})
-    import time
     for attempt in range(retries):
         try:
             with _OPENER.open(req, timeout=120) as resp:
                 return resp.read()
+        except urllib.error.HTTPError:
+            raise  # 404 etc. are deterministic; do not retry
         except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
             if attempt == retries - 1:
                 raise
@@ -93,7 +98,7 @@ def http_get(url: str, retries: int = 3) -> bytes:
 def parse_xml(body: bytes) -> ET.Element:
     if len(body) > MAX_XML_BYTES:
         raise RuntimeError(f"XML input too large: {len(body)}")
-    lowered = body[:4096].lower()
+    lowered = body.lower()
     if b"<!doctype" in lowered or b"<!entity" in lowered:
         raise RuntimeError("XML with DTD/ENTITY declarations refused")
     return ET.fromstring(body)
@@ -154,10 +159,12 @@ def usdt_like(symbol: str) -> bool:
 
 
 def month_of(key: str) -> str | None:
-    # .../klines/BTCUSDT/BTCUSDT-1d-2023-06.zip -> "2023-06" (1d files only;
-    # the symbol directory also holds other intervals)
+    # .../klines/BTCUSDT/1d/BTCUSDT-1d-2023-06.zip -> "2023-06".
+    # .zip only: the sibling .zip.CHECKSUM files must not parse as months.
     name = key.rsplit("/", 1)[-1]
-    parts = name.replace(".zip", "").split("-")
+    if not name.endswith(".zip"):
+        return None
+    parts = name[:-4].split("-")
     if len(parts) == 4 and parts[1] == "1d" and len(parts[2]) == 4 and parts[2].isdigit():
         return f"{parts[2]}-{parts[3]}"
     return None
@@ -246,20 +253,111 @@ def smoke(symbol: str, months: list[str], curated_path: Path) -> dict:
     return report
 
 
+def month_range(first: str, last: str = "2023-12") -> list[str]:
+    fy, fm = (int(x) for x in first.split("-"))
+    ly, lm = (int(x) for x in last.split("-"))
+    out = []
+    y, m = fy, fm
+    while (y, m) <= (ly, lm):
+        out.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    return out
+
+
+def fetch(candidates_path: Path, out_dir: Path, only: set[str] | None,
+          limit: int, months_filter: set[str] | None = None) -> None:
+    """Download kline + funding zips with checksum verification into a raw
+    directory. Resumable: existing files with matching sha256 are skipped.
+    Missing months (delistings) are recorded, not fatal."""
+    spec = json.loads(candidates_path.read_text())
+    symbols = sorted(spec["first_bar_by_symbol"])
+    if only:
+        symbols = [s for s in symbols if s in only]
+    if limit:
+        symbols = symbols[:limit]
+    klines_dir = out_dir / "klines"
+    funding_dir = out_dir / "fundingRate"
+    manifest_path = out_dir / "fetch-manifest.jsonl"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    done_syms = 0
+    with open(manifest_path, "a", encoding="utf-8") as manifest:
+        for sym in symbols:
+            first = spec["first_bar_by_symbol"][sym]
+            wanted = month_range(first)
+            if months_filter:
+                wanted = [m for m in wanted if m in months_filter]
+            entries = []
+            for m in wanted:
+                for kind, prefix, directory in (
+                    ("kline", KLINE_PREFIX + f"{sym}/1d/{sym}-1d-{m}.zip", klines_dir),
+                    ("funding", FUNDING_PREFIX + f"{sym}/{sym}-fundingRate-{m}.zip", funding_dir),
+                ):
+                    dest = directory / sym / f"{kind}-{m}.zip"
+                    record = {"symbol": sym, "month": m, "kind": kind,
+                              "key": prefix, "path": str(dest)}
+                    if dest.exists():
+                        blob = dest.read_bytes()
+                        record.update(status="cached",
+                                      sha256=hashlib.sha256(blob).hexdigest())
+                    else:
+                        try:
+                            blob = http_get(f"{ARCHIVE_BASE}/{prefix}")
+                            ck = http_get(f"{ARCHIVE_BASE}/{prefix}.CHECKSUM").decode().strip()
+                            if not verify_sha256(blob, ck):
+                                record.update(status="checksum_mismatch")
+                            else:
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                dest.write_bytes(blob)
+                                record.update(status="ok",
+                                              sha256=hashlib.sha256(blob).hexdigest(),
+                                              bytes=len(blob))
+                        except urllib.error.HTTPError as exc:
+                            record.update(status="missing", http=exc.code)
+                    entries.append(record)
+                    manifest.write(json.dumps(record, sort_keys=True) + "\n")
+            bad = [e for e in entries if e["status"] in ("checksum_mismatch",)]
+            if bad:
+                raise RuntimeError(f"{sym}: checksum mismatch on {len(bad)} files")
+            done_syms += 1
+            if done_syms % 10 == 0:
+                print(f"  fetched {done_syms}/{len(symbols)} symbols", file=sys.stderr)
+    print(f"fetch pass complete: {done_syms} symbols -> {out_dir}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["enumerate", "smoke"])
+    parser.add_argument("mode", choices=["enumerate", "smoke", "fetch"])
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--months", default="2023-10,2023-11,2023-12")
+    parser.add_argument("--out", default="/Users/ASUS/Desktop/gmaq-data/snapshots/"
+                                          "pre2024-usdm-current-survivors/raw")
+    parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
+    here = Path(__file__).parent
     if args.mode == "enumerate":
         enumerate_candidates()
-    else:
+        return 0
+    if args.mode == "smoke":
         curated = Path(
             "/Users/ASUS/Desktop/gmaq-data/snapshots/btceth-weekly-tsmom/curated/"
             "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615/data/"
             f"{args.symbol}-1d.jsonl")
-        smoke(args.symbol, args.months.split(","), curated)
+        report = smoke(args.symbol, args.months.split(","), curated)
+        here.joinpath("pre2024-smoke-report.json").write_text(
+            json.dumps(report, indent=2))
+        failed = (any(not m["sha256_ok"] for m in report["months"].values())
+                  or report["cross_check"]["overlap_days"] == 0
+                  or report["cross_check"]["decimal_mismatches"] > 0)
+        if failed:
+            print("SMOKE_GATE=FAIL", file=sys.stderr)
+            return 1
+        print("SMOKE_GATE=PASS")
+        return 0
+    fetch(here / "pre2024-candidates.json", Path(args.out),
+          only={args.symbol} if args.symbol != "ALL" else None, limit=args.limit,
+          months_filter=set(args.months.split(",")) if args.mode == "fetch" and args.months else None)
     return 0
 
 

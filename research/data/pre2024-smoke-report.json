@@ -1,0 +1,24 @@
+{
+  "symbol": "BTCUSDT",
+  "months": {
+    "2023-11": {
+      "rows": 30,
+      "sha256_ok": true,
+      "columns": 12,
+      "first_field": [
+        "1698796800000",
+        "34651.40",
+        "35734",
+        "34076",
+        "35437.40",
+        "469214.787"
+      ]
+    }
+  },
+  "cross_check": {
+    "curated_rows": 2423,
+    "overlap_days": 30,
+    "decimal_mismatches": 0,
+    "examples": []
+  }
+}
