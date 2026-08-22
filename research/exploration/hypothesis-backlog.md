@@ -98,14 +98,6 @@ target, not as a signal direction.
 - Delta vs closed: risk-overlay family; tested as an overlay on EXPL-001's
   base, not standalone.
 
-### EXPL-010 · target-vol portfolio of the universe · DRAFT
-- Hypothesis: top-N universe portfolio at constant 20% annualized target vol
-  with rebalance bands beats unscaled buy-and-hold on risk-adjusted terms in
-  the train window (risk management claim, not directional alpha).
-- Fixed grid: target ∈ {15%, 20%, 30%}; band ∈ {±10%, ±20% relative}.
-- Delta vs closed: none needed — family untested; framing explicitly
-  risk-management, so its graduation bar is Calmar/MDD, not raw Sharpe.
-
 ## Family D — Regime and breadth
 
 ### EXPL-011 · breadth risk switch · DRAFT
@@ -115,12 +107,43 @@ target, not as a signal direction.
 - Delta vs closed: breadth is a market-level gate, unavailable to
   single-symbol studies; overlay on EXPL-010 base.
 
-### EXPL-012 · BTC/ETH relative strength rotation · DRAFT
-- Hypothesis: rotating between BTC and ETH by 30d relative strength with
-  hysteresis beats static 50/50 after costs.
-- Fixed grid: lookback ∈ {14d, 30d}; hysteresis band ∈ {±3%, ±5%}.
-- Delta vs closed: rotation with hysteresis vs always-in LS; benchmark is
-  static 50/50 which beat the closed TSMOM studies.
+### EXPL-012 · BTC/ETH relative strength rotation · SCREENED 2026-08-22 · KEPT_THIN
+- Screen result (train 2020-01-01..2023-12-31, dataset 88d9ff34, spot
+  long-only, 15bps/side, full numbers in `expl-screen-results-2026-08-22.json`):
+  baseline net Sharpe 1.131–1.229 vs daily-rebalanced 50/50 benchmark 1.115
+  (all 4 grid points beat it; Calmar 1.044–1.236 vs 0.951). Under 2x cost
+  stress only the 14d/3% point still beats the benchmark (Sharpe 1.170,
+  Calmar 1.089); the other three lose their excess. Verdict: weak survivor —
+  thin, cost-fragile edge concentrated at fast lookback + tight band. If
+  graduated, the formal preregistration must re-test the FULL grid (no
+  cherry-picking the stress survivor); expectations low.
+- Original card: rotate between BTC and ETH by relative strength with
+  hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
+  benchmark static 50/50.
+
+### EXPL-010 · target-vol portfolio of the universe · SCREENED 2026-08-22 (reduced breadth) · DROPPED (preliminary)
+- Screen result (N=2 BTC/ETH only — the card specifies top-N; full breadth
+  BLOCKED_ON_DATA, see below): target-vol scaling cuts MDD from -76% to
+  -27%..-49% but Calmar lands 0.68–0.86 vs 0.95 for unscaled 50/50 on every
+  grid point; Sharpe improvement is marginal (≤ +0.09). Risk-adjusted terms
+  worsen. Mirrors the ASQ A5-1 lesson: vol scaling alone does not improve
+  tail-risk-adjusted returns. Dropped at preliminary breadth; re-carding at
+  top-N requires pre-2024 universe data.
+- Original card: top-N universe portfolio at constant target vol with
+  rebalance bands vs unscaled buy-and-hold; graduation bar Calmar/MDD.
+  Grid target ∈ {15%, 20%, 30%}; band ∈ {±10%, ±20%}.
+
+## DATA BLOCKERS (2026-08-22 inventory)
+
+- PIT universe files (`global-quant-continuation/user_data/data/pit/`, 82
+  symbols, 15m klines + funding) cover **2026-02..2026-08 only** — entirely
+  inside the tainted region. Family A cards (EXPL-001..004), EXPL-013, and
+  the full-breadth EXPL-010 cannot be screened on the train window.
+- Clean pre-2024 data available: curated `88d9ff34` (BTC/ETH 1d + funding +
+  mark-8h, 2020-01..2026-08) and curated `9601a8ff` (BTC/ETH spot/perp 8h).
+- Implication: screening proceeds on BTC/ETH cards until the data-layer
+  scope decision (protocol escalation path) delivers a pre-2024 multi-symbol
+  dataset through the raw → validated → curated V1 flow.
 
 ## Family E — Portfolio construction
 
@@ -159,11 +182,14 @@ target, not as a signal direction.
 
 ## Screening order
 
-1. EXPL-010 and EXPL-013 first (pure construction, cheapest to build, feed
-   benchmarks/overlays for other cards).
-2. EXPL-001 next (base for 002/004/005/009/011/014 interactions).
-3. Conditioned families (B, C gates) after bases exist.
-4. Event family (F) last — needs the most bespoke plumbing.
+1. ~~EXPL-010 and EXPL-013 first~~ — EXPL-010 screened (dropped at N=2,
+   full breadth blocked on data); EXPL-013 blocked on data (needs top-N).
+2. EXPL-012 screened 2026-08-22: KEPT_THIN.
+3. Next screenable on clean BTC/ETH data: EXPL-008 (vol-regime gated
+   trend), EXPL-015 (post-jump conditional drift), EXPL-016 (session ×
+   vol regime, 1d granularity only).
+4. Family A, EXPL-013, full EXPL-010 wait on the pre-2024 universe data
+   decision (see DATA BLOCKERS).
 
 ## Escalation note
 

@@ -1,0 +1,307 @@
+{
+  "screen": "EXPL-012 + EXPL-010 (reduced breadth) train-window screen",
+  "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
+  "claim_status": "NOT EVIDENCE - exploration tier screen only",
+  "data": {
+    "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
+    "files": {
+      "BTCUSDT-1d.jsonl": "124ab7650b0cd1f4f0b7a7c442ebb857ba6085ef449cd10b52f3b44506ca6feb",
+      "ETHUSDT-1d.jsonl": "f17168b40ebbff533b7a6d99231c7d22621885b8341f67d0c32a4f5812b18c89"
+    },
+    "window": "2020-01-01..2023-12-31 (train only)",
+    "days": 1461,
+    "funding": "excluded: long-only spot feasible for BTC/ETH"
+  },
+  "cost_per_side": 0.0015,
+  "benchmarks": {
+    "btc": {
+      "net_total_return": 3.5185,
+      "annualized_return": 0.4696,
+      "sharpe": 0.916,
+      "calmar": 0.612,
+      "max_drawdown": -0.7667
+    },
+    "eth": {
+      "net_total_return": 11.6782,
+      "annualized_return": 0.9123,
+      "sharpe": 1.186,
+      "calmar": 1.15,
+      "max_drawdown": -0.7935
+    },
+    "static_5050_buyhold": {
+      "net_total_return": 7.5499,
+      "annualized_return": 0.7293,
+      "sharpe": 1.118,
+      "calmar": 0.956,
+      "max_drawdown": -0.7629
+    },
+    "daily_rebalanced_5050_net": {
+      "net_total_return": 7.4704,
+      "annualized_return": 0.7252,
+      "sharpe": 1.115,
+      "calmar": 0.951,
+      "max_drawdown": -0.7629
+    }
+  },
+  "expl012_baseline": [
+    {
+      "lookback": 14,
+      "band": 0.03,
+      "switches": 63,
+      "net": {
+        "net_total_return": 11.9549,
+        "annualized_return": 0.9228,
+        "sharpe": 1.229,
+        "calmar": 1.236,
+        "max_drawdown": -0.7466
+      }
+    },
+    {
+      "lookback": 14,
+      "band": 0.05,
+      "switches": 50,
+      "net": {
+        "net_total_return": 9.3657,
+        "annualized_return": 0.8165,
+        "sharpe": 1.159,
+        "calmar": 1.044,
+        "max_drawdown": -0.782
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.03,
+      "switches": 40,
+      "net": {
+        "net_total_return": 9.1022,
+        "annualized_return": 0.8046,
+        "sharpe": 1.147,
+        "calmar": 1.15,
+        "max_drawdown": -0.6995
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.05,
+      "switches": 36,
+      "net": {
+        "net_total_return": 8.6675,
+        "annualized_return": 0.7844,
+        "sharpe": 1.131,
+        "calmar": 1.082,
+        "max_drawdown": -0.7251
+      }
+    }
+  ],
+  "expl012_cost_stress_2x": [
+    {
+      "lookback": 14,
+      "band": 0.03,
+      "switches": 63,
+      "net": {
+        "net_total_return": 9.7604,
+        "annualized_return": 0.8339,
+        "sharpe": 1.17,
+        "calmar": 1.089,
+        "max_drawdown": -0.7661
+      }
+    },
+    {
+      "lookback": 14,
+      "band": 0.05,
+      "switches": 50,
+      "net": {
+        "net_total_return": 7.9559,
+        "annualized_return": 0.7499,
+        "sharpe": 1.113,
+        "calmar": 0.939,
+        "max_drawdown": -0.7988
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.03,
+      "switches": 40,
+      "net": {
+        "net_total_return": 7.9718,
+        "annualized_return": 0.7507,
+        "sharpe": 1.11,
+        "calmar": 1.066,
+        "max_drawdown": -0.704
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.05,
+      "switches": 36,
+      "net": {
+        "net_total_return": 7.6784,
+        "annualized_return": 0.7359,
+        "sharpe": 1.098,
+        "calmar": 1.003,
+        "max_drawdown": -0.7341
+      }
+    }
+  ],
+  "expl010_reduced_breadth_baseline": [
+    {
+      "target_vol": 0.15,
+      "band": 0.1,
+      "avg_weight": 0.272,
+      "turnover_total": 8.06,
+      "net": {
+        "net_total_return": 1.0076,
+        "annualized_return": 0.1947,
+        "sharpe": 1.115,
+        "calmar": 0.725,
+        "max_drawdown": -0.2686
+      }
+    },
+    {
+      "target_vol": 0.15,
+      "band": 0.2,
+      "avg_weight": 0.278,
+      "turnover_total": 6.5,
+      "net": {
+        "net_total_return": 0.9764,
+        "annualized_return": 0.1899,
+        "sharpe": 1.064,
+        "calmar": 0.684,
+        "max_drawdown": -0.2777
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.1,
+      "avg_weight": 0.356,
+      "turnover_total": 9.8,
+      "net": {
+        "net_total_return": 1.5502,
+        "annualized_return": 0.2699,
+        "sharpe": 1.161,
+        "calmar": 0.781,
+        "max_drawdown": -0.3457
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.2,
+      "avg_weight": 0.363,
+      "turnover_total": 7.72,
+      "net": {
+        "net_total_return": 1.4932,
+        "annualized_return": 0.2626,
+        "sharpe": 1.108,
+        "calmar": 0.736,
+        "max_drawdown": -0.357
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.1,
+      "avg_weight": 0.517,
+      "turnover_total": 12.01,
+      "net": {
+        "net_total_return": 2.9296,
+        "annualized_return": 0.4181,
+        "sharpe": 1.205,
+        "calmar": 0.862,
+        "max_drawdown": -0.4853
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.2,
+      "avg_weight": 0.53,
+      "turnover_total": 9.2,
+      "net": {
+        "net_total_return": 2.861,
+        "annualized_return": 0.4117,
+        "sharpe": 1.168,
+        "calmar": 0.836,
+        "max_drawdown": -0.4924
+      }
+    }
+  ],
+  "expl010_reduced_breadth_cost_stress_2x": [
+    {
+      "target_vol": 0.15,
+      "band": 0.1,
+      "avg_weight": 0.272,
+      "turnover_total": 8.06,
+      "net": {
+        "net_total_return": 0.9835,
+        "annualized_return": 0.191,
+        "sharpe": 1.097,
+        "calmar": 0.707,
+        "max_drawdown": -0.2702
+      }
+    },
+    {
+      "target_vol": 0.15,
+      "band": 0.2,
+      "avg_weight": 0.278,
+      "turnover_total": 6.5,
+      "net": {
+        "net_total_return": 0.9573,
+        "annualized_return": 0.187,
+        "sharpe": 1.051,
+        "calmar": 0.67,
+        "max_drawdown": -0.279
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.1,
+      "avg_weight": 0.356,
+      "turnover_total": 9.8,
+      "net": {
+        "net_total_return": 1.513,
+        "annualized_return": 0.2652,
+        "sharpe": 1.145,
+        "calmar": 0.763,
+        "max_drawdown": -0.3476
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.2,
+      "avg_weight": 0.363,
+      "turnover_total": 7.72,
+      "net": {
+        "net_total_return": 1.4646,
+        "annualized_return": 0.2589,
+        "sharpe": 1.096,
+        "calmar": 0.722,
+        "max_drawdown": -0.3586
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.1,
+      "avg_weight": 0.517,
+      "turnover_total": 12.01,
+      "net": {
+        "net_total_return": 2.8595,
+        "annualized_return": 0.4116,
+        "sharpe": 1.192,
+        "calmar": 0.845,
+        "max_drawdown": -0.4874
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.2,
+      "avg_weight": 0.53,
+      "turnover_total": 9.2,
+      "net": {
+        "net_total_return": 2.8081,
+        "annualized_return": 0.4068,
+        "sharpe": 1.158,
+        "calmar": 0.823,
+        "max_drawdown": -0.4942
+      }
+    }
+  ],
+  "expl010_caveat": "N=2 only (BTC/ETH); the card specifies a top-N universe. Full-breadth screen BLOCKED_ON_DATA: PIT universe files cover 2026-02..2026-08 only (tainted region). Reduced-breadth result is a preliminary signal, not the card's registered screen."
+}
