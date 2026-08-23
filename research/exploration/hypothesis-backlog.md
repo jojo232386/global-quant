@@ -319,16 +319,82 @@ vol as a gate or target, not as a signal direction.
 
 ## Family E — Portfolio construction
 
-### EXPL-013 · banded inverse-vol universe portfolio · DRAFT
-- Hypothesis: inverse-vol weights across the top-N universe with wide
-  rebalance bands (trade only when weight drift > band) retains the
-  diversification benefit at a fraction of the turnover.
-- Fixed grid: N ∈ {10, 30}; band ∈ {±20%, ±35% relative}.
-- Delta vs closed: the dead two-asset inverse-vol test (ASQ A5-1) and the
-  9-symbol-week carry both suffered tiny breadth; this is N≥10 with an
-  explicit turnover budget.
-- Data: curated price V1 `a7d65a92`; archive-extended, survivor-biased,
+### EXPL-013 · banded inverse-vol universe portfolio · FROZEN BEFORE RUN
+- Frozen contract: `expl-013-preregistration.json`. The contract must be
+  committed before implementation or result generation; any later change to
+  mechanism, formula, data, split, parameters, costs, benchmarks, or gates
+  requires a new experiment id. The primary cannot be replaced by a grid
+  winner.
+- Hypothesis: heterogeneous crypto volatility makes an equal-weight broad
+  portfolio concentrate risk in the most volatile contracts. Inverse-vol
+  sizing can distribute risk more evenly; a wide relative drift band should
+  preserve most of the unbanded inverse-vol risk benefit while using at most
+  75% of its turnover. This is a portfolio-construction hypothesis, not a
+  directional return-prediction factor.
+- Formula: on each scheduled decision close, first form the eligible set from
+  names active in the current PIT universe with complete 90-bar volume and
+  31-close history; fewer than N is a hard stop. Select by median quote volume
+  over the 90 completed UTC daily bars, descending, with canonical symbol
+  ascending as the tie-break. Estimate each name's sample volatility from its 30 completed
+  close-to-close returns through that close and set a long-only target weight
+  proportional to inverse annualized volatility, normalized to gross one.
+  Volatility only sizes positions; it never ranks names into long/short
+  directions. Zero/non-finite volatility or missing required history is a
+  hard data stop.
+- Band: at each monthly decision close, mark actual incumbent holdings at that
+  close and normalize by total portfolio equity, then compare those drifted
+  weights with the new target. The first allocation or a membership change
+  immediately triggers a full rebalance without evaluating a relative ratio.
+  When memberships match, compare common members only; any relative deviation
+  `abs(current-target)/target` strictly above the band triggers a full
+  rebalance at the next UTC daily open, otherwise no trade occurs. At the next open, turnover/cost uses the then-current marked
+  incumbent weights versus the precomputed target. Initial allocation and
+  final liquidation are charged.
+- Primary: N=30, relative band=20%. Frozen neighborhood only:
+  N ∈ {10, 30} × band ∈ {20%, 35%}. Vol window=30 completed days and monthly
+  frequency are fixed, not tunable.
+- Data: Data Layer V1 curated snapshot
+  `a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b`,
+  manifest SHA256
+  `cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166`;
+  only `open_time_utc_ms`, `open`, `close`, `quote_volume`, and monthly
+  `pit_universe` are used. The data is archive-extended, survivor-biased, and
   exploration-only.
+- Split: one continuous path with calendar 2021 train, calendar 2022 OOS,
+  calendar 2023 final holdout; positions are not reset or liquidated at split
+  boundaries. Only the final 2023 exit is forced. Pre-2021 rows are warmup
+  only and nothing from 2024 onward may be read for
+  calculation. All rules are frozen before any segment is evaluated.
+- Timing and costs: information through close t is executed at open t+1;
+  returns are next-open to next-open with the existing terminal close/exit
+  rule. Cost is sum absolute weight change × 15 bps baseline (5 bps fee +
+  10 bps slippage) or 30 bps stress. Funding is not modeled even though the
+  source is USD-M perpetual price data, so 30 bps is only a price-execution
+  cost stress and the result cannot be a tradable
+  total-return, formal-promotion, or live claim.
+- Benchmarks: (1) equal-weight top-N, fully rebalanced monthly under the same
+  PIT selection, timing, and costs; (2) the identical inverse-vol target fully
+  rebalanced monthly with no band. The first tests risk allocation; the second
+  tests whether the band saves turnover without discarding the risk benefit.
+- Required gates: every frozen gate in `expl-013-preregistration.json` must
+  pass, including OOS and final-holdout benchmark improvement, 30 bps stress,
+  ≤75% turnover versus unbanded inverse-vol, 3/4 parameter-neighborhood
+  stability, multi-symbol contribution/weight concentration, and four
+  half-year multi-period checks. Any failure → `FAIL` and the pure Price Alpha
+  line stops without parameter rescue. All pass → `EXPLORATION_PASS` only;
+  survivor bias and unmodeled funding still block alpha promotion.
+- Expected failure: inverse-vol overweights contracts whose low historical
+  volatility does not persist, correlations jump in stress, the band delays a
+  necessary risk rebalance, equal weight is already sufficiently diversified,
+  turnover reduction is too small, or relative benefit is concentrated in one
+  symbol or subperiod.
+- Delta vs closed: unlike EXPL-003, volatility sets size and never direction;
+  unlike EXPL-010_N2, there is no aggregate target-vol overlay and
+  the frozen mechanism is cross-sectional N≥10 risk budgeting plus an explicit
+  turnover budget. Moving from two names to N≥10 is acknowledged as a breadth
+  change, not claimed as new alpha; cross-project A-share results are context
+  only and are not evidence for this contract. It must not be stacked on
+  failed momentum signals.
 
 ### EXPL-014 · rank momentum with vol scaling · DRAFT
 - Hypothesis: EXPL-001 base with per-name vol-scaled position sizes
