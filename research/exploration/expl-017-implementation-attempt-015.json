@@ -1,0 +1,71 @@
+{
+  "artifact_class": "EXPLORATION_IMPLEMENTATION_ATTEMPT_STATUS",
+  "hypothesis_id": "EXPL-017",
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "implementation_attempt_id": "EXPL-017-IMPL-015",
+  "status": "DATA_UNAVAILABLE_PRE_FORMAL",
+  "classification": "DATA_UNAVAILABLE",
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "mechanism_changed": false,
+  "core_binding": {
+    "implementation_attempt_id": "EXPL-017-IMPL-014",
+    "status": "CORRECTNESS_PASS_CORE_ONLY",
+    "reviewed_implementation_sha": "f143ad8ee09479e7c74d95acf3af29bdca5bbbd2"
+  },
+  "requested_delta": "Add the minimal verified Price V1 formal consumer, complete IC path, and no-cost/baseline/stress portfolio orchestration without exposing formal metrics.",
+  "dataset_binding": {
+    "dataset_id": "pre2024-usdm-archive-extended-1d",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "stage": "curated",
+    "integrity": "VERIFIED",
+    "quality": "PASS",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_universe_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "registered_roles": {
+      "kline": 208,
+      "pit_universe": 1,
+      "summary": 1,
+      "lifecycle_or_event": 0
+    },
+    "binding_result": "PASS_IDENTITY_BUT_INSUFFICIENT_ROLE"
+  },
+  "blocking_finding": {
+    "required_capability": "Point-in-time lifecycle_as_of state that can identify a verified terminal event at the terminal close without consulting a future missing bar.",
+    "finding": "The bound Price V1 schema and snapshot contain OHLC, quote volume, monthly PIT universe, and summary only. They contain no lifecycle, event, listing-status, or terminal-status role.",
+    "why_implementation_stopped": "Inferring a terminal event from the next absent bar would use future information. Treating the dataset cutoff as terminal would misclassify right-censored active contracts. Either behavior would violate the frozen lookahead and lifecycle semantics.",
+    "data_admission_evidence_defect": "expl-017-data-admission.json declares lifecycle handling but binds no lifecycle source or registered role. That declaration cannot supply the formal consumer contract."
+  },
+  "historical_lifecycle_audit": {
+    "commit": "786ef0f6fee3a6690724cea60d4e0e14b5f85554",
+    "ancestor_of_current_lineage": false,
+    "uses_sources_outside_bound_price_v1_snapshot": true,
+    "verdict": "FAIL",
+    "blocker": "AKROUSDT:TERMINATED_UNCONFIRMED",
+    "contract_sha256": "61e1b8707bfb0678dc62308a1926a3d0e1131d231435ac2a9865546d1b33178f",
+    "evidence_sha256": "15ea89b97b3a76760c267ba6319d5fbf5862d96da78d5547eb85346ae06fbf1d",
+    "report_sha256": "27e49a3618e44452dafc44bf543576cabdc97d581454d1ee320fe6c09f227123",
+    "blocked_artifact_sha256": "942f670adb330fa10860108844c31429ad8585e6c2902bbdfac97e028b4d6603",
+    "admitted_for_impl_015": false
+  },
+  "execution": {
+    "formal_consumer_implemented": false,
+    "formal_003_created": false,
+    "freeze_created": false,
+    "formal_dataset_performance_path_run": false,
+    "formal_metrics_computed": false,
+    "formal_metrics_printed": false,
+    "formal_metrics_serialized": false,
+    "formal_run_count": 0,
+    "formal_result": "NOT_RUN"
+  },
+  "independent_review": {
+    "approve_stop": true,
+    "classification": "DATA_UNAVAILABLE",
+    "dataset_binding": "PASS_IDENTITY_BUT_INSUFFICIENT_ROLE",
+    "lifecycle_check": "FAIL_DATA_UNAVAILABLE",
+    "lookahead_check": "FAIL_CLOSED_NO_FUTURE_ABSENCE_INFERENCE",
+    "formal_metrics_exposed": false
+  },
+  "allowed_next_action": "Only after explicit new authority: create and admit a PIT-available lifecycle data extension, resolve the AKROUSDT conflict, and then start a new implementation attempt. Do not create a freeze or formal run from IMPL-015."
+}

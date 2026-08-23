@@ -287,7 +287,7 @@ vol as a gate or target, not as a signal direction.
 - `EXPL-017-IMPL-001` through `EXPL-017-IMPL-013` are
   `INVALID_PRE_FORMAL`:
   implementation defects invalidated those attempts only.
-  `EXPL-017-IMPL-014` is `CORRECTNESS_PASS_PRE_FREEZE` at reviewed
+  `EXPL-017-IMPL-014` is retained as `CORRECTNESS_PASS_CORE_ONLY` at reviewed
   implementation SHA `f143ad8ee09479e7c74d95acf3af29bdca5bbbd2`.
   `EXPL-017-FORMAL-001` froze at `0e0b7f8` but is closed as
   `PROCESS_DEFECT / NOT_RUN`: its last scheduled decision requires a
@@ -297,6 +297,13 @@ vol as a gate or target, not as a signal direction.
   independent contract review closed it as `INVALID_BEFORE_EXECUTION` because
   the bound reviewed implementation remains formal-locked and no complete
   formal IC/runtime consumer was committed before freeze.
+  `EXPL-017-IMPL-015` then attempted only the missing formal consumer, but
+  stopped before code as `DATA_UNAVAILABLE_PRE_FORMAL`: the exact VERIFIED
+  Price V1 snapshot has 208 kline roles plus PIT universe and summary, with no
+  lifecycle/event role capable of supplying `lifecycle_as_of`. Inferring a
+  terminal event from a future missing bar is prohibited lookahead. The only
+  historical lifecycle audit is outside this lineage and is itself FAIL on
+  `AKROUSDT:TERMINATED_UNCONFIRMED`, so it was not imported or used.
   Formal run count is zero and formal OOS/holdout performance remains unread;
   EXPL-017 stays active and has no market verdict or Factor Graveyard entry.
 
@@ -501,7 +508,8 @@ vol as a gate or target, not as a signal direction.
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
 9. EXPL-017: PRE_FORMAL_ACTIVE; implementation attempt EXPL-017-IMPL-014 is
-   CORRECTNESS_PASS_PRE_FREEZE. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
+   CORRECTNESS_PASS_CORE_ONLY and EXPL-017-IMPL-015 is
+   DATA_UNAVAILABLE_PRE_FORMAL. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
    and EXPL-017-FORMAL-002 is INVALID_BEFORE_EXECUTION after contract review;
    aggregate formal run count remains zero, with no market verdict or Factor
    Graveyard entry.
