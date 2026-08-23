@@ -96,7 +96,11 @@ must be refused by the control plane.
 ## 6. Health metrics
 
 - Heartbeat: Freqtrade `last_process` age.
-- Clock: offset between host and exchange server time; limit 2 seconds.
+- Clock: five exchange-time samples per decision. Samples with round-trip time
+  above 2 seconds are excluded, at least three qualified samples are required,
+  and the median offset must remain within 2 seconds. Insufficient evidence or
+  sustained drift fails closed; one transient network/clock outlier cannot pass
+  or fail the gate by itself.
 - Data freshness: age of the newest candle processed.
 - Counts: open trades, open orders, dry-run wallet, protection state.
 - Verdicts: `HEALTHY`, `UNHEALTHY`, `UNKNOWN`. Any `UNKNOWN` health input is
@@ -114,6 +118,9 @@ must be refused by the control plane.
   fails closed when channels are configured but cannot deliver.
 - Every dispatch is recorded in the audit journal with the channels and
   delivery outcome; a failed delivery is recorded, never silent.
+- The latest failure is also atomically persisted to
+  `user_data/audit/last-alert.json` and emitted on stderr, including when no
+  remote alert channel is configured.
 - Alert payloads contain no credentials and no secrets.
 
 ## 8. Independent kill switch

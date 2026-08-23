@@ -1,12 +1,13 @@
-# Reliability Soak Protocol (48–72h, dry-run)
+# Reliability Observation Protocol (48–72h post-canary, dry-run)
 
 > `DRY_RUN_ONLY = TRUE`
 
-This protocol defines the promoted-layout reliability run and the evidence
-package it must produce. The soak exercises the runtime and the control
-plane; it does not test alpha and it does not authorize live trading.
-Completion of the soak removes exactly one blocker from
-`configs/LIVE_READINESS.md` and nothing more.
+This protocol defines a bounded canary followed by a DISARMED reliability
+observation and the evidence package it must produce. It exercises the runtime
+and control plane; it does not test alpha and it does not authorize live
+trading. Its `OBSERVATION_ONLY_PASS` verdict is deliberately distinct from the
+legacy continuously-ARMED 48-hour protocol and does not automatically remove a
+blocker from `configs/LIVE_READINESS.md`.
 
 ## Scope and layout
 
@@ -17,11 +18,16 @@ Completion of the soak removes exactly one blocker from
   25 USDT dry-run stake.
 - Control plane in the loop: `scripts/gmaq-control`, audit journal enabled.
 - Execution wrapper: `scripts/reliability-soak <48-72> --authorization-id ID`
-  drives the scheduled exercises. The explicit id authorizes this dry-run only.
+  drives one canary authorization and the scheduled DISARMED observations. The
+  explicit id authorizes this dry-run canary only.
 - Non-mutating validation: `scripts/reliability-soak --smoke` proves the exact
   runtime binding, health, audit chain and zero-state reconciliation while the
   entry gate remains `DISARMED`. It never counts as 48–72h evidence.
-- Duration: 48–72 hours continuous. A run shorter than 48h is not evidence.
+- Authorization: exactly one ARM is permitted. It ends immediately after one
+  complete canary entry/exit lifecycle; there is no periodic authorization
+  refresh or re-ARM during observation.
+- Duration: 48–72 hours continuous after the canary is complete and the gate is
+  DISARMED. A shorter observation does not receive `OBSERVATION_ONLY_PASS`.
 - A monitor-loop gap over five minutes or a backward host-clock jump fails the
   run; suspended host time never counts toward continuous duration.
 
@@ -36,8 +42,10 @@ Completion of the soak removes exactly one blocker from
 6. Kill switch rehearsed once from a running state: `./scripts/gmaq-control
    kill` stops the runtime, then recovery to DISARMED per
    `configs/CONTROL_PLANE.md`.
-7. Entry record appended to the audit journal. The soak clock starts only after
-   kill recovery creates and verifies a fresh exact binding.
+7. Entry record appended to the audit journal. After one complete canary
+   lifecycle, the runner immediately records a DISARM and only then starts the
+   observation clock. Both pre-canary preflights require trustworthy clock
+   evidence; unavailable time evidence is not treated as confirmed drift.
 
 ## Scheduled exercises
 
@@ -47,20 +55,26 @@ Each exercise appends an audit record and is listed in the evidence table.
 |---|---|---|---|
 | E1 | health sample | every 6h | HEALTHY verdict records |
 | E2 | reconcile | every 6h | MATCH verdicts, unique identities |
-| E3 | pause / resume | 2x per 24h | state transitions in journal |
-| E4 | clean restart | 1x per 24h | recovery with zero duplicate trades/orders |
-| E5 | short network interruption | 1x | runtime survives, no unaccounted state |
+| E4 | clean restart while DISARMED | 1x per 24h | recovery with zero duplicate trades/orders |
+| E5 | short network interruption while DISARMED | 1x | runtime survives, no unaccounted state |
 | E6 | stopped-database backup/restore | 1x | restored runtime equals pre-backup state |
 | E7 | API reconnection | 2x | bound API ping reachable after reconnect |
-| E8 | duplicate identity scan | every 12h | database trade/order ids and audit sequences remain unique |
+| E8 | duplicate identity and audit scan | every 12h | database trade/order ids and audit sequences remain unique |
+
+Health, reconciliation, audit verification and duplicate checks continue for
+the whole observation. Because the entry gate is DISARMED, health does not call
+the Binance time endpoint; fresh trusted clock evidence remains mandatory
+before any later ARM outside this observation.
 
 ## Exit criteria (all mandatory)
 
 - Final controlled exit in dry-run followed by a reconcile with **zero open
   positions and zero open orders**.
 - The flat database identity baseline captured immediately before E0 must be
-  followed by at least one fully closed `LiveExecutionCanaryStrategy` dry-run
-  trade with closed buy and sell orders. A zero-trade soak fails.
+  followed by exactly the authorized canary phase producing at least one fully
+  closed `LiveExecutionCanaryStrategy` dry-run trade with closed buy and sell
+  orders. A zero-trade run fails, and the observation cannot start until this
+  lifecycle is complete and the gate is DISARMED.
 - No duplicate trade/order identities across the whole run.
 - Audit hash chain intact from entry to exit.
 - Every scheduled exercise has a matching evidence record; a missed exercise
@@ -81,7 +95,11 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 - `audit-start-anchor.json` and `initial-audit-verify.json`: the verified
   predecessor hash and record count anchoring that segment to the pre-soak chain.
 - `health-samples.jsonl`: timestamped E1 verdict records at the six-hour cadence.
+- `preflight.json` and `preflight-after-kill.json`: the complete five-sample
+  clock evidence and every other check before the only ARM.
 - `reconcile-records.jsonl`: timestamped E2 verdict records at the six-hour cadence.
+- `audit-verify-records.jsonl`: periodic audit-chain verification during the
+  DISARMED observation.
 - `trade-baseline.json` and `trade-lifecycle.json`: the pre-E0 database
   identity boundary and proof of a complete post-baseline canary round trip.
 - `backup-restore.md`: E6 steps and comparison result.
@@ -92,7 +110,9 @@ Produce one dated folder under `user_data/audit/soak-<UTC date>/` containing:
 
 ## Acceptance
 
-- A PASS removes the "reliability run not completed" blocker only.
+- `OBSERVATION_ONLY_PASS` proves only the stated canary plus DISARMED observation
+  contract. It is not the legacy continuously-ARMED 48-hour `PASS` and does not
+  by itself remove the "reliability run not completed" blocker.
 - `SMOKE_ONLY_PASS` does not remove that blocker and does not authorize entries.
 - Live remains BLOCKED by every item listed in `configs/LIVE_READINESS.md`
   that is still unverified, especially the authenticated account checks.
