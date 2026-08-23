@@ -287,8 +287,10 @@ vol as a gate or target, not as a signal direction.
 - `EXPL-017-IMPL-001` through `EXPL-017-IMPL-013` are
   `INVALID_PRE_FORMAL`:
   implementation defects invalidated those attempts only.
-  `EXPL-017-IMPL-014` is the clean attempt. All have
-  `FORMAL_RUN_ID = NONE`; formal OOS/holdout performance remains unread.
+  `EXPL-017-IMPL-014` is `CORRECTNESS_PASS_PRE_FREEZE` at reviewed
+  implementation SHA `f143ad8ee09479e7c74d95acf3af29bdca5bbbd2`.
+  All have `FORMAL_RUN_ID = NONE`; formal OOS/holdout performance remains
+  unread.
 
 ## Family D — Regime and breadth
 
@@ -490,8 +492,9 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
-9. EXPL-017: PRE_FORMAL_ACTIVE under clean implementation attempt
-   EXPL-017-IMPL-014; no market verdict or Factor Graveyard entry.
+9. EXPL-017: PRE_FORMAL_ACTIVE; implementation attempt EXPL-017-IMPL-014 is
+   CORRECTNESS_PASS_PRE_FREEZE, with no formal run, market verdict, or Factor
+   Graveyard entry.
 
 ## Escalation note
 

@@ -1,11 +1,13 @@
 # EXPL-017 Lead Research Design
 
-Status: `HYPOTHESIS_ACTIVE_PRE_FORMAL`
+Hypothesis status: `HYPOTHESIS_ACTIVE_PRE_FORMAL`
+Implementation attempt status: `CORRECTNESS_PASS_PRE_FREEZE`
 Main baseline: `94100c7ca60444d8e72f0a8ff6fc70f57206aabb`
 
 ```ini
 HYPOTHESIS_ID = EXPL-017
 IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-014
+IMPLEMENTATION_ATTEMPT_STATUS = CORRECTNESS_PASS_PRE_FREEZE
 PRIOR_IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-001 THROUGH EXPL-017-IMPL-013 INVALID_PRE_FORMAL
 FORMAL_RUN_ID = NONE
 MECHANISM = Cross-sectional momentum changes sign with the broad PIT universe volatility state: calm markets permit slow information diffusion and continuation, while high-volatility markets are dominated by forced deleveraging, correlation spikes, and rebound, producing relative reversal.
@@ -92,7 +94,9 @@ Price V1 is survivor-biased and exploration-only. `PROMOTABLE_ALPHA`,
 
 This document fixes the EXPL-017 mechanism. It is not a formal freeze commit.
 No `FORMAL_RUN_ID` may exist until a clean implementation attempt passes the
-independent correctness review.
+independent correctness review. EXPL-017-IMPL-014 has passed that review, but
+this task stops before freeze: `FORMAL_RUN_ID`, formal freeze, and formal
+OOS/holdout performance all remain `NONE` / `NOT RUN`.
 
 `EXPL-017-GOLD-ORACLE-002` was committed before either production attempt and
 its arithmetic passed independent review. It is reused byte-for-byte by

@@ -1,0 +1,32 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-014",
+  "status": "CORRECTNESS_PASS_PRE_FREEZE",
+  "implementation_sha": "f143ad8ee09479e7c74d95acf3af29bdca5bbbd2",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "independent_review": {
+    "approve": true,
+    "reviewed_sha": "f143ad8ee09479e7c74d95acf3af29bdca5bbbd2",
+    "request_changes": null,
+    "reviewer_role": "independent read-only reviewer",
+    "focused_tests": "32 passed",
+    "full_tests": "342 passed; 72 existing temporary-directory cleanup warnings"
+  },
+  "correctness_checks": {
+    "lookahead": "PASS",
+    "timestamp_alignment": "PASS",
+    "pit": "PASS",
+    "lifecycle": "PASS",
+    "cost_and_nav_normalized_turnover": "PASS",
+    "split_and_parameter_contamination": "PASS",
+    "independent_gold_oracle": "PASS",
+    "formal_performance_lock": "PASS"
+  },
+  "allowed_next_step": "In a separate authorized task, mint a FORMAL_RUN_ID and commit a freeze contract before one formal OOS/holdout run."
+}
