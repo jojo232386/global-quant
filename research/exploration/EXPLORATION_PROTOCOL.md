@@ -7,9 +7,9 @@ Status: `ACTIVE_PROTOCOL` (adopted 2026-08-22)
 The formal research loop (`research/README.md`) is deliberately expensive:
 preregistration, V1 dataset binding, one-shot runs, no parameter rescue.
 That discipline is correct and stays unchanged. What has been missing is a
-cheap layer in front of it. This protocol defines that layer: a train-only
-screening space where many hypotheses can die quickly, without contaminating
-formal evidence.
+cheap layer in front of it. This protocol defines that layer: train-only cheap
+screens plus explicitly preregistered pre-2024 price experiments when the user
+requires OOS/final-holdout evidence, without contaminating formal evidence.
 
 Two rules summarize the whole document:
 
@@ -18,18 +18,23 @@ Two rules summarize the whole document:
 
 ## Hard boundaries
 
-- **Train-only window.** Exploration screens evaluate on data ending
-  `2023-12-31`. The 2024–2026 region is already observed by three formal V1
-  studies and is treated as tainted for selection. Any selection decision
-  (keep/drop/tune a card) that looked at post-2023 data invalidates the card.
+- **Pre-2024 containment.** Cheap card screens are train-only. A stricter
+  price experiment may instead freeze one primary, train, OOS, and final
+  holdout before code, as Price Alpha v1 already did; every split must end by
+  `2023-12-31`, the primary cannot be chosen from the grid, and the final
+  holdout cannot rescue failed train/OOS gates. The 2024–2026 region is
+  already observed by formal V1 studies and is tainted for exploration. Any
+  selection or tuning that looked at post-2023 data invalidates the card.
 - **Artifact containment.** All exploration artifacts live under
   `research/exploration/` and use the `expl-` prefix. They are never written
   to `research/backtests/`, never named `results.json`, and never read by
   admission, Control Room, or any formal runner.
-- **No claims.** Exploratory numbers may not be quoted as PASS, edge, or
-  performance anywhere — including commit messages, the vault, and
-  conversations with humans. The only permitted phrasing is "screened,
-  kept/dropped".
+- **No promotion claims.** Cheap screens use only `kept/dropped`. A frozen
+  price experiment with preregistered OOS/holdout gates may record
+  `EXPLORATION_PASS/FAIL`, but neither label is evidence of alpha promotion,
+  a tradable edge, or live readiness. Numeric performance stays in the
+  contained result JSON and is not quoted in backlog, commits, the vault, or
+  human summaries.
 - **Fixed small grids.** Each card registers its parameter grid at creation.
   Expanding a grid after seeing screen results is parameter rescue and is
   forbidden; it requires a new card with a stated reason.
@@ -61,6 +66,13 @@ Two rules summarize the whole document:
    `VERIFIED` curated dataset binding, and a one-shot formal run under the
    existing gate. Graduation does not weaken any formal rule.
 
+A frozen price experiment is the stricter alternative used when the user
+requires OOS and a final holdout before deciding whether the price-only line
+continues. Its immutable preregistration is committed before code, it runs
+once, and `EXPLORATION_PASS` is still only a signal to acquire independent
+confirmation data. `FAIL` is permanent for that id and cannot be parameter-
+rescued.
+
 ## Graduation selection rule (frozen 2026-08-22, per Codex-App review)
 
 - A graduated card designates **one primary configuration**, selected by a
@@ -76,8 +88,9 @@ Two rules summarize the whole document:
 ## Record containment (reinforced)
 
 - Backlog entries, commit messages, the vault, and agent-to-agent
-  summaries record only status (`DRAFT / SCREENED / KEPT / DROPPED /
-  BLOCKED_ON_DATA`), the primary config, and non-numeric reasons.
+  summaries record only status (`DRAFT / FROZEN BEFORE RUN / SCREENED / KEPT /
+  DROPPED / EXPLORATION_PASS / FAIL / BLOCKED_ON_DATA`), the primary config,
+  and non-numeric reasons.
 - All performance figures live exclusively in the exploration results
   JSON under `research/exploration/`.
 

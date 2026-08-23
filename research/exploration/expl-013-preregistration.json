@@ -1,0 +1,153 @@
+{
+  "artifact_class": "EXPLORATION_ONLY_NOT_EVIDENCE",
+  "benchmarks": {
+    "equal_weight": "same top-N PIT universe, fully rebalanced monthly, identical timing and costs",
+    "unbanded_inverse_vol": "same inverse-vol target, fully rebalanced monthly with no drift band"
+  },
+  "claim_boundary": {
+    "alpha_promotion": "BLOCKED",
+    "funding_modeled": false,
+    "maximum_outcome": "EXPLORATION_PASS",
+    "production_ready": false,
+    "survivor_biased": true
+  },
+  "costs": {
+    "baseline_per_unit_one_way_turnover": 0.0015,
+    "fee_component": 0.0005,
+    "funding": "NOT_MODELED",
+    "slippage_component": 0.001,
+    "stress_per_unit_one_way_turnover": 0.003,
+    "turnover": "sum(abs(target_weight-current_weight)); initial allocation and final liquidation included"
+  },
+  "data": {
+    "dataset": "pre2024-usdm-archive-extended-1d",
+    "fields": [
+      "open_time_utc_ms",
+      "open",
+      "close",
+      "quote_volume",
+      "pit_universe"
+    ],
+    "labels": [
+      "archive-extended",
+      "survivor-biased",
+      "exploration-only"
+    ],
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "verification": "before calculation, verify_snapshot(snapshot_id, expected_dataset, minimum_stage=curated) must return integrity VERIFIED and quality PASS; exact manifest and every registered file SHA must replay, otherwise DATA_ERROR_STOP"
+  },
+  "execution": {
+    "continuous_state": "one continuous simulation; no liquidation or reset at train/OOS/holdout boundaries",
+    "decision": "last close before the first UTC daily open of each calendar month",
+    "entry": "next UTC daily open after the decision close",
+    "incumbent_for_band": "actual holdings marked at decision close and normalized by total portfolio equity",
+    "incumbent_for_turnover": "actual holdings marked at execution open immediately before trade and normalized by total portfolio equity",
+    "missing_required_value": "DATA_ERROR_STOP",
+    "return_path": "daily open-to-next-open; terminal final-open-to-close then exit",
+    "timezone": "UTC"
+  },
+  "experiment_id": "EXPL-013",
+  "formula": {
+    "band_trigger": "first allocation triggers without a ratio; compare membership next and if different trigger without a ratio; only when memberships match, evaluate common members and trigger if any abs(decision_close_incumbent-target)/target > band; common-member target weights are strictly positive; a trigger rebalances the full portfolio at next open",
+    "direction": "long_only",
+    "gross_exposure": 1.0,
+    "leverage": 1.0,
+    "rebalance_frequency": "monthly",
+    "selection": "first require complete 90-volume-bar and 31-close history for active PIT names; fewer than N is DATA_ERROR_STOP; then sort median quote_volume descending and canonical symbol ascending",
+    "volatility": "sample stdev of 30 completed close-to-close daily returns through decision close, annualized by sqrt(365)",
+    "weight": "(1/volatility) / sum(1/volatility); volatility sizes only and never determines long/short direction"
+  },
+  "frozen_before_code_and_run": true,
+  "mechanism": "cross-sectional inverse-vol risk budgeting with wide drift bands can retain unbanded risk diversification at materially lower turnover",
+  "metrics": {
+    "annualization_days": 365,
+    "calmar": "compounded annualized net return / abs(max drawdown)",
+    "concentration": "per-symbol arithmetic gross contribution minus that symbol's actual transaction cost; largest absolute contribution / sum absolute contributions",
+    "daily_return": "portfolio open-to-next-open gross return minus actual turnover cost at that open; terminal uses final-open-to-close minus exit cost",
+    "invalid_metric": "empty input, zero/negative/non-finite denominator, zero/non-finite sample volatility, zero contribution denominator, or any non-finite metric makes the associated check false",
+    "max_observed_weight": "maximum absolute live symbol weight observed at daily opens after trade and at scheduled decision closes",
+    "max_drawdown": "minimum compounded equity / prior peak - 1",
+    "risk_free_rate": 0.0,
+    "sharpe": "mean daily net return / sample stdev daily net return * sqrt(365)",
+    "total_return": "compounded product of one plus daily net returns minus one"
+  },
+  "outcomes": {
+    "all_checks_pass": "EXPLORATION_PASS",
+    "any_check_fails": "FAIL_AND_STOP_PRICE_ALPHA",
+    "data_contract_fails": "DATA_ERROR_STOP"
+  },
+  "parameters": {
+    "grid": [
+      {"band_relative": 0.2, "n": 10},
+      {"band_relative": 0.35, "n": 10},
+      {"band_relative": 0.2, "n": 30},
+      {"band_relative": 0.35, "n": 30}
+    ],
+    "primary": {"band_relative": 0.2, "n": 30},
+    "selection_rule": "primary fixed before run; grid points are stability diagnostics and cannot replace it"
+  },
+  "pass_fail": {
+    "all_required": true,
+    "concentration": {
+      "oos_and_holdout_largest_absolute_symbol_pnl_share_max": 0.25,
+      "oos_and_holdout_max_observed_weight_max": 0.2,
+      "primary_minimum_names": 30
+    },
+    "final_holdout_primary": {
+      "baseline_calmar_gte_equal_weight": true,
+      "baseline_sharpe_margin_over_equal_weight_min": 0.1,
+      "baseline_sharpe_positive": true,
+      "baseline_sharpe_retention_vs_unbanded_min": 0.9,
+      "baseline_total_return_positive": true,
+      "max_drawdown_no_worse_than_equal_weight": true,
+      "stress_sharpe_gte_equal_weight": true,
+      "stress_sharpe_positive": true,
+      "stress_total_return_positive": true,
+      "turnover_ratio_vs_unbanded_max": 0.75,
+      "unbanded_baseline_sharpe_positive": true
+    },
+    "multi_period": {
+      "half_years": [
+        "2022-H1",
+        "2022-H2",
+        "2023-H1",
+        "2023-H2"
+      ],
+      "primary_baseline_calmar_gte_equal_weight_min_count": 3,
+      "primary_baseline_sharpe_gte_equal_weight_min_count": 3
+    },
+    "oos_primary": {
+      "baseline_calmar_gte_equal_weight": true,
+      "baseline_sharpe_margin_over_equal_weight_min": 0.1,
+      "baseline_sharpe_positive": true,
+      "baseline_sharpe_retention_vs_unbanded_min": 0.9,
+      "baseline_total_return_positive": true,
+      "max_drawdown_no_worse_than_equal_weight": true,
+      "stress_sharpe_gte_equal_weight": true,
+      "stress_sharpe_positive": true,
+      "stress_total_return_positive": true,
+      "turnover_ratio_vs_unbanded_max": 0.75,
+      "unbanded_baseline_sharpe_positive": true
+    },
+    "parameter_stability": {
+      "grid_point_required": "in both OOS and holdout: baseline total return and Sharpe positive; baseline Sharpe > equal-weight; stress total return and Sharpe positive; stress Sharpe >= equal-weight stress; turnover ratio vs unbanded <= 0.75",
+      "grid_points_meeting_all_required_in_both_oos_and_holdout_min": 3,
+      "total_grid_points": 4
+    },
+    "train_sanity": {
+      "baseline_calmar_gte_equal_weight": true,
+      "baseline_sharpe_gte_equal_weight": true,
+      "baseline_sharpe_positive": true,
+      "baseline_total_return_positive": true,
+      "turnover_ratio_vs_unbanded_max": 0.75
+    }
+  },
+  "split": {
+    "final_holdout": "2023-01-01..2023-12-31",
+    "oos": "2022-01-01..2022-12-31",
+    "train": "2021-01-01..2021-12-31",
+    "warmup": "pre-2021 rows only",
+    "window_end_exclusive": "2024-01-01"
+  }
+}
