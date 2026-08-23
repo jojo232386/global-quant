@@ -1,0 +1,336 @@
+{
+  "screen": "EXPL-012 + EXPL-010 N2 diagnostic (unified semantics)",
+  "protocol": "research/exploration/EXPLORATION_PROTOCOL.md",
+  "claim_status": "NOT EVIDENCE - exploration tier screen only",
+  "comparison_spec": "see module docstring in expl_screens_v1.py",
+  "correction": "third correction: unified EXPL-010 N2 base/benchmark construction, full-precision judgments (rounding only in this serialized output)",
+  "data": {
+    "dataset_id": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615",
+    "files": {
+      "BTCUSDT-1d.jsonl": "124ab7650b0cd1f4f0b7a7c442ebb857ba6085ef449cd10b52f3b44506ca6feb",
+      "ETHUSDT-1d.jsonl": "f17168b40ebbff533b7a6d99231c7d22621885b8341f67d0c32a4f5812b18c89"
+    },
+    "window": "2020-01-01..2023-12-31 (train only)",
+    "days": 1461,
+    "timestamp_alignment_checked": true,
+    "funding": "excluded: long-only spot feasible for BTC/ETH"
+  },
+  "cost_per_side": 0.0015,
+  "checks": {
+    "timestamps_aligned": true,
+    "cost_stress_changes_results": true,
+    "buyhold_and_daily_rb_differ": true,
+    "buyhold_window_matches_strategy": true
+  },
+  "benchmarks": {
+    "btc": {
+      "net_total_return": 3.5185,
+      "annualized_return": 0.4696,
+      "sharpe": 0.9159,
+      "calmar": 0.6124,
+      "max_drawdown": -0.7667
+    },
+    "eth": {
+      "net_total_return": 11.6782,
+      "annualized_return": 0.9123,
+      "sharpe": 1.1857,
+      "calmar": 1.1497,
+      "max_drawdown": -0.7935
+    },
+    "static_5050_buyhold_primary": {
+      "net_total_return": 7.5984,
+      "annualized_return": 0.7318,
+      "sharpe": 1.1002,
+      "calmar": 0.9409,
+      "max_drawdown": -0.7778
+    },
+    "daily_rebalanced_5050_diagnostic": {
+      "net_total_return": 7.3911,
+      "annualized_return": 0.7211,
+      "sharpe": 1.1119,
+      "calmar": 0.9438,
+      "max_drawdown": -0.764
+    }
+  },
+  "expl012_judgment": {
+    "verdict": "KEPT_PRIMARY_SELECTED",
+    "primary_config": {
+      "lookback": 14,
+      "band": 0.03
+    },
+    "baseline_beats_count": "3/4",
+    "stress_survivors_count": "1/4"
+  },
+  "expl012_baseline": [
+    {
+      "lookback": 14,
+      "band": 0.03,
+      "switches": 63,
+      "net": {
+        "net_total_return": 9.8154,
+        "annualized_return": 0.8363,
+        "sharpe": 1.1733,
+        "calmar": 1.1201,
+        "max_drawdown": -0.7466
+      }
+    },
+    {
+      "lookback": 14,
+      "band": 0.05,
+      "switches": 50,
+      "net": {
+        "net_total_return": 7.6538,
+        "annualized_return": 0.7347,
+        "sharpe": 1.1029,
+        "calmar": 0.9395,
+        "max_drawdown": -0.782
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.03,
+      "switches": 40,
+      "net": {
+        "net_total_return": 7.8781,
+        "annualized_return": 0.746,
+        "sharpe": 1.1084,
+        "calmar": 1.0666,
+        "max_drawdown": -0.6995
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.05,
+      "switches": 36,
+      "net": {
+        "net_total_return": 7.4961,
+        "annualized_return": 0.7265,
+        "sharpe": 1.0931,
+        "calmar": 1.002,
+        "max_drawdown": -0.7251
+      }
+    }
+  ],
+  "expl012_cost_stress_2x": [
+    {
+      "lookback": 14,
+      "band": 0.03,
+      "switches": 63,
+      "net": {
+        "net_total_return": 7.9542,
+        "annualized_return": 0.7498,
+        "sharpe": 1.1127,
+        "calmar": 0.9788,
+        "max_drawdown": -0.7661
+      }
+    },
+    {
+      "lookback": 14,
+      "band": 0.05,
+      "switches": 50,
+      "net": {
+        "net_total_return": 6.4526,
+        "annualized_return": 0.6698,
+        "sharpe": 1.055,
+        "calmar": 0.8385,
+        "max_drawdown": -0.7988
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.03,
+      "switches": 40,
+      "net": {
+        "net_total_return": 6.8855,
+        "annualized_return": 0.694,
+        "sharpe": 1.0713,
+        "calmar": 0.9859,
+        "max_drawdown": -0.704
+      }
+    },
+    {
+      "lookback": 30,
+      "band": 0.05,
+      "switches": 36,
+      "net": {
+        "net_total_return": 6.6276,
+        "annualized_return": 0.6797,
+        "sharpe": 1.0593,
+        "calmar": 0.9259,
+        "max_drawdown": -0.7341
+      }
+    }
+  ],
+  "expl010_judgment": {
+    "EXPL-010_FULL": "BLOCKED_ON_DATA (pre-2024 top-N universe data absent)",
+    "EXPL-010_N2_DIAGNOSTIC": "DROPPED",
+    "note": "N=2 BTC/ETH diagnostic on unified daily-rebalanced construction; direction consistent with ASQ A5-1 but not a cross-market confirmation"
+  },
+  "expl010_n2_diagnostic_baseline": [
+    {
+      "target_vol": 0.15,
+      "band": 0.1,
+      "avg_weight": 0.273,
+      "turnover_total": 7.93,
+      "net": {
+        "net_total_return": 1.0588,
+        "annualized_return": 0.2024,
+        "sharpe": 1.0416,
+        "calmar": 0.7252,
+        "max_drawdown": -0.2791
+      }
+    },
+    {
+      "target_vol": 0.15,
+      "band": 0.2,
+      "avg_weight": 0.279,
+      "turnover_total": 6.37,
+      "net": {
+        "net_total_return": 0.9782,
+        "annualized_return": 0.1902,
+        "sharpe": 0.9682,
+        "calmar": 0.6532,
+        "max_drawdown": -0.2912
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.1,
+      "avg_weight": 0.356,
+      "turnover_total": 9.63,
+      "net": {
+        "net_total_return": 1.5901,
+        "annualized_return": 0.275,
+        "sharpe": 1.1218,
+        "calmar": 0.8225,
+        "max_drawdown": -0.3343
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.2,
+      "avg_weight": 0.363,
+      "turnover_total": 7.55,
+      "net": {
+        "net_total_return": 1.4509,
+        "annualized_return": 0.2571,
+        "sharpe": 1.0388,
+        "calmar": 0.7479,
+        "max_drawdown": -0.3438
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.1,
+      "avg_weight": 0.518,
+      "turnover_total": 11.75,
+      "net": {
+        "net_total_return": 2.8929,
+        "annualized_return": 0.4147,
+        "sharpe": 1.1863,
+        "calmar": 0.8883,
+        "max_drawdown": -0.4669
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.2,
+      "avg_weight": 0.531,
+      "turnover_total": 8.95,
+      "net": {
+        "net_total_return": 2.6764,
+        "annualized_return": 0.3942,
+        "sharpe": 1.1175,
+        "calmar": 0.8299,
+        "max_drawdown": -0.475
+      }
+    }
+  ],
+  "expl010_n2_diagnostic_cost_stress_2x": [
+    {
+      "target_vol": 0.15,
+      "band": 0.1,
+      "avg_weight": 0.273,
+      "turnover_total": 7.93,
+      "net": {
+        "net_total_return": 1.0249,
+        "annualized_return": 0.1973,
+        "sharpe": 1.0201,
+        "calmar": 0.7042,
+        "max_drawdown": -0.2802
+      }
+    },
+    {
+      "target_vol": 0.15,
+      "band": 0.2,
+      "avg_weight": 0.279,
+      "turnover_total": 6.37,
+      "net": {
+        "net_total_return": 0.95,
+        "annualized_return": 0.1859,
+        "sharpe": 0.9501,
+        "calmar": 0.636,
+        "max_drawdown": -0.2922
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.1,
+      "avg_weight": 0.356,
+      "turnover_total": 9.63,
+      "net": {
+        "net_total_return": 1.5376,
+        "annualized_return": 0.2683,
+        "sharpe": 1.1003,
+        "calmar": 0.7996,
+        "max_drawdown": -0.3355
+      }
+    },
+    {
+      "target_vol": 0.2,
+      "band": 0.2,
+      "avg_weight": 0.363,
+      "turnover_total": 7.55,
+      "net": {
+        "net_total_return": 1.4083,
+        "annualized_return": 0.2515,
+        "sharpe": 1.0211,
+        "calmar": 0.729,
+        "max_drawdown": -0.345
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.1,
+      "avg_weight": 0.518,
+      "turnover_total": 11.75,
+      "net": {
+        "net_total_return": 2.7915,
+        "annualized_return": 0.4052,
+        "sharpe": 1.1667,
+        "calmar": 0.8613,
+        "max_drawdown": -0.4704
+      }
+    },
+    {
+      "target_vol": 0.3,
+      "band": 0.2,
+      "avg_weight": 0.531,
+      "turnover_total": 8.95,
+      "net": {
+        "net_total_return": 2.5949,
+        "annualized_return": 0.3862,
+        "sharpe": 1.1014,
+        "calmar": 0.8106,
+        "max_drawdown": -0.4765
+      }
+    }
+  ],
+  "expl010_n2_unscaled_comparator": {
+    "net_total_return": 7.3911,
+    "annualized_return": 0.7211,
+    "sharpe": 1.1119,
+    "calmar": 0.9438,
+    "max_drawdown": -0.764
+  }
+}

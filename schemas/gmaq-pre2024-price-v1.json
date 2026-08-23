@@ -1,0 +1,36 @@
+{
+  "authoritative_sources": {
+    "archive": "https://data.binance.vision/data/futures/um",
+    "reference_snapshot": "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615"
+  },
+  "dataset": "pre2024-usdm-archive-extended-1d",
+  "fields": {
+    "klines": [
+      "open_time_utc_ms",
+      "open",
+      "high",
+      "low",
+      "close",
+      "quote_volume"
+    ],
+    "pit_universe": [
+      "effective_month_start_utc_ms",
+      "symbols"
+    ]
+  },
+  "intervals": {
+    "klines_ms": 86400000,
+    "liquidity_lookback_completed_days": 90,
+    "universe_rebalance": "calendar_month"
+  },
+  "limitations": {
+    "formal_pass_eligible": false,
+    "purpose": "exploration_only",
+    "survivor_bias": true,
+    "unbiased_historical_contract_master": false
+  },
+  "market": "crypto_perpetual",
+  "schema_version": 1,
+  "time_standard": "UTC",
+  "venue": "Binance USD-M"
+}

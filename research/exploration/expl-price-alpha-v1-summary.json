@@ -1,0 +1,36 @@
+{
+  "FUNDING_NOT_MODELED": true,
+  "LIVE_PROMOTION": "BLOCKED",
+  "STOP_AFTER_EXPLORATION": true,
+  "artifact_class": "EXPLORATION_ONLY_NOT_EVIDENCE",
+  "batch": "GMAQ Price Alpha Exploration v1",
+  "candidate_ranking": [
+    {
+      "classification": "FAIL",
+      "primary_oos_flat_15bps_sharpe": 0.8953119536726428,
+      "rank": 1,
+      "rank_key_experiment": "EXPL-001"
+    },
+    {
+      "classification": "FAIL",
+      "primary_oos_flat_15bps_sharpe": 0.7652362618795003,
+      "rank": 2,
+      "rank_key_experiment": "EXPL-004"
+    },
+    {
+      "classification": "FAIL",
+      "primary_oos_flat_15bps_sharpe": -0.13991857876265965,
+      "rank": 3,
+      "rank_key_experiment": "EXPL-003"
+    }
+  ],
+  "classifications": {
+    "EXPL-001": "FAIL",
+    "EXPL-003": "FAIL",
+    "EXPL-004": "FAIL"
+  },
+  "code_sha": "cb55371830b73f8a30fe50f43b48df37fcb5a77ef28154fb97c09917be80b76d",
+  "dataset_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+  "dataset_sha": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+  "ranking_basis": "frozen-primary OOS flat-15bps Sharpe; reporting only, never parameter selection"
+}

@@ -1,0 +1,26 @@
+{
+  "candidate_set_sha256": "98f6cb4562f8f75b4d485c5f04951297c65ebdb9ae41b218326e8a6f1f112956",
+  "exclusions": [
+    {
+      "code": "EXCLUDED_INCOMPLETE_TRADE_HISTORY",
+      "evidence": [
+        {
+          "kind": "trade_kline_1h",
+          "path": "repairs/domain-exclusions/ICPUSDT/ICPUSDT-1h-2022-09.zip",
+          "sha256": "9d2b210a8935d7e09401c0d7dcf980bd873d95be7c51fc75524f509db9ff10d7"
+        },
+        {
+          "kind": "mark_price_1d",
+          "path": "repairs/domain-exclusions/ICPUSDT/ICPUSDT-mark-1d-2022-09.zip",
+          "sha256": "c74b76868acfc1cc84806aadeb49fd17d409602f7657b257bbb0182989ba7f36"
+        }
+      ],
+      "gap_end_inclusive": "2022-09-26",
+      "gap_start": "2022-09-22",
+      "reason": "Official trade-kline archives and the public historical endpoint contain no trade bars while the official mark-price archive continues; zero-fill, interpolation, and mark-price substitution are forbidden.",
+      "symbol": "ICPUSDT"
+    }
+  ],
+  "policy": "Exclude the whole symbol before any alpha screen; preserve and bind the original 209-symbol candidate set and this evidence.",
+  "schema_version": 1
+}

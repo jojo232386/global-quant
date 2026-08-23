@@ -22,6 +22,7 @@ from gmaq_data import (  # noqa: E402
     status_summary,
     verify_snapshot,
 )
+from gmaq_data.pre2024 import build_pre2024_v1  # noqa: E402
 
 
 def selected_root(value: str | None) -> pathlib.Path:
@@ -37,6 +38,23 @@ def main(argv: list[str] | None = None) -> int:
     migrate.add_argument("--source-dir", required=True)
     migrate_carry_parser = subparsers.add_parser("migrate-carry")
     migrate_carry_parser.add_argument("--source-dir", required=True)
+    pre2024 = subparsers.add_parser("build-pre2024-price")
+    pre2024.add_argument("--raw-dir", required=True)
+    pre2024.add_argument(
+        "--candidates",
+        default=str(ROOT / "research" / "data" / "pre2024-candidates.json"),
+    )
+    pre2024.add_argument(
+        "--reference-dir",
+        default=(
+            "/Users/ASUS/Desktop/gmaq-data/snapshots/btceth-weekly-tsmom/curated/"
+            "88d9ff34d0e871c4e395730e7584a828448ca62c376005c15ce7f2233c7bf615/data"
+        ),
+    )
+    pre2024.add_argument(
+        "--exclusions",
+        default=str(ROOT / "research" / "data" / "pre2024-domain-exclusions.json"),
+    )
     verify = subparsers.add_parser("verify")
     verify.add_argument("--snapshot-id", required=True)
     status = subparsers.add_parser("status")
@@ -59,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
                 source_dir=pathlib.Path(args.source_dir),
                 data_root=data_root,
                 repo_root=ROOT,
+            )
+        elif args.command == "build-pre2024-price":
+            result = build_pre2024_v1(
+                data_root=data_root,
+                raw_dir=pathlib.Path(args.raw_dir),
+                candidates_path=pathlib.Path(args.candidates),
+                reference_dir=pathlib.Path(args.reference_dir),
+                repo_root=ROOT,
+                exclusions_path=pathlib.Path(args.exclusions),
             )
         elif args.command == "verify":
             record = verify_snapshot(data_root, args.snapshot_id)
