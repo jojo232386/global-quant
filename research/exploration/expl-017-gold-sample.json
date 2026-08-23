@@ -1,0 +1,73 @@
+{
+  "artifact_class": "PRE_IMPLEMENTATION_HAND_CALCULATED_GOLD_SAMPLE",
+  "experiment_id": "EXPL-017",
+  "notes": "Small windows exercise the exact production algebra. Percent values below are decimals. Baseline cost is turnover times 0.0015.",
+  "cases": [
+    {
+      "case": "A_NORMAL_CONTINUOUS_CALM",
+      "parameters": {"momentum_horizons": [1, 2], "volatility_window": 2, "leg_fraction": 0.2},
+      "decision_timestamp": "2021-01-07T00:00:00Z-close",
+      "input_bars": {
+        "A": {"closes_t_minus_2_to_t": [100.0, 102.0, 104.0], "execution_open": 104.0, "next_execution_open": 109.2},
+        "B": {"closes_t_minus_2_to_t": [100.0, 101.0, 102.0], "execution_open": 102.0, "next_execution_open": 103.02},
+        "C": {"closes_t_minus_2_to_t": [100.0, 100.0, 100.5], "execution_open": 100.5, "next_execution_open": 100.5},
+        "D": {"closes_t_minus_2_to_t": [100.0, 99.0, 98.0], "execution_open": 98.0, "next_execution_open": 97.02},
+        "E": {"closes_t_minus_2_to_t": [100.0, 98.0, 96.0], "execution_open": 96.0, "next_execution_open": 91.2}
+      },
+      "momentum_value": {"A": 1.0, "B": 0.75, "C": 0.5, "D": 0.25, "E": 0.0},
+      "volatility_regime_value": {"state": "calm", "broad_statistic": 0.0052977474847487474, "frozen_threshold": 0.01, "method": "median of five annualized two-return sample volatilities"},
+      "signal": "continuation: long A, short E",
+      "target_position": {"A": 0.5, "E": -0.5},
+      "execution_timestamp": "2021-01-08T00:00:00Z-open",
+      "turnover": 1.0,
+      "cost": 0.0015,
+      "next_period_return": {"A": 0.05, "E": -0.05},
+      "portfolio_pnl": {"gross": 0.05, "net": 0.0485}
+    },
+    {
+      "case": "B_REBALANCE_TIMESTAMP_HIGH_VOL",
+      "parameters": {"momentum_horizons": [1, 2], "volatility_window": 2, "leg_fraction": 0.2},
+      "decision_timestamp": "2021-02-04T00:00:00Z-close",
+      "input_bars": {
+        "A": {"closes_t_minus_2_to_t": [100.0, 102.0, 104.0], "execution_open": 110.0, "execution_close_not_available_at_decision": 55.0, "next_execution_open": 104.5},
+        "B": {"closes_t_minus_2_to_t": [100.0, 101.0, 102.0], "execution_open": 102.0, "next_execution_open": 102.0},
+        "C": {"closes_t_minus_2_to_t": [100.0, 100.0, 100.5], "execution_open": 100.5, "next_execution_open": 100.5},
+        "D": {"closes_t_minus_2_to_t": [100.0, 99.0, 98.0], "execution_open": 98.0, "next_execution_open": 98.0},
+        "E": {"closes_t_minus_2_to_t": [100.0, 98.0, 96.0], "execution_open": 90.0, "execution_close_not_available_at_decision": 180.0, "next_execution_open": 99.0}
+      },
+      "momentum_value": {"A": 1.0, "B": 0.75, "C": 0.5, "D": 0.25, "E": 0.0},
+      "volatility_regime_value": {"state": "high", "broad_statistic": 0.0052977474847487474, "frozen_threshold": 0.004, "method": "median of five annualized two-return sample volatilities"},
+      "signal": "reversal: long E, short A; execution-day closes cannot alter the decision",
+      "target_position": {"A": -0.5, "E": 0.5},
+      "execution_timestamp": "2021-02-05T00:00:00Z-open",
+      "incumbent_position": {"A": 0.5, "E": -0.5},
+      "turnover": 2.0,
+      "cost": 0.003,
+      "next_period_return": {"A": -0.05, "E": 0.1},
+      "portfolio_pnl": {"gross": 0.075, "net": 0.072}
+    },
+    {
+      "case": "C_LIFECYCLE_TERMINAL_CONTRACT",
+      "parameters": {"momentum_horizons": [1, 2], "volatility_window": 2, "leg_fraction": 0.2},
+      "decision_timestamp": "2021-03-04T00:00:00Z-close",
+      "input_bars": {
+        "A": {"closes_t_minus_2_to_t": [100.0, 102.0, 104.0], "execution_open": 100.0, "next_execution_open": 110.0},
+        "B": {"closes_t_minus_2_to_t": [100.0, 101.0, 102.0], "execution_open": 100.0, "next_execution_open": 100.0},
+        "C": {"closes_t_minus_2_to_t": [100.0, 100.0, 100.5], "execution_open": 100.0, "next_execution_open": 100.0},
+        "D": {"closes_t_minus_2_to_t": [100.0, 99.0, 98.0], "execution_open": 100.0, "next_execution_open": 100.0},
+        "E": {"closes_t_minus_2_to_t": [100.0, 98.0, 96.0], "execution_open": 100.0, "terminal_close": 80.0, "next_execution_open": null}
+      },
+      "momentum_value": {"A": 1.0, "B": 0.75, "C": 0.5, "D": 0.25, "E": 0.0},
+      "volatility_regime_value": {"state": "calm", "broad_statistic": 0.0052977474847487474, "frozen_threshold": 0.01, "method": "median of five annualized two-return sample volatilities"},
+      "signal": "continuation: long A, short E",
+      "target_position": {"A": 0.5, "E": -0.5},
+      "execution_timestamp": "2021-03-05T00:00:00Z-open",
+      "turnover": 1.5,
+      "turnover_detail": {"entry_both_legs": 1.0, "terminal_exit_E": 0.5},
+      "cost": 0.00225,
+      "next_period_return": {"A": 0.1, "E_terminal_open_to_close": -0.2},
+      "portfolio_pnl": {"gross": 0.15, "net": 0.14775},
+      "lifecycle_contract": "E is valued open-to-terminal-close, exited once with cost, never forward-filled"
+    }
+  ]
+}
