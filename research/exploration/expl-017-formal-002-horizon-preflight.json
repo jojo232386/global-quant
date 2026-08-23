@@ -1,24 +1,52 @@
 {
   "artifact_class": "EXPL-017_FORMAL_HORIZON_PREFLIGHT",
-  "expected_counts": {
-    "holdout": [
-      52,
-      51
-    ],
-    "oos": [
-      52,
-      51
-    ],
-    "train": [
-      53,
-      44
-    ]
-  },
+  "artifact_version": 1,
+  "formal_run_id": "EXPL-017-FORMAL-002",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-014",
   "input_spec": {
     "anchor": "2021-01-01",
+    "boundary_exclusive": "2024-01-01",
     "cadence_days": 7,
-    "dataset_boundary_exclusive": "2024-01-01",
-    "endpoint": "execution+7d"
+    "dataset_last_allowed_bar": "2023-12-31",
+    "decision_offset_days": 1,
+    "forward_horizon_days": 7,
+    "splits": [
+      {
+        "end_exclusive": "2022-01-01",
+        "name": "train",
+        "start_inclusive": "2021-01-01"
+      },
+      {
+        "end_exclusive": "2023-01-01",
+        "name": "oos",
+        "start_inclusive": "2022-01-01"
+      },
+      {
+        "end_exclusive": "2024-01-01",
+        "name": "holdout",
+        "start_inclusive": "2023-01-01"
+      }
+    ],
+    "train_warmup_decisions": 8
+  },
+  "invariants": {
+    "decision_equals_execution_minus_1d": true,
+    "endpoint_equals_execution_plus_7d": true,
+    "execution_cadence_7d": true,
+    "execution_strictly_ordered": true,
+    "execution_unique": true,
+    "expected_split_counts": true,
+    "included_iff_nonwarmup_same_split_and_dataset": true,
+    "reason_matches_frozen_rule": true,
+    "reason_vocabulary_exact": true,
+    "row_count_157": true,
+    "split_matches_execution": true
+  },
+  "performance_state": {
+    "formal_performance_computed": false,
+    "formal_performance_printed": false,
+    "formal_performance_serialized": false
   },
   "rows": [
     {
@@ -26,7 +54,7 @@
       "endpoint": "2021-01-08",
       "execution": "2021-01-01",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -34,7 +62,7 @@
       "endpoint": "2021-01-15",
       "execution": "2021-01-08",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -42,7 +70,7 @@
       "endpoint": "2021-01-22",
       "execution": "2021-01-15",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -50,7 +78,7 @@
       "endpoint": "2021-01-29",
       "execution": "2021-01-22",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -58,7 +86,7 @@
       "endpoint": "2021-02-05",
       "execution": "2021-01-29",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -66,7 +94,7 @@
       "endpoint": "2021-02-12",
       "execution": "2021-02-05",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -74,7 +102,7 @@
       "endpoint": "2021-02-19",
       "execution": "2021-02-12",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -82,7 +110,7 @@
       "endpoint": "2021-02-26",
       "execution": "2021-02-19",
       "ic_included": false,
-      "reason": "warmup",
+      "reason": "TRAIN_REGIME_WARMUP",
       "split": "train"
     },
     {
@@ -90,7 +118,7 @@
       "endpoint": "2021-03-05",
       "execution": "2021-02-26",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -98,7 +126,7 @@
       "endpoint": "2021-03-12",
       "execution": "2021-03-05",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -106,7 +134,7 @@
       "endpoint": "2021-03-19",
       "execution": "2021-03-12",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -114,7 +142,7 @@
       "endpoint": "2021-03-26",
       "execution": "2021-03-19",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -122,7 +150,7 @@
       "endpoint": "2021-04-02",
       "execution": "2021-03-26",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -130,7 +158,7 @@
       "endpoint": "2021-04-09",
       "execution": "2021-04-02",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -138,7 +166,7 @@
       "endpoint": "2021-04-16",
       "execution": "2021-04-09",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -146,7 +174,7 @@
       "endpoint": "2021-04-23",
       "execution": "2021-04-16",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -154,7 +182,7 @@
       "endpoint": "2021-04-30",
       "execution": "2021-04-23",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -162,7 +190,7 @@
       "endpoint": "2021-05-07",
       "execution": "2021-04-30",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -170,7 +198,7 @@
       "endpoint": "2021-05-14",
       "execution": "2021-05-07",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -178,7 +206,7 @@
       "endpoint": "2021-05-21",
       "execution": "2021-05-14",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -186,7 +214,7 @@
       "endpoint": "2021-05-28",
       "execution": "2021-05-21",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -194,7 +222,7 @@
       "endpoint": "2021-06-04",
       "execution": "2021-05-28",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -202,7 +230,7 @@
       "endpoint": "2021-06-11",
       "execution": "2021-06-04",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -210,7 +238,7 @@
       "endpoint": "2021-06-18",
       "execution": "2021-06-11",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -218,7 +246,7 @@
       "endpoint": "2021-06-25",
       "execution": "2021-06-18",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -226,7 +254,7 @@
       "endpoint": "2021-07-02",
       "execution": "2021-06-25",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -234,7 +262,7 @@
       "endpoint": "2021-07-09",
       "execution": "2021-07-02",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -242,7 +270,7 @@
       "endpoint": "2021-07-16",
       "execution": "2021-07-09",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -250,7 +278,7 @@
       "endpoint": "2021-07-23",
       "execution": "2021-07-16",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -258,7 +286,7 @@
       "endpoint": "2021-07-30",
       "execution": "2021-07-23",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -266,7 +294,7 @@
       "endpoint": "2021-08-06",
       "execution": "2021-07-30",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -274,7 +302,7 @@
       "endpoint": "2021-08-13",
       "execution": "2021-08-06",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -282,7 +310,7 @@
       "endpoint": "2021-08-20",
       "execution": "2021-08-13",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -290,7 +318,7 @@
       "endpoint": "2021-08-27",
       "execution": "2021-08-20",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -298,7 +326,7 @@
       "endpoint": "2021-09-03",
       "execution": "2021-08-27",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -306,7 +334,7 @@
       "endpoint": "2021-09-10",
       "execution": "2021-09-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -314,7 +342,7 @@
       "endpoint": "2021-09-17",
       "execution": "2021-09-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -322,7 +350,7 @@
       "endpoint": "2021-09-24",
       "execution": "2021-09-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -330,7 +358,7 @@
       "endpoint": "2021-10-01",
       "execution": "2021-09-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -338,7 +366,7 @@
       "endpoint": "2021-10-08",
       "execution": "2021-10-01",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -346,7 +374,7 @@
       "endpoint": "2021-10-15",
       "execution": "2021-10-08",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -354,7 +382,7 @@
       "endpoint": "2021-10-22",
       "execution": "2021-10-15",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -362,7 +390,7 @@
       "endpoint": "2021-10-29",
       "execution": "2021-10-22",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -370,7 +398,7 @@
       "endpoint": "2021-11-05",
       "execution": "2021-10-29",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -378,7 +406,7 @@
       "endpoint": "2021-11-12",
       "execution": "2021-11-05",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -386,7 +414,7 @@
       "endpoint": "2021-11-19",
       "execution": "2021-11-12",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -394,7 +422,7 @@
       "endpoint": "2021-11-26",
       "execution": "2021-11-19",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -402,7 +430,7 @@
       "endpoint": "2021-12-03",
       "execution": "2021-11-26",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -410,7 +438,7 @@
       "endpoint": "2021-12-10",
       "execution": "2021-12-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -418,7 +446,7 @@
       "endpoint": "2021-12-17",
       "execution": "2021-12-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -426,7 +454,7 @@
       "endpoint": "2021-12-24",
       "execution": "2021-12-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -434,7 +462,7 @@
       "endpoint": "2021-12-31",
       "execution": "2021-12-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "train"
     },
     {
@@ -442,7 +470,7 @@
       "endpoint": "2022-01-07",
       "execution": "2021-12-31",
       "ic_included": false,
-      "reason": "cross_boundary_or_dataset",
+      "reason": "HORIZON_CROSSES_SPLIT",
       "split": "train"
     },
     {
@@ -450,7 +478,7 @@
       "endpoint": "2022-01-14",
       "execution": "2022-01-07",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -458,7 +486,7 @@
       "endpoint": "2022-01-21",
       "execution": "2022-01-14",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -466,7 +494,7 @@
       "endpoint": "2022-01-28",
       "execution": "2022-01-21",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -474,7 +502,7 @@
       "endpoint": "2022-02-04",
       "execution": "2022-01-28",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -482,7 +510,7 @@
       "endpoint": "2022-02-11",
       "execution": "2022-02-04",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -490,7 +518,7 @@
       "endpoint": "2022-02-18",
       "execution": "2022-02-11",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -498,7 +526,7 @@
       "endpoint": "2022-02-25",
       "execution": "2022-02-18",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -506,7 +534,7 @@
       "endpoint": "2022-03-04",
       "execution": "2022-02-25",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -514,7 +542,7 @@
       "endpoint": "2022-03-11",
       "execution": "2022-03-04",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -522,7 +550,7 @@
       "endpoint": "2022-03-18",
       "execution": "2022-03-11",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -530,7 +558,7 @@
       "endpoint": "2022-03-25",
       "execution": "2022-03-18",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -538,7 +566,7 @@
       "endpoint": "2022-04-01",
       "execution": "2022-03-25",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -546,7 +574,7 @@
       "endpoint": "2022-04-08",
       "execution": "2022-04-01",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -554,7 +582,7 @@
       "endpoint": "2022-04-15",
       "execution": "2022-04-08",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -562,7 +590,7 @@
       "endpoint": "2022-04-22",
       "execution": "2022-04-15",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -570,7 +598,7 @@
       "endpoint": "2022-04-29",
       "execution": "2022-04-22",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -578,7 +606,7 @@
       "endpoint": "2022-05-06",
       "execution": "2022-04-29",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -586,7 +614,7 @@
       "endpoint": "2022-05-13",
       "execution": "2022-05-06",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -594,7 +622,7 @@
       "endpoint": "2022-05-20",
       "execution": "2022-05-13",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -602,7 +630,7 @@
       "endpoint": "2022-05-27",
       "execution": "2022-05-20",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -610,7 +638,7 @@
       "endpoint": "2022-06-03",
       "execution": "2022-05-27",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -618,7 +646,7 @@
       "endpoint": "2022-06-10",
       "execution": "2022-06-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -626,7 +654,7 @@
       "endpoint": "2022-06-17",
       "execution": "2022-06-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -634,7 +662,7 @@
       "endpoint": "2022-06-24",
       "execution": "2022-06-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -642,7 +670,7 @@
       "endpoint": "2022-07-01",
       "execution": "2022-06-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -650,7 +678,7 @@
       "endpoint": "2022-07-08",
       "execution": "2022-07-01",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -658,7 +686,7 @@
       "endpoint": "2022-07-15",
       "execution": "2022-07-08",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -666,7 +694,7 @@
       "endpoint": "2022-07-22",
       "execution": "2022-07-15",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -674,7 +702,7 @@
       "endpoint": "2022-07-29",
       "execution": "2022-07-22",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -682,7 +710,7 @@
       "endpoint": "2022-08-05",
       "execution": "2022-07-29",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -690,7 +718,7 @@
       "endpoint": "2022-08-12",
       "execution": "2022-08-05",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -698,7 +726,7 @@
       "endpoint": "2022-08-19",
       "execution": "2022-08-12",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -706,7 +734,7 @@
       "endpoint": "2022-08-26",
       "execution": "2022-08-19",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -714,7 +742,7 @@
       "endpoint": "2022-09-02",
       "execution": "2022-08-26",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -722,7 +750,7 @@
       "endpoint": "2022-09-09",
       "execution": "2022-09-02",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -730,7 +758,7 @@
       "endpoint": "2022-09-16",
       "execution": "2022-09-09",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -738,7 +766,7 @@
       "endpoint": "2022-09-23",
       "execution": "2022-09-16",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -746,7 +774,7 @@
       "endpoint": "2022-09-30",
       "execution": "2022-09-23",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -754,7 +782,7 @@
       "endpoint": "2022-10-07",
       "execution": "2022-09-30",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -762,7 +790,7 @@
       "endpoint": "2022-10-14",
       "execution": "2022-10-07",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -770,7 +798,7 @@
       "endpoint": "2022-10-21",
       "execution": "2022-10-14",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -778,7 +806,7 @@
       "endpoint": "2022-10-28",
       "execution": "2022-10-21",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -786,7 +814,7 @@
       "endpoint": "2022-11-04",
       "execution": "2022-10-28",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -794,7 +822,7 @@
       "endpoint": "2022-11-11",
       "execution": "2022-11-04",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -802,7 +830,7 @@
       "endpoint": "2022-11-18",
       "execution": "2022-11-11",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -810,7 +838,7 @@
       "endpoint": "2022-11-25",
       "execution": "2022-11-18",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -818,7 +846,7 @@
       "endpoint": "2022-12-02",
       "execution": "2022-11-25",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -826,7 +854,7 @@
       "endpoint": "2022-12-09",
       "execution": "2022-12-02",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -834,7 +862,7 @@
       "endpoint": "2022-12-16",
       "execution": "2022-12-09",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -842,7 +870,7 @@
       "endpoint": "2022-12-23",
       "execution": "2022-12-16",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -850,7 +878,7 @@
       "endpoint": "2022-12-30",
       "execution": "2022-12-23",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "oos"
     },
     {
@@ -858,7 +886,7 @@
       "endpoint": "2023-01-06",
       "execution": "2022-12-30",
       "ic_included": false,
-      "reason": "cross_boundary_or_dataset",
+      "reason": "HORIZON_CROSSES_SPLIT",
       "split": "oos"
     },
     {
@@ -866,7 +894,7 @@
       "endpoint": "2023-01-13",
       "execution": "2023-01-06",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -874,7 +902,7 @@
       "endpoint": "2023-01-20",
       "execution": "2023-01-13",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -882,7 +910,7 @@
       "endpoint": "2023-01-27",
       "execution": "2023-01-20",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -890,7 +918,7 @@
       "endpoint": "2023-02-03",
       "execution": "2023-01-27",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -898,7 +926,7 @@
       "endpoint": "2023-02-10",
       "execution": "2023-02-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -906,7 +934,7 @@
       "endpoint": "2023-02-17",
       "execution": "2023-02-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -914,7 +942,7 @@
       "endpoint": "2023-02-24",
       "execution": "2023-02-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -922,7 +950,7 @@
       "endpoint": "2023-03-03",
       "execution": "2023-02-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -930,7 +958,7 @@
       "endpoint": "2023-03-10",
       "execution": "2023-03-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -938,7 +966,7 @@
       "endpoint": "2023-03-17",
       "execution": "2023-03-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -946,7 +974,7 @@
       "endpoint": "2023-03-24",
       "execution": "2023-03-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -954,7 +982,7 @@
       "endpoint": "2023-03-31",
       "execution": "2023-03-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -962,7 +990,7 @@
       "endpoint": "2023-04-07",
       "execution": "2023-03-31",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -970,7 +998,7 @@
       "endpoint": "2023-04-14",
       "execution": "2023-04-07",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -978,7 +1006,7 @@
       "endpoint": "2023-04-21",
       "execution": "2023-04-14",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -986,7 +1014,7 @@
       "endpoint": "2023-04-28",
       "execution": "2023-04-21",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -994,7 +1022,7 @@
       "endpoint": "2023-05-05",
       "execution": "2023-04-28",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1002,7 +1030,7 @@
       "endpoint": "2023-05-12",
       "execution": "2023-05-05",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1010,7 +1038,7 @@
       "endpoint": "2023-05-19",
       "execution": "2023-05-12",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1018,7 +1046,7 @@
       "endpoint": "2023-05-26",
       "execution": "2023-05-19",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1026,7 +1054,7 @@
       "endpoint": "2023-06-02",
       "execution": "2023-05-26",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1034,7 +1062,7 @@
       "endpoint": "2023-06-09",
       "execution": "2023-06-02",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1042,7 +1070,7 @@
       "endpoint": "2023-06-16",
       "execution": "2023-06-09",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1050,7 +1078,7 @@
       "endpoint": "2023-06-23",
       "execution": "2023-06-16",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1058,7 +1086,7 @@
       "endpoint": "2023-06-30",
       "execution": "2023-06-23",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1066,7 +1094,7 @@
       "endpoint": "2023-07-07",
       "execution": "2023-06-30",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1074,7 +1102,7 @@
       "endpoint": "2023-07-14",
       "execution": "2023-07-07",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1082,7 +1110,7 @@
       "endpoint": "2023-07-21",
       "execution": "2023-07-14",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1090,7 +1118,7 @@
       "endpoint": "2023-07-28",
       "execution": "2023-07-21",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1098,7 +1126,7 @@
       "endpoint": "2023-08-04",
       "execution": "2023-07-28",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1106,7 +1134,7 @@
       "endpoint": "2023-08-11",
       "execution": "2023-08-04",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1114,7 +1142,7 @@
       "endpoint": "2023-08-18",
       "execution": "2023-08-11",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1122,7 +1150,7 @@
       "endpoint": "2023-08-25",
       "execution": "2023-08-18",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1130,7 +1158,7 @@
       "endpoint": "2023-09-01",
       "execution": "2023-08-25",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1138,7 +1166,7 @@
       "endpoint": "2023-09-08",
       "execution": "2023-09-01",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1146,7 +1174,7 @@
       "endpoint": "2023-09-15",
       "execution": "2023-09-08",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1154,7 +1182,7 @@
       "endpoint": "2023-09-22",
       "execution": "2023-09-15",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1162,7 +1190,7 @@
       "endpoint": "2023-09-29",
       "execution": "2023-09-22",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1170,7 +1198,7 @@
       "endpoint": "2023-10-06",
       "execution": "2023-09-29",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1178,7 +1206,7 @@
       "endpoint": "2023-10-13",
       "execution": "2023-10-06",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1186,7 +1214,7 @@
       "endpoint": "2023-10-20",
       "execution": "2023-10-13",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1194,7 +1222,7 @@
       "endpoint": "2023-10-27",
       "execution": "2023-10-20",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1202,7 +1230,7 @@
       "endpoint": "2023-11-03",
       "execution": "2023-10-27",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1210,7 +1238,7 @@
       "endpoint": "2023-11-10",
       "execution": "2023-11-03",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1218,7 +1246,7 @@
       "endpoint": "2023-11-17",
       "execution": "2023-11-10",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1226,7 +1254,7 @@
       "endpoint": "2023-11-24",
       "execution": "2023-11-17",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1234,7 +1262,7 @@
       "endpoint": "2023-12-01",
       "execution": "2023-11-24",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1242,7 +1270,7 @@
       "endpoint": "2023-12-08",
       "execution": "2023-12-01",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1250,7 +1278,7 @@
       "endpoint": "2023-12-15",
       "execution": "2023-12-08",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1258,7 +1286,7 @@
       "endpoint": "2023-12-22",
       "execution": "2023-12-15",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1266,7 +1294,7 @@
       "endpoint": "2023-12-29",
       "execution": "2023-12-22",
       "ic_included": true,
-      "reason": "contained",
+      "reason": "FULL_HORIZON_CONTAINED",
       "split": "holdout"
     },
     {
@@ -1274,10 +1302,69 @@
       "endpoint": "2024-01-05",
       "execution": "2023-12-29",
       "ic_included": false,
-      "reason": "cross_boundary_or_dataset",
+      "reason": "HORIZON_CROSSES_SPLIT_AND_DATASET",
       "split": "holdout"
     }
   ],
-  "runtime_lifecycle_rule": "IC-eligible selected symbols require execution and endpoint opens; terminal/liquidation cannot substitute; missing endpoint is DATA_UNAVAILABLE.",
-  "status": "PASS"
+  "runtime_lifecycle_rule": {
+    "final_liquidation_substitution": false,
+    "missing_required_price_classification": "DATA_UNAVAILABLE",
+    "required_prices": [
+      "execution_open",
+      "endpoint_open"
+    ],
+    "scope": "IC_ELIGIBLE_SELECTED_SYMBOLS",
+    "terminal_close_substitution": false
+  },
+  "status": "PASS",
+  "summary": {
+    "boundaries": [
+      {
+        "decision": "2021-12-30",
+        "endpoint": "2022-01-07",
+        "execution": "2021-12-31",
+        "ic_included": false,
+        "reason": "HORIZON_CROSSES_SPLIT",
+        "split": "train"
+      },
+      {
+        "decision": "2022-12-29",
+        "endpoint": "2023-01-06",
+        "execution": "2022-12-30",
+        "ic_included": false,
+        "reason": "HORIZON_CROSSES_SPLIT",
+        "split": "oos"
+      },
+      {
+        "decision": "2023-12-28",
+        "endpoint": "2024-01-05",
+        "execution": "2023-12-29",
+        "ic_included": false,
+        "reason": "HORIZON_CROSSES_SPLIT_AND_DATASET",
+        "split": "holdout"
+      }
+    ],
+    "splits": {
+      "holdout": {
+        "excluded": 1,
+        "included": 51,
+        "schedule": 52
+      },
+      "oos": {
+        "excluded": 1,
+        "included": 51,
+        "schedule": 52
+      },
+      "train": {
+        "excluded": 9,
+        "included": 44,
+        "schedule": 53
+      }
+    },
+    "total": {
+      "excluded": 11,
+      "included": 146,
+      "schedule": 157
+    }
+  }
 }
