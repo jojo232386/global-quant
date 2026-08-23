@@ -5,8 +5,8 @@ Main baseline: `94100c7ca60444d8e72f0a8ff6fc70f57206aabb`
 
 ```ini
 HYPOTHESIS_ID = EXPL-017
-IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-012
-PRIOR_IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-001 THROUGH EXPL-017-IMPL-011 INVALID_PRE_FORMAL
+IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-013
+PRIOR_IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-001 THROUGH EXPL-017-IMPL-012 INVALID_PRE_FORMAL
 FORMAL_RUN_ID = NONE
 MECHANISM = Cross-sectional momentum changes sign with the broad PIT universe volatility state: calm markets permit slow information diffusion and continuation, while high-volatility markets are dominated by forced deleveraging, correlation spikes, and rebound, producing relative reversal.
 WHY_EDGE_MAY_EXIST = Pool-wide volatility is a state variable for the price-formation mechanism, not a second standalone rank. Conditioning the same ex-ante momentum score on that state can reveal opposing conditional rank relations that cancel in an unconditional test.
@@ -96,5 +96,5 @@ independent correctness review.
 
 `EXPL-017-GOLD-ORACLE-002` was committed before either production attempt and
 its arithmetic passed independent review. It is reused byte-for-byte by
-EXPL-017-IMPL-012 because the hypothesis, mechanism, parameters, costs, and
+EXPL-017-IMPL-013 because the hypothesis, mechanism, parameters, costs, and
 lifecycle contract are unchanged.
