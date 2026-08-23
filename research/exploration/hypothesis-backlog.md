@@ -293,7 +293,7 @@ vol as a gate or target, not as a signal direction.
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
 
-### EXPL-010 · target-vol portfolio of the universe · NOT SELECTED
+### EXPL-010 · target-vol portfolio of the universe · NOT_SELECTED
 - `EXPL-010_FULL`: not run. Route review found that expanding the failed N=2
   target-vol mechanism to the wider Price V1 universe is a breadth change,
   not a sufficiently distinct market mechanism. It is not a fallback or
@@ -461,7 +461,7 @@ vol as a gate or target, not as a signal direction.
 1. EXPL-001, EXPL-003, and EXPL-004: FAIL under Price Alpha batch v1; all are
    recorded in the Factor Graveyard with no parameter rescue.
 2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
-3. EXPL-010_FULL: NOT SELECTED; breadth expansion is not a distinct mechanism.
+3. EXPL-010_FULL: NOT_SELECTED; breadth expansion is not a distinct mechanism.
 4. EXPL-013: DATA_ERROR_STOP before performance evaluation; do not reinterpret
    it as PASS/FAIL or change the frozen exit semantics under the same ID.
 5. EXPL-008: DROPPED_COST_FRAGILE (2026-08-22 screen).
