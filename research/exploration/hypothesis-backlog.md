@@ -289,8 +289,11 @@ vol as a gate or target, not as a signal direction.
   implementation defects invalidated those attempts only.
   `EXPL-017-IMPL-014` is `CORRECTNESS_PASS_PRE_FREEZE` at reviewed
   implementation SHA `f143ad8ee09479e7c74d95acf3af29bdca5bbbd2`.
-  All have `FORMAL_RUN_ID = NONE`; formal OOS/holdout performance remains
-  unread.
+  `EXPL-017-FORMAL-001` froze at `0e0b7f8` but is closed as
+  `PROCESS_DEFECT / NOT_RUN`: its last scheduled decision requires a
+  seven-day IC ending in 2024 while the same freeze prohibits 2024 bars.
+  Formal run count is zero and formal OOS/holdout performance remains unread;
+  EXPL-017 stays active and has no market verdict or Factor Graveyard entry.
 
 ## Family D — Regime and breadth
 
@@ -493,8 +496,8 @@ vol as a gate or target, not as a signal direction.
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
 9. EXPL-017: PRE_FORMAL_ACTIVE; implementation attempt EXPL-017-IMPL-014 is
-   CORRECTNESS_PASS_PRE_FREEZE, with no formal run, market verdict, or Factor
-   Graveyard entry.
+   CORRECTNESS_PASS_PRE_FREEZE. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
+   with run count zero; no market verdict or Factor Graveyard entry exists.
 
 ## Escalation note
 
