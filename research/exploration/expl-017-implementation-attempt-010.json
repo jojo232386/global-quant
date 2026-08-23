@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-010",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "353326c224c959529669d9913f901e69629236a5",
+    "finding": "missing, raising or non-iterable PIT universe access escaped as raw Python exceptions instead of the defined fail-closed PreFormalError classification"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-011 under the unchanged hypothesis and oracle; normalize expected universe accessor and materialization failures while preserving sorted-unique validation."
+}
