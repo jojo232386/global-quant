@@ -29,7 +29,9 @@ def day(value: dt.date) -> int:
     return int(dt.datetime.combine(value, dt.time(), tzinfo=dt.UTC).timestamp() * 1000)
 
 
-def injected_price_dataset(*, terminal_symbol: str | None = None):
+def injected_price_dataset(
+    *, terminal_symbol: str | None = None, terminal_date: dt.date | None = None
+):
     """21-symbol PIT toy with 90 completed bars and no performance outputs."""
     first = dt.date(2020, 10, 1)
     last = dt.date(2022, 1, 15)
@@ -37,7 +39,7 @@ def injected_price_dataset(*, terminal_symbol: str | None = None):
     bars, last_timestamp = {}, {}
     symbols = [f"S{index:02d}" for index in range(21)]
     for number, symbol in enumerate(symbols):
-        terminal = dt.date(2021, 3, 1) if symbol == terminal_symbol else last
+        terminal = (terminal_date or dt.date(2021, 3, 1)) if symbol == terminal_symbol else last
         points = {}
         for index, current in enumerate(all_days):
             if current > terminal:
@@ -192,6 +194,45 @@ def test_injected_engine_carries_incumbent_and_exits_terminal_once_without_forwa
     )
     assert terminal_event.cost == pytest.approx(terminal_event.turnover * expl.BASE_COST)
     assert "S00" not in plan[plan.index(terminal_event) + 1].target
+
+
+def test_injected_engine_marks_asymmetric_drift_before_unchanged_target_rebalance():
+    schedule = review_schedule()
+    baseline = expl.build_correctness_plan(
+        injected_price_dataset(), config=expl.EngineConfig(20, 21), executions=schedule
+    )
+    drifted_data = injected_price_dataset()
+    next_open = drifted_data.bars["S00"][schedule[9]]
+    drifted_data.bars["S00"][schedule[9]] = expl.Bar(
+        next_open.open * 2, next_open.close, next_open.quote_volume
+    )
+    drifted = expl.build_correctness_plan(
+        drifted_data, config=expl.EngineConfig(20, 21), executions=schedule
+    )
+    first_invested, unchanged_rebalance = drifted[8], drifted[9]
+    assert first_invested.target == unchanged_rebalance.target
+    assert "S00" in unchanged_rebalance.target
+    assert unchanged_rebalance.terminal_exit_turnover == 0
+    assert unchanged_rebalance.trade_turnover > 0
+    assert unchanged_rebalance.trade_turnover > baseline[9].trade_turnover
+    assert unchanged_rebalance.turnover == pytest.approx(unchanged_rebalance.trade_turnover)
+
+
+def test_terminal_at_next_scheduled_execution_exits_once_at_that_event():
+    schedule = review_schedule()[:-1]
+    terminal_execution = schedule[9]
+    data = injected_price_dataset(
+        terminal_symbol="S00", terminal_date=dt.datetime.fromtimestamp(
+            terminal_execution / 1000, tz=dt.UTC
+        ).date(),
+    )
+    plan = expl.build_correctness_plan(data, config=expl.EngineConfig(20, 21), executions=schedule)
+    prior_event, terminal_event = plan[8], plan[9]
+    assert "S00" in prior_event.target
+    assert "S00" not in prior_event.terminal_exits
+    assert "S00" not in terminal_event.target
+    assert terminal_event.terminal_exits.count("S00") == 1
+    assert sum(event.terminal_exits.count("S00") for event in plan) == 1
 
 
 def test_injected_engine_rejects_parameter_escape_and_split_outside_contract():

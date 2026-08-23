@@ -240,6 +240,14 @@ def _decision_inputs(
     return selected, scores, statistics.median(per_name_volatility)
 
 
+def _marked_exposure(weight: float, entry: Bar, exit_bar: Bar, *, terminal: bool) -> float:
+    """Mark one exposure only; intentionally never aggregates portfolio PnL."""
+    end_price = exit_bar.close if terminal else exit_bar.open
+    if not (math.isfinite(entry.open) and math.isfinite(end_price) and entry.open > 0 and end_price > 0):
+        raise Expl017Error("DATA_UNAVAILABLE: invalid interval mark")
+    return weight * end_price / entry.open
+
+
 def build_correctness_plan(
     dataset: PriceDataset,
     *,
@@ -278,25 +286,55 @@ def build_correctness_plan(
             threshold = (statistics.median(prior_train) if segment == "train" else fixed_train_threshold)
             state = regime(statistic, threshold)
             target = target_positions(scores, 0.2, state)
-        trade_turnover = turnover(incumbent, target)
         next_ms = dates[index + 1] if index + 1 < len(dates) else final_liquidation_ms
         terminal_exits: list[str] = []
         terminal_exit_turnover = 0.0
+
+        # A contract whose terminal bar is this execution is first marked
+        # open-to-close and exited. It is removed from the new target, so it
+        # cannot be exited, re-entered, then exited a second time.
+        terminal_now = {symbol for symbol in target if dataset.last_timestamp[symbol] == execution_ms}
+        for symbol, weight in list(incumbent.items()):
+            terminal_ms = dataset.last_timestamp[symbol]
+            if terminal_ms < execution_ms:
+                raise Expl017Error(f"DATA_UNAVAILABLE: held symbol was not exited {symbol}")
+            if terminal_ms == execution_ms:
+                terminal_weight = _marked_exposure(
+                    weight, dataset.bar(symbol, execution_ms), dataset.bar(symbol, execution_ms), terminal=True
+                )
+                terminal_exit_turnover += abs(terminal_weight)
+                terminal_exits.append(symbol)
+                incumbent.pop(symbol)
+        target = {symbol: weight for symbol, weight in target.items() if symbol not in terminal_now}
+        trade_turnover = turnover(incumbent, target)
+
+        next_incumbent: dict[str, float] = {}
         if next_ms is not None:
             for symbol, weight in target.items():
                 terminal_ms = dataset.last_timestamp[symbol]
                 if terminal_ms < execution_ms:
                     raise Expl017Error(f"DATA_UNAVAILABLE: selected symbol ended before entry {symbol}")
-                if terminal_ms <= next_ms:
+                entry = dataset.bar(symbol, execution_ms)
+                # Strictly before next execution exits in this interval. An
+                # equality is carried at next-open and settled at that event.
+                if terminal_ms < next_ms:
+                    terminal_weight = _marked_exposure(
+                        weight, entry, dataset.bar(symbol, terminal_ms), terminal=True
+                    )
                     terminal_exits.append(symbol)
-                    terminal_exit_turnover += abs(weight)
-            next_incumbent = {symbol: weight for symbol, weight in target.items() if symbol not in terminal_exits}
+                    terminal_exit_turnover += abs(terminal_weight)
+                else:
+                    next_incumbent[symbol] = _marked_exposure(
+                        weight, entry, dataset.bar(symbol, next_ms), terminal=False
+                    )
         else:
             next_incumbent = dict(target)
         if final_liquidation_ms is not None and index == len(preliminary) - 1:
-            # A final liquidation is an exit once, including a contract whose
-            # last observable bar is the liquidation day.
-            remaining = {symbol: weight for symbol, weight in next_incumbent.items() if symbol not in terminal_exits}
+            # The final bar is marked open-to-close and liquidated once.
+            remaining = {}
+            for symbol, weight in next_incumbent.items():
+                final_bar = dataset.bar(symbol, final_liquidation_ms)
+                remaining[symbol] = _marked_exposure(weight, final_bar, final_bar, terminal=True)
             terminal_exit_turnover += sum(abs(weight) for weight in remaining.values())
             terminal_exits.extend(sorted(remaining))
             next_incumbent = {}
