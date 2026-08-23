@@ -1142,6 +1142,25 @@ def preflight() -> dict:
     return result
 
 
+def health_clock_assessment() -> dict:
+    """Require exchange-clock evidence only while entry authorization can matter."""
+    state, error = read_object_strict(STATE_PATH, "state")
+    if error is None and state is not None and state.get("state") == "DISARMED":
+        return {
+            "detail": "entry gate DISARMED; fresh clock evidence is required before any ARM",
+            "estimate_offset_s": None,
+            "offset_limit_s": CLOCK_OFFSET_LIMIT_S,
+            "passed": True,
+            "qualified_sample_count": 0,
+            "required_qualified_sample_count": CLOCK_MIN_QUALIFIED_SAMPLES,
+            "rtt_limit_s": CLOCK_MAX_RTT_S,
+            "sample_count": 0,
+            "samples": [],
+            "status": "NOT_REQUIRED_DISARMED",
+        }
+    return exchange_clock_assessment()
+
+
 def health() -> dict:
     checks = []
     env = read_env()
@@ -1174,7 +1193,7 @@ def health() -> dict:
         }
     )
 
-    clock = exchange_clock_assessment()
+    clock = health_clock_assessment()
     checks.append(
         {
             "name": "clock offset",

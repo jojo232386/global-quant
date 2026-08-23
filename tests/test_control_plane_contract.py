@@ -250,6 +250,149 @@ def test_clock_assessment_rejects_sustained_offset() -> None:
     assert assessment["estimate_offset_s"] == 2.4
 
 
+def run_preflight_with_clock(tmp_path, monkeypatch, clock: dict) -> tuple[object, dict, dict]:
+    control = load_control()
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"dry_run": True, "exchange": {"key": "", "secret": "", "pair_whitelist": ["ETH/USDT:USDT"]}}))
+    binding = {
+        "environment": "dry_run",
+        "candidate_sha": "c" * 40,
+        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
+        "run_id": "dryrun-clock-contract",
+    }
+    monkeypatch.setattr(control, "AUDIT_DIR", audit_dir)
+    monkeypatch.setattr(control, "STATE_PATH", audit_dir / "state.json")
+    monkeypatch.setattr(control, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(control, "validated_runtime_binding", lambda: (binding, None))
+    monkeypatch.setattr(control, "strategy_has_protections", lambda: (True, []))
+    monkeypatch.setattr(control, "compose_command", lambda: ["docker", "compose"])
+    monkeypatch.setattr(control, "read_audit_chain", lambda: [])
+    monkeypatch.setattr(control, "audit_chain_valid", lambda chain: (True, "chain ok"))
+    monkeypatch.setattr(control, "exchange_clock_assessment", lambda: clock)
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: "opaque-token")
+    monkeypatch.setattr(control, "bot_ping", lambda token: True)
+    monkeypatch.setattr(control, "append_audit", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(control, "dispatch_alert", lambda *args, **kwargs: {"sent": False})
+
+    preflight_result = control.preflight()
+    arm_result = control.arm("clock-contract-authorization", 300)
+    return control, preflight_result, arm_result
+
+
+def test_unreachable_exchange_time_blocks_initial_arm(tmp_path, monkeypatch) -> None:
+    control, preflight_result, arm_result = run_preflight_with_clock(
+        tmp_path,
+        monkeypatch,
+        {
+            "detail": "qualified 1/5; need 3 with RTT <= 2.0s",
+            "estimate_offset_s": None,
+            "passed": False,
+            "samples": [
+                {"attempt": 1, "ok": True, "offset_s": 0.01, "rtt_s": 0.1},
+                *(
+                    {"attempt": attempt, "ok": False, "error": "exchange_time_unreachable"}
+                    for attempt in range(2, 6)
+                ),
+            ],
+            "status": "INSUFFICIENT_QUALIFIED_SAMPLES",
+        },
+    )
+
+    assert preflight_result["verdict"] == "FAIL"
+    assert preflight_result["clock"]["status"] == "INSUFFICIENT_QUALIFIED_SAMPLES"
+    assert control.read_state()["state"] == "DISARMED"
+    assert arm_result["verdict"] == "FAIL"
+    assert arm_result["error"] == "arm requires current state PREFLIGHT_PASS"
+
+
+def test_confirmed_clock_drift_blocks_initial_arm(tmp_path, monkeypatch) -> None:
+    control, preflight_result, arm_result = run_preflight_with_clock(
+        tmp_path,
+        monkeypatch,
+        {
+            "detail": "median offset +2.400s exceeds 2.0s",
+            "estimate_offset_s": 2.4,
+            "passed": False,
+            "samples": [],
+            "status": "SUSTAINED_OFFSET_EXCEEDED",
+        },
+    )
+
+    assert preflight_result["verdict"] == "FAIL"
+    assert preflight_result["clock"]["status"] == "SUSTAINED_OFFSET_EXCEEDED"
+    assert control.read_state()["state"] == "DISARMED"
+    assert arm_result["verdict"] == "FAIL"
+    assert arm_result["error"] == "arm requires current state PREFLIGHT_PASS"
+
+
+def test_disarmed_health_does_not_query_exchange_clock(tmp_path, monkeypatch) -> None:
+    control = load_control()
+    audit_records = []
+    monkeypatch.setattr(control, "STATE_PATH", tmp_path / "state.json")
+    control.write_json_atomic(control.STATE_PATH, {"schema_version": 1, "state": "DISARMED"})
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: "opaque-token")
+    monkeypatch.setattr(control, "bot_ping", lambda token: True)
+    monkeypatch.setattr(control, "bot_last_process_age_s", lambda token: 0.0)
+    monkeypatch.setattr(control, "bot_open_trades", lambda token: [])
+    monkeypatch.setattr(
+        control,
+        "exchange_clock_assessment",
+        lambda: (_ for _ in ()).throw(AssertionError("DISARMED health queried Binance time")),
+    )
+    monkeypatch.setattr(
+        control,
+        "append_audit",
+        lambda *args, **kwargs: audit_records.append((args, kwargs)) or {"ok": True},
+    )
+
+    result = control.health()
+
+    assert result["verdict"] == "HEALTHY"
+    assert result["clock"]["status"] == "NOT_REQUIRED_DISARMED"
+    assert result["clock"]["sample_count"] == 0
+    assert audit_records[0][0][:2] == ("health", "gmaq-control")
+    assert audit_records[0][1]["verdict"] == "HEALTHY"
+
+
+def test_armed_health_keeps_clock_fail_closed(monkeypatch) -> None:
+    control = load_control()
+    disarms = []
+    monkeypatch.setattr(
+        control,
+        "read_object_strict",
+        lambda path, label: ({"schema_version": 1, "state": "ARMED"}, None),
+    )
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: "opaque-token")
+    monkeypatch.setattr(control, "bot_ping", lambda token: True)
+    monkeypatch.setattr(control, "bot_last_process_age_s", lambda token: 0.0)
+    monkeypatch.setattr(control, "bot_open_trades", lambda token: [])
+    monkeypatch.setattr(
+        control,
+        "exchange_clock_assessment",
+        lambda: {
+            "detail": "median offset +2.400s exceeds 2.0s",
+            "estimate_offset_s": 2.4,
+            "passed": False,
+            "samples": [],
+            "status": "SUSTAINED_OFFSET_EXCEEDED",
+        },
+    )
+    monkeypatch.setattr(control, "append_audit", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(control, "disarm", lambda reason: disarms.append(reason) or {"ok": True})
+    monkeypatch.setattr(control, "dispatch_alert", lambda *args, **kwargs: {"sent": False})
+
+    result = control.health()
+
+    assert result["verdict"] == "UNKNOWN"
+    assert result["clock"]["status"] == "SUSTAINED_OFFSET_EXCEEDED"
+    assert disarms == ["health_unknown"]
+
+
 def test_clock_assessment_rejects_insufficient_low_latency_evidence() -> None:
     control = load_control()
     assessment = control.assess_exchange_clock(

@@ -297,27 +297,9 @@ if baseline["open_trades"] or baseline["open_orders"]:
     raise SystemExit(f"STOP: trade baseline is not flat: {baseline}")
 print(json.dumps(baseline, sort_keys=True))
 ' >"$EVIDENCE_DIR/trade-baseline.json"
+[[ $(json_verdict <"$EVIDENCE_DIR/preflight-after-kill.json") == PASS ]]
 ./scripts/gmaq-control arm --authorization-id "$AUTHORIZATION_ID" --ttl-seconds 3600 >"$EVIDENCE_DIR/arm.json"
-append_event E0 PASS "entry gates and kill rehearsal passed; soak clock started"
-
-START_EPOCH=$(date +%s)
-END_EPOCH=$((START_EPOCH + HOURS * 3600))
-NEXT_HEALTH=$START_EPOCH
-NEXT_DUPLICATE=$START_EPOCH
-NEXT_PAUSE=$((START_EPOCH + 6 * 3600))
-NEXT_RESTART=$((START_EPOCH + 12 * 3600))
-NEXT_REFRESH=$((START_EPOCH + 45 * 60))
-NETWORK_DONE=0
-BACKUP_DONE=0
-MAX_LOOP_GAP_SECONDS=300
-LAST_LOOP_EPOCH=$START_EPOCH
-
-refresh_arm() {
-  local reason=$1 suffix=$2
-  ./scripts/gmaq-control disarm --reason "$reason" >/dev/null
-  record_command "$EVIDENCE_DIR/preflight-${suffix}.json" ./scripts/gmaq-control preflight >/dev/null
-  ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-${suffix}" --ttl-seconds 3600 >/dev/null
-}
+append_event E0 PASS "entry gates and kill rehearsal passed; one canary authorization opened"
 
 duplicate_scan() {
   local container_name
@@ -410,8 +392,29 @@ if not passed:
 ' "$baseline_trade_id" "$baseline_order_id"
 }
 
+wait_for_canary_completion() {
+  local deadline now code
+  # ARM exists only to obtain one complete dry-run lifecycle. Do not renew it:
+  # after the lifecycle completes, the remaining observation is DISARMED.
+  deadline=$(( $(date +%s) + 3600 ))
+  while true; do
+    set +e
+    verify_trade_lifecycle >"$EVIDENCE_DIR/trade-lifecycle.json"
+    code=$?
+    set -e
+    if (( code == 0 )); then
+      return 0
+    fi
+    now=$(date +%s)
+    if (( now >= deadline )); then
+      echo "STOP: canary lifecycle did not complete before one-hour authorization expiry" >&2
+      return 1
+    fi
+    sleep 10
+  done
+}
+
 backup_restore_check() {
-  ./scripts/gmaq-control disarm --reason soak_backup_check >/dev/null
   local manifest image runtime_volume backup_volume
   manifest="$EVIDENCE_DIR/manifest.json"
   image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["image_ref"])' "$manifest")
@@ -436,8 +439,24 @@ print(f"DB_BACKUP_RESTORE=PASS sha256={before} backup={backup}")
 ' >"$EVIDENCE_DIR/backup-restore.md"
   "${COMPOSE[@]}" start freqtrade >/dev/null
   wait_ping
-  refresh_arm soak_backup_complete backup
 }
+
+wait_for_canary_completion
+./scripts/gmaq-control disarm --reason soak_canary_lifecycle_complete >/dev/null
+append_event E0 PASS "canary lifecycle completed; entry gate disarmed before observation"
+
+# The observation clock starts only after entries are disabled. Health,
+# reconcile, audit, and duplicate checks remain active, but this is no longer
+# the legacy continuously-ARMED 48h reliability protocol.
+START_EPOCH=$(date +%s)
+END_EPOCH=$((START_EPOCH + HOURS * 3600))
+NEXT_HEALTH=$START_EPOCH
+NEXT_DUPLICATE=$START_EPOCH
+NEXT_RESTART=$((START_EPOCH + 12 * 3600))
+NETWORK_DONE=0
+BACKUP_DONE=0
+MAX_LOOP_GAP_SECONDS=300
+LAST_LOOP_EPOCH=$START_EPOCH
 
 while true; do
   NOW=$(date +%s)
@@ -454,6 +473,7 @@ while true; do
   if (( NOW >= NEXT_HEALTH )); then
     record_command "$EVIDENCE_DIR/health-samples.jsonl" ./scripts/gmaq-control health >/dev/null
     record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
+    record_command "$EVIDENCE_DIR/audit-verify-records.jsonl" ./scripts/gmaq-control audit verify >/dev/null
     append_event E1 HEALTHY "six-hour health sample"
     append_event E2 MATCH "six-hour REST/database reconciliation"
     NEXT_HEALTH=$((NEXT_HEALTH + 6 * 3600))
@@ -463,34 +483,24 @@ while true; do
     append_event E8 PASS "audit and runtime identity scan"
     NEXT_DUPLICATE=$((NEXT_DUPLICATE + 12 * 3600))
   fi
-  if (( NOW >= NEXT_PAUSE )); then
-    ./scripts/gmaq-control pause >/dev/null
-    refresh_arm soak_pause_resume "resume-$NOW"
-    append_event E3 PASS "fail-closed pause, preflight and re-arm"
-    NEXT_PAUSE=$((NEXT_PAUSE + 12 * 3600))
-  fi
   if (( NOW >= NEXT_RESTART )); then
-    ./scripts/gmaq-control disarm --reason soak_clean_restart >/dev/null
     "${COMPOSE[@]}" restart --timeout 30 freqtrade >/dev/null
     wait_ping
     ./scripts/gmaq-runtime-manifest --expected-state DISARMED >/dev/null
-    refresh_arm soak_restart_complete "restart-$NOW"
     record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
     append_event E4 PASS "same-binding clean restart and reconciliation"
     append_event E7 PASS "API reconnected after restart"
     NEXT_RESTART=$((NEXT_RESTART + 24 * 3600))
   fi
   if (( NETWORK_DONE == 0 && NOW >= START_EPOCH + 3600 )); then
-    ./scripts/gmaq-control disarm --reason soak_network_exercise >/dev/null
     CONTAINER_NAME=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["container"]["name"])' "$EVIDENCE_DIR/manifest.json")
     NETWORK=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$CONTAINER_NAME")
     docker network disconnect -f "$NETWORK" "$CONTAINER_NAME"
     sleep 15
     docker network connect "$NETWORK" "$CONTAINER_NAME"
     wait_ping
-    record_command "$EVIDENCE_DIR/preflight-network.json" ./scripts/gmaq-control preflight >/dev/null
+    record_command "$EVIDENCE_DIR/health-samples.jsonl" ./scripts/gmaq-control health >/dev/null
     record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile >/dev/null
-    ./scripts/gmaq-control arm --authorization-id "${AUTHORIZATION_ID}-network" --ttl-seconds 3600 >/dev/null
     append_event E5 PASS "network interruption recovered with reconciliation"
     append_event E7 PASS "API reconnected after network interruption"
     NETWORK_DONE=1
@@ -499,10 +509,6 @@ while true; do
     backup_restore_check
     append_event E6 PASS "stopped database copy restored byte-for-byte and passed integrity_check"
     BACKUP_DONE=1
-  fi
-  if (( NOW >= NEXT_REFRESH )); then
-    refresh_arm soak_ttl_refresh "refresh-$NOW"
-    NEXT_REFRESH=$((NOW + 45 * 60))
   fi
   sleep 60
 done
@@ -519,7 +525,6 @@ hours = int(sys.argv[2])
 required = {
     "E1": (hours + 5) // 6,
     "E2": (hours + 5) // 6,
-    "E3": ((hours - 7) // 12) + 1,
     "E4": ((hours - 13) // 24) + 1,
     "E5": 1,
     "E6": 1,
@@ -534,13 +539,12 @@ PY
 ./scripts/gmaq-control disarm --reason soak_final_exit >/dev/null
 record_command "$EVIDENCE_DIR/final-exit.json" ./scripts/gmaq-control exit
 [[ $(json_verdict <"$EVIDENCE_DIR/final-exit.json") == ZERO_POSITIONS_AND_ORDERS ]]
-verify_trade_lifecycle >"$EVIDENCE_DIR/trade-lifecycle.json"
 record_command "$EVIDENCE_DIR/final-audit-verify.json" ./scripts/gmaq-control audit verify
 [[ $(json_verdict <"$EVIDENCE_DIR/final-audit-verify.json") == VERIFIED ]]
-write_verdict PASS "all mandatory 48-72h dry-run exercises and final zero proof completed"
+write_verdict OBSERVATION_ONLY_PASS "canary completed before DISARMED runtime observation; not a legacy continuously-ARMED reliability PASS"
 FINISHED=1
 ./scripts/gmaq stop >/dev/null
 RUNTIME_STARTED=0
 trap - EXIT INT TERM
-echo "RELIABILITY_RESULT=PASS"
+echo "RELIABILITY_RESULT=OBSERVATION_ONLY_PASS"
 echo "EVIDENCE_DIR=$EVIDENCE_DIR"
