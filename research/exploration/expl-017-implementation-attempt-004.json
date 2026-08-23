@@ -1,0 +1,21 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-004",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "e19945fdd69e8be34c7a6a1c25ebc4b984754dca",
+    "findings": [
+      "a contemporaneously observed terminal exit was not persisted as inactive, so a stale PIT member could be selected and re-entered at the next decision",
+      "marking time and scheduled rebalance time shared one clock, so public lifecycle advancement could break the frozen execution cadence"
+    ]
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-005 under the unchanged hypothesis and oracle; no formal performance until independent correctness approval."
+}
