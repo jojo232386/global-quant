@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-011",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "cea1c98f9cf6f17af5cd3b9c08a9f5a8f7581876",
+    "finding": "heterogeneous or unhashable universe elements could escape raw errors, and a bare string could be silently reinterpreted as one-character symbols"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-012 under the unchanged hypothesis and oracle; validate the universe container and canonical string elements before hashing and sorting."
+}
