@@ -29,6 +29,7 @@ VERDICT_TOKENS = (
     "DROPPED",
     "BLOCKED_ON_DATA",
     "DATA_ERROR_STOP",
+    "PROCESS_DEFECT_STOP",
     "NOT_SELECTED",
 )
 BANNED_PHRASES = ("cross-market confirmation", "跨市场互证")

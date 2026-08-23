@@ -270,6 +270,23 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: risk-overlay family; tested as an overlay on EXPL-001's
   base, not standalone.
 
+### EXPL-017 · cross-sectional momentum × broad-volatility state · PROCESS_DEFECT_STOP
+- The Lead froze a genuinely distinct two-direction interaction: continuation
+  in calm broad-market volatility and cross-sectional reversal in high
+  volatility, using the fixed EXPL-001 momentum measurement but no dispersion
+  gate, volatility direction rank, liquidity tilt, or per-name sizing.
+- Price V1 data admission passed and a pre-implementation Gold Sample covered
+  normal, timestamp, and terminal-contract cases. No formal performance was
+  run or revealed.
+- Independent correctness review found two process defects. The final defect
+  used terminal lifecycle knowledge unavailable at the decision timestamp and
+  failed to normalize marked incumbent exposures by portfolio NAV before
+  turnover. The second independent defect triggered the mandatory stop.
+- Evidence: `expl-017-process-defect-stop.json`. This is neither hypothesis
+  failure nor data unavailability. It must not enter the Factor Graveyard or
+  be interpreted as evidence for or against the market mechanism. Any future
+  retry needs a new experiment id and a new contract.
+
 ## Family D — Regime and breadth
 
 ### EXPL-011 · breadth risk switch · DRAFT
@@ -470,6 +487,9 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
+9. EXPL-017: PROCESS_DEFECT_STOP after the second independent correctness
+   defect; no freeze, formal run, hypothesis verdict, or Factor Graveyard
+   entry is permitted under this id.
 
 ## Escalation note
 
