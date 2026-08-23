@@ -1,10 +1,13 @@
 # EXPL-017 Lead Research Design
 
-Status: `LEAD_DESIGN_ACCEPTED_FOR_IMPLEMENTATION`  
+Status: `HYPOTHESIS_ACTIVE_PRE_FORMAL`
 Main baseline: `94100c7ca60444d8e72f0a8ff6fc70f57206aabb`
 
 ```ini
 HYPOTHESIS_ID = EXPL-017
+IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-002
+PRIOR_IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-001 INVALID_PRE_FORMAL
+FORMAL_RUN_ID = NONE
 MECHANISM = Cross-sectional momentum changes sign with the broad PIT universe volatility state: calm markets permit slow information diffusion and continuation, while high-volatility markets are dominated by forced deleveraging, correlation spikes, and rebound, producing relative reversal.
 WHY_EDGE_MAY_EXIST = Pool-wide volatility is a state variable for the price-formation mechanism, not a second standalone rank. Conditioning the same ex-ante momentum score on that state can reveal opposing conditional rank relations that cancel in an unconditional test.
 DELTA_FROM_FAILED_WORK = EXPL-001 always mapped winners long and losers short and used return dispersion only as an on/off gate; EXPL-017 removes that gate and reverses the rank-to-position mapping in high broad-market volatility. EXPL-003 ranked volatility itself as direction; EXPL-017 never ranks names by volatility for direction. EXPL-004 changed liquidity weights; EXPL-017 uses equal weights within legs. EXPL-008 was a BTC/ETH per-asset TSMOM low-vol on/off gate; EXPL-017 is a real PIT cross-section and tests a two-direction interaction. EXPL-014 is a sizing proposal; EXPL-017 keeps equal leg weights.
@@ -77,11 +80,16 @@ committed.
 ## Stop and classification rules
 
 - Dataset cannot satisfy this design: `DATA_UNAVAILABLE` for EXPL-017 only.
-- Gold sample or implementation invariant fails: `PROCESS_DEFECT`; no formal
-  run.
+- Gold oracle or implementation invariant fails: mark only the current
+  `IMPLEMENTATION_ATTEMPT_ID` as `INVALID_PRE_FORMAL`; the hypothesis remains
+  active and no market conclusion exists.
 - Frozen gates fail after the one allowed run: `HYPOTHESIS_FAIL` and enter the
   Factor Graveyard.
 - Every frozen gate passes: `EXPLORATION_PASS` only.
 
 Price V1 is survivor-biased and exploration-only. `PROMOTABLE_ALPHA`,
 `STRATEGY_READY`, and `LIVE_READY` are prohibited conclusions.
+
+This document fixes the EXPL-017 mechanism. It is not a formal freeze commit.
+No `FORMAL_RUN_ID` may exist until a clean implementation attempt passes the
+independent correctness review.

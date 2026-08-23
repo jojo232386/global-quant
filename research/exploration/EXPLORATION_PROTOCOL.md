@@ -16,6 +16,32 @@ Two rules summarize the whole document:
 1. Exploration output is never evidence.
 2. Nothing graduates without a fresh formal preregistration.
 
+## Research identity and pre-formal semantics
+
+Three identifiers have separate meanings and must never be collapsed:
+
+- `HYPOTHESIS_ID` identifies the economic mechanism. Pre-formal code defects
+  do not fail or permanently close it.
+- `IMPLEMENTATION_ATTEMPT_ID` identifies one pre-formal code-and-review
+  attempt. It may be marked `INVALID_PRE_FORMAL` without creating any market
+  conclusion; a clean attempt may follow under the same hypothesis and
+  unchanged mechanism.
+- `FORMAL_RUN_ID` is created only after the selected implementation attempt
+  passes every correctness review and immediately before the formal contract
+  is frozen and committed. It binds the one permitted formal OOS/holdout run.
+
+Pre-formal implementation may be repaired and independently reviewed as many
+times as needed. It may use synthetic fixtures and dataset identity metadata,
+but must not calculate, inspect, print, or serialize formal OOS/holdout
+performance. The hypothesis, mechanism, primary parameters, data contract,
+costs, splits, and success thresholds remain fixed. A defect invalidates only
+the current implementation attempt.
+
+After correctness passes, mint `FORMAL_RUN_ID`, freeze and commit the complete
+contract, and only then allow the single formal run. Once formal results are
+exposed, parameter rescue is forbidden; any mechanism, parameter, data, split,
+cost, or judgment-contract change requires a new hypothesis/experiment id.
+
 ## Hard boundaries
 
 - **Pre-2024 containment.** Cheap card screens are train-only. A stricter
@@ -89,8 +115,9 @@ rescued.
 
 - Backlog entries, commit messages, the vault, and agent-to-agent
   summaries record only status (`DRAFT / FROZEN BEFORE RUN / SCREENED / KEPT /
-  DROPPED / EXPLORATION_PASS / FAIL / BLOCKED_ON_DATA`), the primary config,
-  and non-numeric reasons.
+  DROPPED / PRE_FORMAL_ACTIVE / CORRECTNESS_PASS_PRE_FREEZE /
+  INVALID_PRE_FORMAL / EXPLORATION_PASS / FAIL / BLOCKED_ON_DATA`), the
+  primary config, and non-numeric reasons.
 - All performance figures live exclusively in the exploration results
   JSON under `research/exploration/`.
 

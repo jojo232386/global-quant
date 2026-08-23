@@ -21,6 +21,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPLORATION_DIR = ROOT / "research" / "exploration"
 VERDICT_TOKENS = (
     "EXPLORATION_PASS",
+    "CORRECTNESS_PASS_PRE_FREEZE",
+    "PRE_FORMAL_ACTIVE",
+    "INVALID_PRE_FORMAL",
     "FAIL",
     "KEPT_PRIMARY_SELECTED",
     "KEPT_THIN",

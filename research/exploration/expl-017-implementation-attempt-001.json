@@ -1,0 +1,23 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-001",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_findings": [
+    "terminal-day filtering used lifecycle information unavailable at the decision timestamp",
+    "incumbent turnover used marked exposures without normalization by actual portfolio NAV",
+    "the first implementation's gold replay was not sufficiently independent from production behavior"
+  ],
+  "preserved_evidence": {
+    "branch": "codex/expl017-momentum-vol-regime",
+    "last_commit": "02fd8a331be2965fca8398ac392e5250bcba738c",
+    "draft_pr": "https://github.com/jojo232386/global-quant/pull/30"
+  },
+  "allowed_next_step": "Create a clean implementation attempt under unchanged EXPL-017; no formal performance until independent correctness approval."
+}

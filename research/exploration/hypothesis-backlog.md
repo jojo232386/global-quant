@@ -270,6 +270,24 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: risk-overlay family; tested as an overlay on EXPL-001's
   base, not standalone.
 
+### EXPL-017 · cross-sectional momentum × broad-volatility state · PRE_FORMAL_ACTIVE
+- Hypothesis status: active; no formal freeze, formal run, performance result,
+  market conclusion, or Factor Graveyard entry exists.
+- Mechanism: keep the frozen EXPL-001 7/14/28 cross-sectional momentum
+  measurement, remove its dispersion gate, and map the same rank to
+  continuation in calm broad-universe volatility and reversal in high
+  broad-universe volatility. Volatility is a market state, never a standalone
+  per-name direction rank or sizing input.
+- Delta: unlike EXPL-001 this is a two-direction state interaction, not an
+  always-continuation rank with an on/off dispersion gate; unlike EXPL-003 it
+  does not trade the volatility rank; unlike EXPL-004 it has no liquidity
+  tilt; unlike EXPL-008 it is PIT cross-sectional and reverses direction in
+  high volatility rather than gating BTC/ETH TSMOM off; unlike EXPL-014 it
+  does not vol-scale weights.
+- `EXPL-017-IMPL-001 = INVALID_PRE_FORMAL`: implementation defects invalidated
+  that attempt only. `EXPL-017-IMPL-002` is the clean attempt. Both have
+  `FORMAL_RUN_ID = NONE`; formal OOS/holdout performance remains unread.
+
 ## Family D — Regime and breadth
 
 ### EXPL-011 · breadth risk switch · DRAFT
@@ -470,6 +488,8 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
+9. EXPL-017: PRE_FORMAL_ACTIVE under clean implementation attempt
+   EXPL-017-IMPL-002; no market verdict or Factor Graveyard entry.
 
 ## Escalation note
 

@@ -1,7 +1,10 @@
 {
-  "artifact_class": "PRE_IMPLEMENTATION_HAND_CALCULATED_GOLD_SAMPLE",
-  "experiment_id": "EXPL-017",
-  "notes": "Small windows exercise the exact production algebra. Percent values below are decimals. Baseline cost is turnover times 0.0015.",
+  "artifact_class": "PRE_IMPLEMENTATION_INDEPENDENT_GOLD_ORACLE",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-002",
+  "oracle_id": "EXPL-017-GOLD-ORACLE-002",
+  "oracle_contract": "Committed before production runner; expected values are generated only by tests/oracles/expl_017_impl_002_oracle.py, which imports no production module.",
+  "notes": "Small windows exercise the fixed algebra. Portfolio state uses signed notionals plus cash; drifted weights are divided by actual NAV. Baseline cost is 0.0015 per unit turnover.",
   "cases": [
     {
       "case": "A_NORMAL_CONTINUOUS_CALM",
@@ -62,12 +65,24 @@
       "signal": "continuation: long A, short E",
       "target_position": {"A": 0.5, "E": -0.5},
       "execution_timestamp": "2021-03-05T00:00:00Z-open",
-      "turnover": 1.5,
-      "turnover_detail": {"entry_both_legs": 1.0, "terminal_exit_E": 0.5},
-      "cost": 0.00225,
+      "entry_turnover": 1.0,
+      "entry_cost_dollars": 0.0015,
+      "terminal_nav_before_exit": 1.0985,
+      "terminal_exit_turnover": 0.36413290851160673,
+      "terminal_exit_cost_dollars": 0.0006,
       "next_period_return": {"A": 0.1, "E_terminal_open_to_close": -0.2},
-      "portfolio_pnl": {"gross": 0.15, "net": 0.14775},
+      "portfolio_nav_after_costs_and_marks": 1.1479,
       "lifecycle_contract": "E is valued open-to-terminal-close, exited once with cost, never forward-filled"
+    },
+    {
+      "case": "D_NAV_NORMALIZED_INCUMBENT_DRIFT",
+      "input_state": {"nav_before_entry": 1.0, "target_position": {"A": 0.5, "E": -0.5}, "entry_cost_dollars": 0.0015},
+      "mark_to_next_execution": {"A": 2.0, "E": 1.0},
+      "expected_nav": 1.4985,
+      "expected_drifted_weight": {"A": 0.667334000667334, "E": -0.333667000333667},
+      "unchanged_target_position": {"A": 0.5, "E": -0.5},
+      "expected_turnover": 0.33366700033366703,
+      "expected_rebalance_cost_dollars": 0.00075
     }
   ]
 }
