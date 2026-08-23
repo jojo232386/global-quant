@@ -20,6 +20,8 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPLORATION_DIR = ROOT / "research" / "exploration"
 VERDICT_TOKENS = (
+    "EXPLORATION_PASS",
+    "FAIL",
     "KEPT_PRIMARY_SELECTED",
     "KEPT_THIN",
     "KEPT_N2_ONLY",
