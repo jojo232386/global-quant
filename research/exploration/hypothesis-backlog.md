@@ -284,9 +284,10 @@ vol as a gate or target, not as a signal direction.
   tilt; unlike EXPL-008 it is PIT cross-sectional and reverses direction in
   high volatility rather than gating BTC/ETH TSMOM off; unlike EXPL-014 it
   does not vol-scale weights.
-- `EXPL-017-IMPL-001`, `EXPL-017-IMPL-002`, `EXPL-017-IMPL-003`, and
-  `EXPL-017-IMPL-004` are `INVALID_PRE_FORMAL`: implementation defects
-  invalidated those attempts only. `EXPL-017-IMPL-005` is the clean attempt. All have
+- `EXPL-017-IMPL-001`, `EXPL-017-IMPL-002`, `EXPL-017-IMPL-003`,
+  `EXPL-017-IMPL-004`, and `EXPL-017-IMPL-005` are `INVALID_PRE_FORMAL`:
+  implementation defects invalidated those attempts only.
+  `EXPL-017-IMPL-006` is the clean attempt. All have
   `FORMAL_RUN_ID = NONE`; formal OOS/holdout performance remains unread.
 
 ## Family D — Regime and breadth
@@ -490,7 +491,7 @@ vol as a gate or target, not as a signal direction.
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
 9. EXPL-017: PRE_FORMAL_ACTIVE under clean implementation attempt
-   EXPL-017-IMPL-005; no market verdict or Factor Graveyard entry.
+   EXPL-017-IMPL-006; no market verdict or Factor Graveyard entry.
 
 ## Escalation note
 
