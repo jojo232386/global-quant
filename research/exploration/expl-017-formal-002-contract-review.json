@@ -1,0 +1,43 @@
+{
+  "artifact_class": "FORMAL_CONTRACT_INDEPENDENT_REVIEW",
+  "formal_run_id": "EXPL-017-FORMAL-002",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-014",
+  "reviewed_freeze_sha": "5e361969baf3f503ac6e6dbe937eed00637699bf",
+  "reviewed_freeze_contract_sha256": "f04b333e2f65d07a32859016f925e0f3e5d5d5427857f2d380658071b26ec72e",
+  "horizon_preflight_status": "PASS",
+  "horizon_preflight_sha256": "7dd47bf88491576fb1f7f68fc1fb7554037e1fa4d648ed2cd603ebd0f8c65113",
+  "approve": false,
+  "stop": true,
+  "status": "INVALID_BEFORE_EXECUTION",
+  "reason": "FORMAL_RUNNER_NOT_BOUND_OR_IMPLEMENTED",
+  "classification": "PROCESS_DEFECT",
+  "formal_result": "NOT_RUN",
+  "formal_run_count": 0,
+  "market_conclusion": null,
+  "alpha_status": null,
+  "factor_graveyard_entry": false,
+  "review_findings": {
+    "horizon_complete": "PASS_STATIC_ENUMERATION",
+    "split_containment": "PASS_STATIC",
+    "lookahead": "NO_STATIC_FINDING",
+    "metric_mutation": "NO_UNAUTHORIZED_STATIC_MUTATION_FOUND",
+    "runtime_enforcement": "UNPROVEN",
+    "lifecycle_ambiguity": "CONTRACT_TEXT_CLEAR_BUT_EXECUTION_BINDING_ABSENT",
+    "blocking_finding": "The bound reviewed implementation still declares FORMAL_RUN_ID=None and unconditionally raises FORMAL_RUN_LOCKED. It contains no formal IC consumer, exact endpoint-open admission, DATA_UNAVAILABLE classification, or one-process formal output implementation."
+  },
+  "required_before_any_future_freeze": [
+    "Commit the complete formal runner or consumer before freeze.",
+    "Add non-self-referential synthetic behavior tests for exact endpoint-open admission and prohibited terminal/final-liquidation substitution.",
+    "Prove that ic_included=false affects IC admission only and leaves portfolio NAV, holdings, costs, split continuity, and gates unchanged.",
+    "Bind runner, tests, implementation, dataset, oracle, and horizon-preflight identities in a new formal run contract before independent review."
+  ],
+  "performance_state": {
+    "formal_dataset_loaded": false,
+    "formal_performance_computed": false,
+    "formal_performance_read": false,
+    "formal_performance_printed": false,
+    "formal_performance_serialized": false
+  },
+  "reviewer_role": "independent read-only Sol reviewer"
+}

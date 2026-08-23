@@ -292,6 +292,11 @@ vol as a gate or target, not as a signal direction.
   `EXPL-017-FORMAL-001` froze at `0e0b7f8` but is closed as
   `PROCESS_DEFECT / NOT_RUN`: its last scheduled decision requires a
   seven-day IC ending in 2024 while the same freeze prohibits 2024 bars.
+  `EXPL-017-FORMAL-002` passed its static horizon preflight (157 schedule
+  rows; IC 44/51/51 in train/OOS/holdout) and froze at `5e36196`, but an
+  independent contract review closed it as `INVALID_BEFORE_EXECUTION` because
+  the bound reviewed implementation remains formal-locked and no complete
+  formal IC/runtime consumer was committed before freeze.
   Formal run count is zero and formal OOS/holdout performance remains unread;
   EXPL-017 stays active and has no market verdict or Factor Graveyard entry.
 
@@ -497,7 +502,9 @@ vol as a gate or target, not as a signal direction.
    unlock a funding-conditioned card).
 9. EXPL-017: PRE_FORMAL_ACTIVE; implementation attempt EXPL-017-IMPL-014 is
    CORRECTNESS_PASS_PRE_FREEZE. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
-   with run count zero; no market verdict or Factor Graveyard entry exists.
+   and EXPL-017-FORMAL-002 is INVALID_BEFORE_EXECUTION after contract review;
+   aggregate formal run count remains zero, with no market verdict or Factor
+   Graveyard entry.
 
 ## Escalation note
 
