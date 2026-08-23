@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-006",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "4c32b2132f3dec169b73513eb2d0d0a569cc7349",
+    "finding": "terminal status was persisted only for held exits, so a contemporaneously inactive but unheld PIT member could remain eligible for stale-PIT ranking"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-007 under the unchanged hypothesis and oracle; observe lifecycle state known through decision close for every PIT member before ranking without reading t+1 lifecycle."
+}
