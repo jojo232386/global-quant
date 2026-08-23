@@ -188,6 +188,64 @@ def test_reconcile_api_failure_dispatches_alert(monkeypatch) -> None:
     ]
 
 
+def test_reconcile_retries_a_transient_rest_database_race(monkeypatch) -> None:
+    control = load_control("gmaq_control_reconcile_retry_test")
+    database_reads = iter(
+        [
+            {
+                "trades": [
+                    {
+                        "trade_id": 1,
+                        "pair": "ETH/USDT:USDT",
+                        "is_open": True,
+                        "is_short": False,
+                        "amount": 0.01,
+                        "open_rate": 2500.0,
+                    }
+                ],
+                "orders": [],
+            },
+            {"trades": [], "orders": []},
+        ]
+    )
+    audits = []
+    disarms = []
+    monkeypatch.setattr(control, "read_env", lambda: {})
+    monkeypatch.setattr(control, "api_login", lambda env: "opaque-token")
+    monkeypatch.setattr(control, "bot_open_trades", lambda token: [])
+    monkeypatch.setattr(control, "bot_db_snapshot", lambda env: next(database_reads))
+    monkeypatch.setattr(control.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        control,
+        "append_audit",
+        lambda *args, **kwargs: audits.append((args, kwargs)) or {"ok": True},
+    )
+    monkeypatch.setattr(control, "disarm", lambda reason: disarms.append(reason) or {"ok": True})
+
+    result = control.reconcile()
+
+    assert result["verdict"] == "MATCH"
+    assert result["snapshot_attempts"] == 2
+    assert audits == [
+        (
+            ("reconcile", "gmaq-control"),
+            {
+                "refs": {
+                    "open_trades": 0,
+                    "open_orders": 0,
+                    "partial_orders": 0,
+                    "unknown_outcomes": [],
+                    "mismatches": [],
+                    "snapshot_sha256": result["snapshot_sha256"],
+                    "snapshot_attempts": 2,
+                },
+                "verdict": "MATCH",
+            },
+        )
+    ]
+    assert disarms == []
+
+
 def test_exit_api_failure_dispatches_alert(monkeypatch) -> None:
     control = load_control("gmaq_control_exit_api_failure_test")
     alerts = []

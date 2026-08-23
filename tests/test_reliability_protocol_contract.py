@@ -25,14 +25,14 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
     text = PROTOCOL.read_text()
     for section in ("Entry gates", "Scheduled exercises", "Exit criteria", "Evidence package", "Acceptance"):
         assert f"## {section}" in text, f"missing section: {section}"
-    for exercise in ("E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"):
+    for exercise in ("E1", "E2", "E4", "E5", "E6", "E7", "E8"):
         assert exercise in text, f"missing exercise: {exercise}"
     flat = " ".join(text.split())
     assert "48–72 hours" in flat
     assert "suspended host time never counts" in flat
     assert "zero open positions" in flat
     assert "zero open orders" in flat
-    assert "A zero-trade soak fails" in flat
+    assert "A zero-trade run fails" in flat
     assert "trade-baseline.json" in flat
     assert "trade-lifecycle.json" in flat
     assert "MATCH verdicts" in flat
@@ -47,6 +47,10 @@ def test_protocol_defines_entry_exercises_exit_and_evidence() -> None:
     assert "scripts/reliability-soak" in text
     assert "scripts/gmaq-runtime-manifest" in text
     assert "SMOKE_ONLY_PASS" in text
+    assert "OBSERVATION_ONLY_PASS" in text
+    assert "legacy continuously-ARMED 48-hour" in flat
+    scheduled = text[text.index("## Scheduled exercises") : text.index("## Exit criteria")]
+    assert "| E3 |" not in scheduled
 
 
 def test_protocol_exit_requires_hash_chain_and_full_exercise_coverage() -> None:
@@ -83,9 +87,57 @@ def test_runner_is_isolated_fail_closed_and_authorization_gated() -> None:
     assert "trap cleanup EXIT INT TERM" in text
     assert "wait_control_verdict health HEALTHY" in text
     assert "wait_control_verdict reconcile MATCH" in text
+    assert "wait_for_canary_completion" in text
+    assert "soak_canary_lifecycle_complete" in text
+    assert "OBSERVATION_ONLY_PASS" in text
     smoke = text[text.index("if [[ $MODE == smoke ]]"):text.index("# A promoted soak")]
     assert "gmaq-control arm" not in smoke
     assert "SMOKE_ONLY_PASS" in smoke
+
+
+def test_runner_strictly_preflights_before_its_only_arm() -> None:
+    text = RUNNER.read_text()
+    first_preflight = text.index('record_command "$EVIDENCE_DIR/preflight.json" ./scripts/gmaq-control preflight')
+    second_preflight = text.index('record_command "$EVIDENCE_DIR/preflight-after-kill.json" ./scripts/gmaq-control preflight')
+    arm = text.index('./scripts/gmaq-control arm --authorization-id "$AUTHORIZATION_ID"')
+
+    assert first_preflight < second_preflight < arm
+    assert '[[ $(json_verdict <"$EVIDENCE_DIR/preflight-after-kill.json") == PASS ]]' in text
+    assert text.count("gmaq-control arm --authorization-id") == 1
+
+
+def test_runner_disarms_after_canary_then_observes_without_rearming() -> None:
+    text = RUNNER.read_text()
+    canary_wait = text.index("wait_for_canary_completion\n")
+    disarm = text.index("soak_canary_lifecycle_complete")
+    observation = text.index("# The observation clock starts only after entries are disabled.")
+    loop = text.index("while true; do", observation)
+    post_canary = text[disarm:]
+
+    assert canary_wait < disarm < observation < loop
+    assert "gmaq-control arm" not in post_canary
+    assert "gmaq-control preflight" not in post_canary
+    assert "NEXT_REFRESH" not in post_canary
+
+
+def test_disarmed_observation_continues_health_reconcile_audit_and_duplicate_checks() -> None:
+    text = RUNNER.read_text()
+    observation = text[text.index("# The observation clock starts only after entries are disabled."):]
+
+    assert 'record_command "$EVIDENCE_DIR/health-samples.jsonl" ./scripts/gmaq-control health' in observation
+    assert 'record_command "$EVIDENCE_DIR/reconcile-records.jsonl" ./scripts/gmaq-control reconcile' in observation
+    assert 'record_command "$EVIDENCE_DIR/audit-verify-records.jsonl" ./scripts/gmaq-control audit verify' in observation
+    assert "duplicate_scan >>\"$EVIDENCE_DIR/duplicate-scans.jsonl\"" in observation
+
+
+def test_runner_anchors_audit_after_runtime_binding() -> None:
+    text = RUNNER.read_text()
+    first_up = text.index("./scripts/gmaq up")
+    first_wait = text.index("wait_ping", first_up)
+    first_anchor_seq = text.index("START_SEQ=$(audit_count)")
+    first_anchor = text.index("capture_audit_anchor", first_wait)
+
+    assert first_up < first_wait < first_anchor_seq < first_anchor
 
 
 def test_runtime_manifest_reads_only_allowlisted_non_secret_env_fields() -> None:
