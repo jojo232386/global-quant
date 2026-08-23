@@ -293,9 +293,11 @@ vol as a gate or target, not as a signal direction.
   hysteresis; grid lookback ∈ {14d, 30d}, hysteresis band ∈ {±3%, ±5%};
   benchmark static 50/50.
 
-### EXPL-010 · target-vol portfolio of the universe · DRAFT
-- `EXPL-010_FULL`: price data is ready in curated V1 `a7d65a92`; the
-  registered full card has not run.
+### EXPL-010 · target-vol portfolio of the universe · NOT SELECTED
+- `EXPL-010_FULL`: not run. Route review found that expanding the failed N=2
+  target-vol mechanism to the wider Price V1 universe is a breadth change,
+  not a sufficiently distinct market mechanism. It is not a fallback or
+  parameter-rescue candidate for this Price Alpha line.
 - `EXPL-010_N2_DIAGNOSTIC = DROPPED`: N=2 BTC/ETH diagnostic fails the
   card's Calmar/MDD graduation bar at every grid point. Direction consistent
   with the ASQ A5-1 outcome; directional consistency only, no
@@ -319,7 +321,14 @@ vol as a gate or target, not as a signal direction.
 
 ## Family E — Portfolio construction
 
-### EXPL-013 · banded inverse-vol universe portfolio · FROZEN BEFORE RUN
+### EXPL-013 · banded inverse-vol universe portfolio · DATA_ERROR_STOP
+- The frozen run stopped before producing performance results. The May 2022
+  PIT/volume rule selected `LUNAUSDT`, whose verified curated series ends on
+  2022-05-13; the required 2022-05-14 open is absent. The frozen contract says
+  a missing held-symbol value is `DATA_ERROR_STOP`, so no interpolation,
+  post-run delisting exit rule, PASS/FAIL classification, or Factor Graveyard
+  entry is permitted. Bound incident evidence:
+  `expl-013-data-error.json`.
 - Frozen contract: `expl-013-preregistration.json`. The contract must be
   committed before implementation or result generation; any later change to
   mechanism, formula, data, split, parameters, costs, benchmarks, or gates
@@ -452,12 +461,14 @@ vol as a gate or target, not as a signal direction.
 1. EXPL-001, EXPL-003, and EXPL-004: FAIL under Price Alpha batch v1; all are
    recorded in the Factor Graveyard with no parameter rescue.
 2. EXPL-012: KEPT_PRIMARY_SELECTED (primary config in the results JSON).
-3. Queue EXPL-010_FULL and EXPL-013 after the first Family A price batch.
-4. EXPL-008: DROPPED_COST_FRAGILE (2026-08-22 screen).
-5. EXPL-015: DROPPED_COST_FRAGILE (2026-08-22 screen).
-6. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
+3. EXPL-010_FULL: NOT SELECTED; breadth expansion is not a distinct mechanism.
+4. EXPL-013: DATA_ERROR_STOP before performance evaluation; do not reinterpret
+   it as PASS/FAIL or change the frozen exit semantics under the same ID.
+5. EXPL-008: DROPPED_COST_FRAGILE (2026-08-22 screen).
+6. EXPL-015: DROPPED_COST_FRAGILE (2026-08-22 screen).
+7. EXPL-016: BLOCKED_ON_DATA (claims cross-sectional breadth; must not be
    force-run on two symbols).
-7. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
+8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
 
 ## Escalation note

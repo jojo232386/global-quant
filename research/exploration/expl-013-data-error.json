@@ -1,0 +1,32 @@
+{
+  "artifact_class": "EXPLORATION_DATA_ERROR_EVIDENCE",
+  "code_commit_sha": "d058e733034731e4bbe9253474b43e6cf7c5eba1",
+  "dataset": {
+    "dataset_id": "pre2024-usdm-archive-extended-1d",
+    "integrity": "VERIFIED",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "quality": "PASS",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b"
+  },
+  "error": {
+    "category": "MISSING_REQUIRED_HELD_BAR",
+    "first_missing_open_utc": "2022-05-14",
+    "frozen_monthly_rank": 3,
+    "last_available_bar_utc": "2022-05-13",
+    "pit_effective_month_utc": "2022-05-01",
+    "symbol": "LUNAUSDT"
+  },
+  "experiment_id": "EXPL-013",
+  "freeze_commit": "9ca27eb625bae14c6df0ad798583823567eaafe1",
+  "observed_at_utc": "2026-08-23T04:30:52Z",
+  "outcome": "DATA_ERROR_STOP",
+  "prereg_sha256": "db81b3a59fa3962b0a1ce328b7c14a6fd4091b360e5d43c3ec9b99eecd3e7dda",
+  "preservation": {
+    "delisting_exit_rule_added_post_run": false,
+    "interpolation_used": false,
+    "performance_report_generated": false,
+    "same_experiment_id_may_be_reinterpreted": false
+  },
+  "runner_sha256": "1fa1b18b133ac0208b57090bca1a73d8c5cff6df1fe8138e2aef6792de9659c3"
+}
