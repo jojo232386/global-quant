@@ -270,9 +270,9 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: risk-overlay family; tested as an overlay on EXPL-001's
   base, not standalone.
 
-### EXPL-017 · cross-sectional momentum × broad-volatility state · PRE_FORMAL_ACTIVE
-- Hypothesis status: active; no formal freeze, formal run, performance result,
-  market conclusion, or Factor Graveyard entry exists.
+### EXPL-017 · cross-sectional momentum × broad-volatility state · FAIL
+- Hypothesis status: failed its single frozen formal run and is recorded in
+  the Factor Graveyard; parameter rescue and rerun are prohibited.
 - Mechanism: keep the frozen EXPL-001 7/14/28 cross-sectional momentum
   measurement, remove its dispersion gate, and map the same rank to
   continuation in calm broad-universe volatility and reversal in high
@@ -313,10 +313,14 @@ vol as a gate or target, not as a signal direction.
   final-liquidation consumer passed independent review at implementation SHA
   `df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a`. IMPL-016 is therefore
   `CORRECTNESS_PASS_PRE_FREEZE`; this is not a formal result.
-  `EXPL-017-FORMAL-003` is frozen against that reviewed IMPL-016 consumer and
-  awaits independent contract review. Formal run count is zero and formal
-  OOS/holdout performance remains unread; EXPL-017 stays active and has no
-  market verdict or Factor Graveyard entry.
+  `EXPL-017-FORMAL-003` froze against that reviewed IMPL-016 consumer, passed
+  independent contract review, and ran exactly once. The immutable result is
+  formal classification `HYPOTHESIS_FAIL`: primary holdout Sharpe was `0.14`;
+  30 bps stress holdout return was `-8.93%`; holdout signed mean IC was
+  `-0.05` and combined IC t-stat was `0.79`; the high-volatility regime had only 12
+  admitted observations; and maximum absolute incumbent/target weight was
+  `16.30%`. Multi-period, neighborhood, and lifecycle gates passed, but every
+  frozen gate was required. No rerun or parameter rescue is allowed.
 
 ## Family D — Regime and breadth
 
@@ -518,12 +522,10 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
-9. EXPL-017: PRE_FORMAL_ACTIVE; EXPL-017-IMPL-016 is
-   CORRECTNESS_PASS_PRE_FREEZE after the separately bound Lifecycle V1 and
-   complete formal consumer passed independent review. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
-   and EXPL-017-FORMAL-002 is INVALID_BEFORE_EXECUTION after contract review;
-   aggregate formal run count remains zero, with no market verdict or Factor
-   Graveyard entry.
+9. EXPL-017: FAIL after the one-shot `EXPL-017-FORMAL-003` run; formal
+   classification `HYPOTHESIS_FAIL`;
+   formal run count is one, frozen failed gates are preserved, and the result
+   is recorded in the Factor Graveyard with no rerun or parameter rescue.
 
 ## Escalation note
 
