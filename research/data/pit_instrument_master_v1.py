@@ -3,9 +3,11 @@
 
 The master is deliberately a fixed historical cohort, not a claim about the
 complete Binance USD-M market.  Cohort membership comes from one archived
-official ``exchangeInfo`` response.  Price V1 supplies event-time activity
-evidence and the existing Lifecycle V1 sidecar supplies confirmed terminals.
-Numeric archive vintage remains explicitly unverified.
+official ``exchangeInfo`` response.  Price V1 supplies event-time rows, while
+authoritative terminal evidence distinguishes real activity from
+post-settlement zero-volume tails.  The existing Lifecycle V1 sidecar is
+reused and a small cohort-only supplement is bound beside it.  Numeric archive
+vintage remains explicitly unverified.
 """
 
 from __future__ import annotations
@@ -47,9 +49,11 @@ CDX_PATH = RAW_DIR / "wayback-cdx-exchange-info.json"
 ACTIVITY_PATH = EVIDENCE_DIR / "price-v1-cohort-activity.json"
 MASTER_PATH = EVIDENCE_DIR / "pit-instrument-master-v1.json"
 LIFECYCLE_PATH = pathlib.Path(__file__).with_name("expl-017-lifecycle-v1.json")
+SUPPLEMENTAL_LIFECYCLE_PATH = EVIDENCE_DIR / "pit-cohort-terminal-evidence-v1.json"
 
 MASTER_CLASS = "GMAQ_PIT_INSTRUMENT_MASTER_V1"
 ACTIVITY_CLASS = "GMAQ_PRICE_V1_COHORT_ACTIVITY_EVIDENCE"
+SUPPLEMENTAL_LIFECYCLE_CLASS = "GMAQ_PIT_COHORT_TERMINAL_EVIDENCE_V1"
 COHORT_ID = "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z"
 WAYBACK_TIMESTAMP = "20210104195101"
 WAYBACK_CAPTURE_UTC = "2021-01-04T19:51:01Z"
@@ -58,10 +62,22 @@ CDX_RETRIEVED_UTC = "2026-08-24T14:44:44Z"
 ORIGINAL_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 SNAPSHOT_SHA256 = "0c3613accfe9acf01cb6fb0523835ee52dea17f1a7df9de84e6a1fe39e27dfd2"
 CDX_SHA256 = "b4e48f0a4e86b55f8158599d56adb0465d3a74b7aab3034ddfb7c818e2f59ac1"
-COVERAGE_END_UTC = "2024-01-01T00:00:00Z"
+SUPPLEMENTAL_LIFECYCLE_SHA256 = (
+    "33c4cb0438bc9a1417ef620e71f97de3efaa0ffa82a29ba5f76c6d7045786561"
+)
+COVERAGE_END_UTC = "2023-11-15T00:00:00Z"
 EXPECTED_COHORT_SIZE = 80
-EXPECTED_TERMINALS = {"BZRXUSDT", "YFIIUSDT"}
+CANONICAL_TERMINALS = {"BZRXUSDT", "YFIIUSDT"}
+SUPPLEMENTAL_TERMINALS = {"CVCUSDT", "HNTUSDT", "SRMUSDT"}
+EXPECTED_TERMINALS = CANONICAL_TERMINALS | SUPPLEMENTAL_TERMINALS
 EXPECTED_QUARANTINE = "AKROUSDT"
+EXPECTED_ZERO_TAILS = {
+    "CVCUSDT": 397,
+    "HNTUSDT": 286,
+    "SRMUSDT": 411,
+    "TOMOUSDT": 47,
+}
+UNRESOLVED_COVERAGE_STOP_SYMBOL = "TOMOUSDT"
 
 
 class InstrumentMasterError(RuntimeError):
@@ -115,7 +131,9 @@ def _utc_from_ms(value: int) -> str:
     return rendered.replace("+00:00", "Z")
 
 
-def _parse_utc(value: str, *, field: str) -> dt.datetime:
+def _parse_utc(value: Any, *, field: str) -> dt.datetime:
+    if not isinstance(value, str):
+        raise InstrumentMasterError(f"invalid {field}")
     try:
         parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (TypeError, ValueError) as error:
@@ -222,6 +240,28 @@ def capture_price_activity(
         raise InstrumentMasterError(f"Price V1 lacks cohort symbols: {missing}")
     for symbol in sorted(cohort):
         points = sorted(dataset.bars[symbol])
+        positive_points = [
+            timestamp
+            for timestamp in points
+            if dataset.bars[symbol][timestamp].quote_volume > 0
+        ]
+        if not positive_points:
+            raise InstrumentMasterError(
+                f"Price V1 has no positive-volume activity: {symbol}"
+            )
+        last_positive = positive_points[-1]
+        trailing_points = [timestamp for timestamp in points if timestamp > last_positive]
+        if any(
+            dataset.bars[symbol][timestamp].quote_volume == 0
+            for timestamp in points
+            if timestamp < last_positive
+        ):
+            raise InstrumentMasterError(f"Price V1 has an internal zero-volume day: {symbol}")
+        if any(
+            dataset.bars[symbol][timestamp].quote_volume != 0
+            for timestamp in trailing_points
+        ):
+            raise InstrumentMasterError(f"Price V1 activity tail is inconsistent: {symbol}")
         gaps = sum(right != left + DAY_MS for left, right in zip(points, points[1:]))
         role = f"kline.{symbol}"
         source_file = file_by_role.get(role)
@@ -232,12 +272,17 @@ def capture_price_activity(
                 "symbol": symbol,
                 "first_bar_open_utc": _utc_from_ms(points[0]),
                 "last_bar_open_utc": _utc_from_ms(points[-1]),
+                "last_positive_quote_volume_bar_open_utc": _utc_from_ms(last_positive),
+                "trailing_zero_quote_volume_day_count": len(trailing_points),
                 "row_count": len(points),
                 "internal_gap_count": gaps,
                 "source_role": role,
                 "source_file_sha256": source_file["sha256"],
                 "first_bar_semantics": "PROXY_EVIDENCE_NOT_LISTING_TIMESTAMP",
-                "activity_semantics": "OFFICIAL_EVENT_TIME; NUMERIC_VINTAGE_UNVERIFIED",
+                "activity_semantics": (
+                    "POSITIVE_QUOTE_VOLUME_IS_EVENT_ACTIVITY; ZERO_VOLUME_ROWS_ARE_NOT_ACTIVITY; "
+                    "NUMERIC_VINTAGE_UNVERIFIED"
+                ),
             }
         )
     return {
@@ -290,12 +335,121 @@ def _load_activity() -> dict[str, Mapping[str, Any]]:
             raise InstrumentMasterError("duplicate or discontinuous Price V1 activity")
         if row.get("first_bar_semantics") != "PROXY_EVIDENCE_NOT_LISTING_TIMESTAMP":
             raise InstrumentMasterError("first bar was promoted beyond proxy evidence")
-        if row.get("activity_semantics") != "OFFICIAL_EVENT_TIME; NUMERIC_VINTAGE_UNVERIFIED":
+        if row.get("activity_semantics") != (
+            "POSITIVE_QUOTE_VOLUME_IS_EVENT_ACTIVITY; ZERO_VOLUME_ROWS_ARE_NOT_ACTIVITY; "
+            "NUMERIC_VINTAGE_UNVERIFIED"
+        ):
             raise InstrumentMasterError("Price V1 activity availability semantics differ")
+        expected_tail = EXPECTED_ZERO_TAILS.get(symbol, 0)
+        if row.get("trailing_zero_quote_volume_day_count") != expected_tail:
+            raise InstrumentMasterError("Price V1 zero-volume tail differs")
+        first = _parse_utc(row.get("first_bar_open_utc"), field="first bar")
+        last_positive = _parse_utc(
+            row.get("last_positive_quote_volume_bar_open_utc"), field="last positive bar"
+        )
+        last = _parse_utc(row.get("last_bar_open_utc"), field="last bar")
+        if not first <= last_positive <= last:
+            raise InstrumentMasterError("Price V1 activity timestamps differ")
         if not isinstance(row.get("source_file_sha256"), str) or len(row["source_file_sha256"]) != 64:
             raise InstrumentMasterError("Price V1 activity file identity is absent")
         output[symbol] = row
     return output
+
+
+def _load_supplemental_events() -> tuple[
+    dict[str, Mapping[str, Any]], Mapping[str, Any]
+]:
+    if sha256_file(SUPPLEMENTAL_LIFECYCLE_PATH) != SUPPLEMENTAL_LIFECYCLE_SHA256:
+        raise InstrumentMasterError("supplemental terminal artifact SHA-256 mismatch")
+    payload = _load_json(SUPPLEMENTAL_LIFECYCLE_PATH)
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("artifact_class") != SUPPLEMENTAL_LIFECYCLE_CLASS
+        or payload.get("artifact_version") != 1
+    ):
+        raise InstrumentMasterError("supplemental terminal artifact identity differs")
+    if payload.get("source_policy") != (
+        "OFFICIAL_ANNOUNCEMENT_PLUS_OFFICIAL_EVENT_ARCHIVE; "
+        "SUBMINUTE_SETTLEMENT_TAILS_RECORDED_NOT_HIDDEN"
+    ):
+        raise InstrumentMasterError("supplemental terminal source policy differs")
+    rows = payload.get("events")
+    if not isinstance(rows, list):
+        raise InstrumentMasterError("supplemental terminal events are absent")
+    events: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("symbol"), str):
+            raise InstrumentMasterError("supplemental terminal event is malformed")
+        symbol = row["symbol"]
+        source = row.get("evidence_source")
+        identity = row.get("evidence_identity")
+        archive = row.get("trade_archive")
+        if symbol in events or row.get("classification") != TERMINATED_CONFIRMED:
+            raise InstrumentMasterError("supplemental terminal set is duplicate or unresolved")
+        if not all(isinstance(value, Mapping) for value in (source, identity, archive)):
+            raise InstrumentMasterError("supplemental terminal evidence is incomplete")
+        published = _parse_utc(row.get("evidence_published_at_utc"), field="publication")
+        effective = _parse_utc(row.get("terminal_effective_at_utc"), field="terminal")
+        first_trade = _parse_utc(archive.get("first_trade_at_utc"), field="first trade")
+        last_trade = _parse_utc(archive.get("last_trade_at_utc"), field="last trade")
+        if not published < effective < _parse_utc(
+            COVERAGE_END_UTC, field="coverage end"
+        ):
+            raise InstrumentMasterError("supplemental terminal chronology differs")
+        if not first_trade < effective or not last_trade <= effective + dt.timedelta(
+            minutes=1
+        ):
+            raise InstrumentMasterError("supplemental terminal archive boundary differs")
+        actual_tail = max(0.0, (last_trade - effective).total_seconds())
+        recorded_tail = archive.get("settlement_tail_after_effective_seconds")
+        if (
+            isinstance(recorded_tail, bool)
+            or not isinstance(recorded_tail, (int, float))
+            or abs(float(recorded_tail) - actual_tail) > 0.000_001
+        ):
+            raise InstrumentMasterError("supplemental settlement tail differs")
+        if type(archive.get("row_count")) is not int or archive["row_count"] <= 0:
+            raise InstrumentMasterError("supplemental terminal archive count differs")
+        if not source.get("announcement_url", "").startswith(
+            "https://www.binance.com/en/support/announcement/detail/"
+        ) or not source.get("cms_api_url", "").startswith(
+            "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query?"
+        ):
+            raise InstrumentMasterError("supplemental announcement source differs")
+        expected_archive_prefix = (
+            "https://data.binance.vision/data/futures/um/daily/aggTrades/"
+            f"{symbol}/{symbol}-aggTrades-"
+        )
+        if not source.get("trade_archive_url", "").startswith(expected_archive_prefix):
+            raise InstrumentMasterError("supplemental trade archive source differs")
+        if any(
+            not isinstance(identity.get(key), str)
+            or len(identity[key]) != 64
+            or any(character not in "0123456789abcdef" for character in identity[key])
+            for key in ("announcement_response_sha256", "trade_archive_sha256")
+        ):
+            raise InstrumentMasterError("supplemental terminal hashes differ")
+        events[symbol] = row
+    if set(events) != SUPPLEMENTAL_TERMINALS:
+        raise InstrumentMasterError("supplemental terminal symbol set differs")
+
+    coverage_stop = payload.get("coverage_stop")
+    if not isinstance(coverage_stop, Mapping) or coverage_stop.get("symbol") != (
+        UNRESOLVED_COVERAGE_STOP_SYMBOL
+    ):
+        raise InstrumentMasterError("unresolved coverage stop is absent")
+    required_stop = {
+        "classification": "LIFECYCLE_UNRESOLVED_NO_TERMINAL_INFERENCE",
+        "coverage_end_exclusive_utc": COVERAGE_END_UTC,
+        "last_positive_quote_volume_bar_open_utc": "2023-11-14T00:00:00.000Z",
+        "first_zero_quote_volume_tail_bar_open_utc": "2023-11-15T00:00:00.000Z",
+        "trailing_zero_quote_volume_day_count": EXPECTED_ZERO_TAILS[
+            UNRESOLVED_COVERAGE_STOP_SYMBOL
+        ],
+    }
+    if any(coverage_stop.get(key) != value for key, value in required_stop.items()):
+        raise InstrumentMasterError("unresolved coverage stop contract differs")
+    return events, coverage_stop
 
 
 def _terminal_source(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -309,6 +463,7 @@ def _terminal_source(raw: Mapping[str, Any]) -> dict[str, Any]:
         "effective_at_utc": raw["terminal_effective_at_utc"],
         "announcement_url": source["announcement_url"],
         "trade_archive_url": source["trade_archive_url"],
+        **({"cms_api_url": source["cms_api_url"]} if "cms_api_url" in source else {}),
         "announcement_response_sha256": identity["announcement_response_sha256"],
         "trade_archive_sha256": identity["trade_archive_sha256"],
     }
@@ -324,33 +479,50 @@ def build_master() -> dict[str, Any]:
     events, lifecycle_sha = load_sidecar(LIFECYCLE_PATH)
     lifecycle_raw = _load_json(LIFECYCLE_PATH)
     raw_events = {row["symbol"]: row for row in lifecycle_raw["exceptions"]}
-    cohort_events = {symbol: event for symbol, event in events.items() if symbol in cohort}
-    if set(cohort_events) != EXPECTED_TERMINALS:
-        raise InstrumentMasterError("frozen cohort terminal set differs")
-    if any(event.classification != TERMINATED_CONFIRMED for event in cohort_events.values()):
+    canonical_events = {symbol: event for symbol, event in events.items() if symbol in cohort}
+    if set(canonical_events) != CANONICAL_TERMINALS:
+        raise InstrumentMasterError("canonical cohort terminal set differs")
+    if any(event.classification != TERMINATED_CONFIRMED for event in canonical_events.values()):
         raise InstrumentMasterError("frozen cohort contains an unresolved terminal")
+    supplemental_events, coverage_stop = _load_supplemental_events()
+    terminal_records = {
+        **{symbol: raw_events[symbol] for symbol in canonical_events},
+        **supplemental_events,
+    }
+    if set(terminal_records) != EXPECTED_TERMINALS:
+        raise InstrumentMasterError("combined cohort terminal set differs")
+    supplemental_sha = SUPPLEMENTAL_LIFECYCLE_SHA256
 
     records: list[dict[str, Any]] = []
     for symbol in sorted(cohort):
         raw = cohort[symbol]
         activity_row = activity[symbol]
-        terminal = cohort_events.get(symbol)
-        terminal_evidence = _terminal_source(raw_events[symbol]) if terminal else None
-        interval_end = (
-            _utc_from_ms(terminal.effective_at_ms) if terminal else COVERAGE_END_UTC
-        )
+        terminal = terminal_records.get(symbol)
+        terminal_evidence = _terminal_source(terminal) if terminal else None
+        interval_end = terminal["terminal_effective_at_utc"] if terminal else COVERAGE_END_UTC
         listing_start = response_utc
         if _parse_utc(activity_row["first_bar_open_utc"], field="first bar") > _parse_utc(
             listing_start, field="confirmed active start"
         ):
             raise InstrumentMasterError(f"Price activity starts after cohort capture: {symbol}")
-        last_bar = _parse_utc(activity_row["last_bar_open_utc"], field="last bar")
-        if terminal and last_bar.date() != _parse_utc(
+        last_positive = _parse_utc(
+            activity_row["last_positive_quote_volume_bar_open_utc"],
+            field="last positive bar",
+        )
+        if terminal and last_positive.date() != _parse_utc(
             interval_end, field="terminal effective"
         ).date():
             raise InstrumentMasterError(f"terminal activity date differs for {symbol}")
-        if not terminal and last_bar.date() != dt.date(2023, 12, 31):
+        required_active_through = _parse_utc(
+            COVERAGE_END_UTC, field="coverage end"
+        ) - dt.timedelta(days=1)
+        if not terminal and last_positive < required_active_through:
             raise InstrumentMasterError(f"active cohort member does not reach cutoff: {symbol}")
+        if symbol == UNRESOLVED_COVERAGE_STOP_SYMBOL and (
+            activity_row["last_positive_quote_volume_bar_open_utc"]
+            != coverage_stop["last_positive_quote_volume_bar_open_utc"]
+        ):
+            raise InstrumentMasterError("coverage stop and Price V1 activity differ")
         records.append(
             {
                 "instrument_id": f"BINANCE:USD_M:PERPETUAL:{symbol}",
@@ -397,10 +569,14 @@ def build_master() -> dict[str, Any]:
                     "price_manifest_sha256": PRICE_MANIFEST_SHA256,
                     "price_pit_sha256": PRICE_PIT_SHA256,
                     "lifecycle_sidecar_sha256": lifecycle_sha,
+                    "supplemental_terminal_evidence_sha256": supplemental_sha,
                 },
                 "vintage_lineage": {
                     "instrument_status_snapshot": "VERIFIED_HISTORICAL_CAPTURE",
-                    "event_activity": "EVENT_TIME_CONFIRMED",
+                    "event_activity": (
+                        "POSITIVE_QUOTE_VOLUME_EVENT_TIME_ONLY; "
+                        "ZERO_VOLUME_ROWS_NOT_ACTIVITY"
+                    ),
                     "numeric_archive_bytes": "VINTAGE_UNVERIFIED",
                 },
                 "conflict_status": "NONE",
@@ -439,6 +615,10 @@ def build_master() -> dict[str, Any]:
             "tier2_data_foundation_ready": False,
             "coverage_start_inclusive_utc": response_utc,
             "coverage_end_exclusive_utc": COVERAGE_END_UTC,
+            "coverage_end_reason": (
+                "TOMOUSDT_POST_2023_11_14_LIFECYCLE_UNRESOLVED; "
+                "ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
+            ),
             "scope_limit": "FIXED_COHORT_NOT_COMPLETE_DYNAMIC_MARKET_UNIVERSE",
         },
         "input_lineage": {
@@ -446,6 +626,7 @@ def build_master() -> dict[str, Any]:
             "wayback_cdx_sha256": CDX_SHA256,
             "price_activity_sha256": sha256_file(ACTIVITY_PATH),
             "lifecycle_sidecar_sha256": lifecycle_sha,
+            "supplemental_terminal_evidence_sha256": supplemental_sha,
         },
         "availability_contract": {
             "instrument_status": "HISTORICALLY_CAPTURED_OFFICIAL_RESPONSE",
@@ -457,6 +638,10 @@ def build_master() -> dict[str, Any]:
             "retrieval_timestamp": SOURCE_RETRIEVED_UTC,
             "numeric_price_vintage": "VINTAGE_UNVERIFIED",
             "funding_oi_vintage": "VINTAGE_UNVERIFIED",
+            "zero_volume_tail_policy": (
+                "NOT_TRADING_ACTIVITY_OR_TERMINAL_EVIDENCE; FAIL_CLOSED_AT_FIRST_"
+                "UNRESOLVED_TAIL"
+            ),
         },
         "records": records,
         "quarantine": [quarantine],

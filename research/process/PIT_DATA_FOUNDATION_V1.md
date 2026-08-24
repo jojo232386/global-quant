@@ -29,14 +29,19 @@ REAL_ORDER_COUNT=0
 The cohort candidate is the complete set of 80 `TRADING / PERPETUAL / USDT` instruments
 in one archived official Binance USD-M `exchangeInfo` response. The response's
 official `serverTime` differs from the Wayback capture by about one second.
-All 80 bind to Price V1; 78 have continuous daily activity through 2023-12-31,
-while `BZRXUSDT` and `YFIIUSDT` retain their confirmed official terminal events.
+All 80 bind to Price V1. Seventy-four retain positive quote-volume activity
+through 2023-12-31; `BZRXUSDT` and `YFIIUSDT` retain their existing confirmed
+terminal events, while `CVCUSDT`, `HNTUSDT`, and `SRMUSDT` now bind additional
+official terminal evidence. `TOMOUSDT` has an unresolved zero-volume tail after
+2023-11-14, so the deterministic query window stops at 2023-11-15 rather than
+pretending its padded rows prove continued trading.
 
-Historical queries return 80 symbols in mid-2021 and 78 in mid-2022/mid-2023.
-The two later-delisted contracts remain present before their effective terminal
-times. Symbols listed after the frozen capture are never admitted. This controls
-current-survivor bias for the cohort; it does not claim complete rolling-market
-coverage or add later listings.
+Historical queries return 80 symbols in mid-2021, 78 in mid-2022, and 75 in
+mid-2023. The five later-delisted contracts remain present before their
+effective terminal times. Queries at or after 2023-11-15 fail closed. Symbols
+listed after the frozen capture are never admitted. This controls
+current-survivor bias for the covered cohort window; it does not claim complete
+rolling-market coverage or add later listings.
 
 ## Evidence semantics
 
@@ -45,10 +50,13 @@ coverage or add later listings.
   not a publication timestamp. It is a conservative confirmed-active start,
   not the true listing time. Binance's reported `onboardDate` is retained but
   explicitly untrusted and is never used for admission.
-- Delisting: Tier A — existing official Binance CMS announcement plus official
-  aggregate-trade archive evidence for `BZRXUSDT` and `YFIIUSDT`.
-- Activity: official exchange-event timestamps in the verified Price V1 files;
-  first/last bars are never promoted to listing/delisting facts.
+- Delisting: Tier A — official Binance CMS announcement plus official
+  aggregate-trade archive evidence for five cohort members. The two existing
+  Lifecycle V1 events are reused; three cohort-only events are hash-bound in a
+  supplemental artifact without rewriting the canonical sidecar.
+- Activity: positive-quote-volume exchange-event timestamps in the verified
+  Price V1 files. First/last or zero-volume bars are never promoted to
+  listing/delisting facts. The unresolved `TOMOUSDT` tail limits global coverage.
 - AKRO: `QUARANTINED`. It is not a cohort member; the announced 2022-05-26
   settlement conflicts with official aggregate trades through 2022-05-27.
 - Vintage: instrument-status capture is historically bound. Current numeric
@@ -59,7 +67,8 @@ coverage or add later listings.
 
 - Price V1 is linked by exact snapshot, manifest, PIT, per-role file hashes and
   remains `EXPLORATION_ONLY` for its numeric results.
-- Lifecycle V1 is linked by exact sidecar hash and remains unchanged.
+- Lifecycle V1 is linked by exact sidecar hash and remains unchanged; the
+  three-event supplemental terminal artifact is independently hash-bound.
 - Funding/OI is identity-compatible by Binance USD-M symbol but remains blocked
   by historical first-availability and revision/vintage evidence.
 - No Alpha, EXPL, backtest, Research Tier, Protocol, runtime, database, data

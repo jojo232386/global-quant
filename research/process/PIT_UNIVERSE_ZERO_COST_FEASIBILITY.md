@@ -79,12 +79,15 @@ mission's authorized scope.
 The later [PIT Data Foundation V1](PIT_DATA_FOUNDATION_V1.md) mission found a
 route that does not contradict the full-market stop above. A Wayback capture of
 the official Binance USD-M `exchangeInfo` endpoint freezes all 80 contracts
-trading at one historical timestamp. All 80 bind to Price V1; 78 are continuous
-through the 2023 cutoff and two have confirmed terminal evidence. The cohort is
-not selected from today's survivors or later returns.
+trading at one historical timestamp. All 80 bind to Price V1. Five have
+confirmed official terminal evidence; an unresolved `TOMOUSDT` zero-volume tail
+forces the global query window to end before 2023-11-15. The cohort is not
+selected from today's survivors or later returns, and zero-volume padding is
+not treated as continued activity.
 
 That evidence unlocks only a bounded, fixed `PARTIAL_PIT_COHORT_CANDIDATE`.
 It does not reconstruct later listings, prove a complete dynamic
 market domain, or remove the Price/Funding/OI numeric vintage blocker. The
 correct follow-up result is `PARTIAL_PIT_UNIVERSE_UNLOCKED`, not a reversal of
-the full-market or Candidate B data-admission stop.
+the full-market or Candidate B data-admission stop. It also does not claim
+coverage through 2023-12-31.

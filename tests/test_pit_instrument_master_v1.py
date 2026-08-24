@@ -26,7 +26,11 @@ def test_committed_master_matches_deterministic_rebuild() -> None:
         "formally_tier2_admitted_symbol_count": 0,
         "tier2_data_foundation_ready": False,
         "coverage_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
-        "coverage_end_exclusive_utc": "2024-01-01T00:00:00Z",
+        "coverage_end_exclusive_utc": "2023-11-15T00:00:00Z",
+        "coverage_end_reason": (
+            "TOMOUSDT_POST_2023_11_14_LIFECYCLE_UNRESOLVED; "
+            "ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
+        ),
         "scope_limit": "FIXED_COHORT_NOT_COMPLETE_DYNAMIC_MARKET_UNIVERSE",
     }
     assert len(payload["records"]) == 80
@@ -60,24 +64,31 @@ def test_universe_at_preserves_past_delisted_members_and_excludes_future_termina
     assert len(universe_2022) == 78
     assert "BZRXUSDT" not in universe_2022
     assert "YFIIUSDT" not in universe_2022
-    assert universe_2023 == universe_2022
+    assert len(universe_2023) == 75
+    assert set(universe_2023) < set(universe_2022)
+    assert {"CVCUSDT", "HNTUSDT", "SRMUSDT"}.isdisjoint(universe_2023)
     assert {"BTCUSDT", "ETHUSDT", "ETCUSDT", "LTCUSDT", "XRPUSDT"} <= set(
         universe_2023
     )
 
 
-def test_terminal_boundaries_are_effective_time_not_last_bar_inference() -> None:
+@pytest.mark.parametrize(
+    ("symbol", "before_timestamp", "at_timestamp"),
+    [
+        ("BZRXUSDT", "2021-12-19T01:59:59Z", "2021-12-19T02:00:00Z"),
+        ("YFIIUSDT", "2022-04-12T08:59:59Z", "2022-04-12T09:00:00Z"),
+        ("SRMUSDT", "2022-11-15T04:29:59Z", "2022-11-15T04:30:00Z"),
+        ("CVCUSDT", "2022-11-29T08:59:59Z", "2022-11-29T09:00:00Z"),
+        ("HNTUSDT", "2023-03-20T08:59:59Z", "2023-03-20T09:00:00Z"),
+    ],
+)
+def test_terminal_boundaries_are_effective_time_not_last_bar_inference(
+    symbol: str, before_timestamp: str, at_timestamp: str
+) -> None:
     payload = master.load_master()
 
-    before = master.universe_at(payload, "2021-12-19T01:59:59Z")
-    at = master.universe_at(payload, "2021-12-19T02:00:00Z")
-    assert "BZRXUSDT" in before
-    assert "BZRXUSDT" not in at
-
-    before_yfii = master.universe_at(payload, "2022-04-12T08:59:59Z")
-    at_yfii = master.universe_at(payload, "2022-04-12T09:00:00Z")
-    assert "YFIIUSDT" in before_yfii
-    assert "YFIIUSDT" not in at_yfii
+    assert symbol in master.universe_at(payload, before_timestamp)
+    assert symbol not in master.universe_at(payload, at_timestamp)
 
 
 def test_akro_conflict_is_quarantined_without_blocking_the_cohort() -> None:
@@ -112,8 +123,25 @@ def test_price_activity_is_hash_bound_gap_free_and_vintage_fail_closed() -> None
         row["first_bar_semantics"] == "PROXY_EVIDENCE_NOT_LISTING_TIMESTAMP"
         for row in activity["records"]
     )
+    rows = {row["symbol"]: row for row in activity["records"]}
+    assert {
+        symbol: row["trailing_zero_quote_volume_day_count"]
+        for symbol, row in rows.items()
+        if row["trailing_zero_quote_volume_day_count"]
+    } == master.EXPECTED_ZERO_TAILS
+    assert all(
+        "ZERO_VOLUME_ROWS_ARE_NOT_ACTIVITY" in row["activity_semantics"]
+        for row in activity["records"]
+    )
+    assert rows["TOMOUSDT"]["last_positive_quote_volume_bar_open_utc"] == (
+        "2023-11-14T00:00:00.000Z"
+    )
     assert payload["availability_contract"]["funding_oi_vintage"] == "VINTAGE_UNVERIFIED"
     assert payload["availability_contract"]["numeric_price_vintage"] == "VINTAGE_UNVERIFIED"
+    assert payload["availability_contract"]["zero_volume_tail_policy"] == (
+        "NOT_TRADING_ACTIVITY_OR_TERMINAL_EVIDENCE; "
+        "FAIL_CLOSED_AT_FIRST_UNRESOLVED_TAIL"
+    )
     assert (
         payload["availability_contract"]["publication_timestamp"]
         == "NOT_APPLICABLE_TO_REST_STATUS_RESPONSE"
@@ -129,11 +157,39 @@ def test_price_activity_is_hash_bound_gap_free_and_vintage_fail_closed() -> None
     )
 
 
+def test_supplemental_terminals_are_hash_bound_and_tomo_stops_global_coverage() -> None:
+    payload = master.load_master()
+    records = {record["symbol"]: record for record in payload["records"]}
+    evidence = json.loads(
+        master.SUPPLEMENTAL_LIFECYCLE_PATH.read_text(encoding="utf-8")
+    )
+
+    assert payload["input_lineage"]["supplemental_terminal_evidence_sha256"] == (
+        master.sha256_file(master.SUPPLEMENTAL_LIFECYCLE_PATH)
+    )
+    assert {row["symbol"] for row in evidence["events"]} == master.SUPPLEMENTAL_TERMINALS
+    assert evidence["coverage_stop"]["symbol"] == "TOMOUSDT"
+    assert evidence["coverage_stop"]["classification"] == (
+        "LIFECYCLE_UNRESOLVED_NO_TERMINAL_INFERENCE"
+    )
+    assert all(
+        records[symbol]["terminal_evidence"]["evidence_type"]
+        == "TIER_A_OFFICIAL_ANNOUNCEMENT_PLUS_EVENT_ARCHIVE"
+        and records[symbol]["terminal_evidence"]["cms_api_url"].startswith(
+            "https://www.binance.com/bapi/"
+        )
+        for symbol in master.SUPPLEMENTAL_TERMINALS
+    )
+    assert records["TOMOUSDT"]["terminal_evidence"] is None
+    assert "TOMOUSDT" in master.universe_at(payload, "2023-11-14T23:59:59Z")
+
+
 @pytest.mark.parametrize(
     "timestamp",
     [
         "2021-01-04T19:51:02.038Z",
-        "2024-01-01T00:00:00Z",
+        "2023-11-15T00:00:00Z",
+        "2023-12-31T00:00:00Z",
         "2025-01-01T00:00:00Z",
     ],
 )
@@ -195,6 +251,21 @@ def test_duplicate_activity_identity_fails_closed(
 
     with pytest.raises(master.InstrumentMasterError, match="duplicate"):
         master._load_activity()
+
+
+def test_supplemental_terminal_evidence_tampering_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    evidence = json.loads(
+        master.SUPPLEMENTAL_LIFECYCLE_PATH.read_text(encoding="utf-8")
+    )
+    evidence["events"][0]["terminal_effective_at_utc"] = "2022-11-30T09:00:00Z"
+    path = tmp_path / "supplemental.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    monkeypatch.setattr(master, "SUPPLEMENTAL_LIFECYCLE_PATH", path)
+
+    with pytest.raises(master.InstrumentMasterError, match="SHA-256 mismatch"):
+        master.build_master()
 
 
 def test_overlapping_or_multiple_status_intervals_fail_closed() -> None:
