@@ -6,6 +6,12 @@ EXPL-017 artifacts, and the Factor Graveyard remain historical records and are
 not rewritten by this protocol. This document does not authorize runtime,
 Strategy, Freqtrade, credentials, orders, tiny-live, or any live trading.
 
+Future work is additionally classified by
+[GMAQ Research Tier System v1](GMAQ_RESEARCH_TIER_V1.md). The tier system is
+additive: it separates exploration evidence from confirmation and production
+candidate evidence; it does not relax this protocol's PIT, lookahead,
+lifecycle, accounting, independent-review, or formal-run requirements.
+
 ## Audit of the current flow
 
 **CURRENT_FLOW:** Candidate Review → independent Hypothesis Review → Data
