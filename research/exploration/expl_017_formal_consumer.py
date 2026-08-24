@@ -114,16 +114,19 @@ def load_verified_price_lifecycle_adapter(data_root: pathlib.Path):
     """Bind the immutable Price V1 snapshot and sidecar without running metrics."""
     import price_alpha_v1 as price  # local, price-only existing loader
 
-    dataset = price.load_dataset(data_root)
-    if (
-        dataset.manifest_sha256 != lifecycle.PRICE_MANIFEST_SHA
-        or dataset.pit_sha256 != lifecycle.PRICE_PIT_SHA
-        or len(dataset.bars) != 208
-    ):
-        raise FormalDataUnavailable("DATA_UNAVAILABLE: verified Price V1 identity differs")
-    events, sidecar_sha = lifecycle.load_sidecar()
-    lifecycle.verify_composite_identity(sidecar_sha)
-    _verify_price_v1_scope(dataset, events)
+    try:
+        dataset = price.load_dataset(data_root)
+        if (
+            dataset.manifest_sha256 != lifecycle.PRICE_MANIFEST_SHA
+            or dataset.pit_sha256 != lifecycle.PRICE_PIT_SHA
+            or len(dataset.bars) != 208
+        ):
+            raise FormalDataUnavailable("DATA_UNAVAILABLE: verified Price V1 identity differs")
+        events, sidecar_sha = lifecycle.load_sidecar()
+        lifecycle.verify_composite_identity(sidecar_sha)
+        _verify_price_v1_scope(dataset, events)
+    except (price.PriceAlphaError, lifecycle.LifecycleError, OSError, ValueError) as error:
+        raise FormalDataUnavailable(f"DATA_UNAVAILABLE: required formal input: {error}") from error
     return PriceV1FormalAdapter(dataset, lifecycle.LifecycleResolver(events))
 
 

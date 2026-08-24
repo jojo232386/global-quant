@@ -36,6 +36,8 @@ def test_formal_003_freeze_binds_the_reviewed_consumer_and_all_data_identities()
     assert identity["reviewed_core"]["sha256"] == digest(identity["reviewed_core"]["path"])
     assert identity["formal_consumer"]["sha256"] == digest(identity["formal_consumer"]["path"])
     assert identity["formal_runner"]["sha256"] == digest(identity["formal_runner"]["path"])
+    assert identity["lifecycle_runtime"]["sha256"] == digest(identity["lifecycle_runtime"]["path"])
+    assert identity["price_loader"]["sha256"] == digest(identity["price_loader"]["path"])
     assert identity["horizon_preflight"]["generator_sha256"] == digest(identity["horizon_preflight"]["generator_path"])
     assert consumer.FORMAL_METRICS_EXPOSED is False
 

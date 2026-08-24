@@ -283,6 +283,25 @@ def test_pit_mismatch_and_internal_required_gap_fail_closed():
         adapter.completed_bar("OLD", day(2022, 1, 2))
 
 
+def test_required_price_loader_failure_normalizes_to_data_unavailable(monkeypatch, tmp_path):
+    import price_alpha_v1 as price
+
+    def unavailable(_root):
+        raise price.PriceAlphaError("registered snapshot unavailable")
+
+    monkeypatch.setattr(price, "load_dataset", unavailable)
+    with pytest.raises(formal.FormalDataUnavailable, match="required formal input"):
+        formal.load_verified_price_lifecycle_adapter(tmp_path)
+
+
+def test_programmer_failure_is_not_misclassified_as_required_data(monkeypatch, tmp_path):
+    import price_alpha_v1 as price
+
+    monkeypatch.setattr(price, "load_dataset", lambda _root: (_ for _ in ()).throw(AssertionError("bug")))
+    with pytest.raises(AssertionError, match="bug"):
+        formal.load_verified_price_lifecycle_adapter(tmp_path)
+
+
 class PreFormalUnavailableFixture(SyntheticFixture):
     def __init__(self, base, failure):
         super().__init__(base)

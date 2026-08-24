@@ -13,7 +13,8 @@
   },
   "supersedes_pre_review_freezes": [
     {"freeze_sha": "de91c0a904a7c7b3faa0c95f18ad4f731e90fb2e", "reason": "Pre-review reporting wrapper lacked required frozen diagnostics; no approval, Price V1 execution, or formal metric exposure occurred."},
-    {"freeze_sha": "d22cfe39ccaa931658fe48f46de89ba0bd924568", "reason": "Independent review requested corrections to endpoint IC, one-shot durability, lifecycle denominator, regime attribution, and runtime/result identity; no approval or metric exposure occurred."}
+    {"freeze_sha": "d22cfe39ccaa931658fe48f46de89ba0bd924568", "reason": "Independent review requested corrections to endpoint IC, one-shot durability, lifecycle denominator, regime attribution, and runtime/result identity; no approval or metric exposure occurred."},
+    {"freeze_sha": "dc3d7905f8bb1b3aeae2cfec7a8e6915aef38290", "reason": "Independent review required loaded lifecycle and Price V1 module binding, deterministic data-load classification, explicit primary neighborhood gate, and corrected entrypoint text; no approval or metric exposure occurred."}
   ],
   "identity": {
     "price_v1": {
@@ -36,6 +37,14 @@
       "unresolved_symbol": "AKROUSDT",
       "unresolved_rule": "Remain active until a required missing bar raises DATA_UNAVAILABLE; never infer a terminal event from a future missing bar."
     },
+    "lifecycle_runtime": {
+      "path": "research/data/expl_017_lifecycle_v1.py",
+      "sha256": "03d538c98be2b5127cbad7b4d7b324d7d32594cb621efc17820d5d9d6f9e056f"
+    },
+    "price_loader": {
+      "path": "research/exploration/price_alpha_v1.py",
+      "sha256": "cb55371830b73f8a30fe50f43b48df37fcb5a77ef28154fb97c09917be80b76d"
+    },
     "composite": {
       "path": "research/data/expl-017-price-lifecycle-composite.json",
       "sha256": "5511caa8a0839fa9c0296f23e828988e6d1374d9cf3edaa2c8cb075e163050bd",
@@ -53,14 +62,14 @@
     },
     "formal_consumer": {
       "path": "research/exploration/expl_017_formal_consumer.py",
-      "sha256": "57f72614fe926caed21e8bca6c366e5a40446459b68ccf0a045110721330f1ce",
+      "sha256": "6aacc6341ca9593791eb89d3bbafa4b270957139d98f4c4016a0099d401fbad0",
       "entrypoint": "load_verified_price_lifecycle_adapter(data_root) then FormalConsumer(adapter, Config(...)).execute_schedule(frozen_schedule, frozen_final_timestamp)",
       "rule": "Reuse this reviewed core adapter and consumer; do not reimplement momentum, volatility, NAV, turnover, lifecycle accounting, or IC."
     },
     "formal_runner": {
       "path": "research/exploration/expl_017_formal_runner.py",
-      "sha256": "80957409273760c56fad3e25dd9cd894f651c1ac2129ad57d552782248ba87f0",
-      "entrypoint": "run(data_root, result_path) after a separate approved contract-review artifact binds this exact freeze SHA",
+      "sha256": "10ea4976e72f57da561e228c03aaecc251d704db38adb6c0ae1975d716a51f54",
+      "entrypoint": "run(data_root) after a separate approved contract-review artifact binds this exact freeze SHA",
       "rule": "This thin entry verifies the freeze, invokes only the bound adapter and consumer for all frozen cells, and writes exactly one result artifact."
     },
     "horizon_preflight": {

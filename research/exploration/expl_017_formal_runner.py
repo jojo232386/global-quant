@@ -19,6 +19,8 @@ from typing import Any, Mapping, Sequence
 
 import expl_017 as core
 import expl_017_formal_consumer as consumer
+import expl_017_lifecycle_v1 as lifecycle
+import price_alpha_v1 as price
 
 
 FORMAL_RUN_ID = "EXPL-017-FORMAL-003"
@@ -57,7 +59,7 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
     if not isinstance(identity, Mapping):
         raise FormalRunnerError("formal identity missing")
     root = pathlib.Path(__file__).resolve().parents[2]
-    for name in ("lifecycle_v1", "composite", "gold_oracle", "reviewed_core", "formal_consumer", "horizon_preflight", "formal_runner"):
+    for name in ("lifecycle_v1", "lifecycle_runtime", "price_loader", "composite", "gold_oracle", "reviewed_core", "formal_consumer", "horizon_preflight", "formal_runner"):
         item = identity.get(name)
         if not isinstance(item, Mapping):
             raise FormalRunnerError(f"formal {name} identity missing")
@@ -71,6 +73,10 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
             raise FormalRunnerError(f"formal {name} identity differs")
     if identity["formal_consumer"]["sha256"] != _sha256(pathlib.Path(consumer.__file__)):
         raise FormalRunnerError("loaded formal consumer differs")
+    if identity["lifecycle_runtime"]["sha256"] != _sha256(pathlib.Path(lifecycle.__file__)):
+        raise FormalRunnerError("loaded lifecycle runtime differs")
+    if identity["price_loader"]["sha256"] != _sha256(pathlib.Path(price.__file__)):
+        raise FormalRunnerError("loaded Price V1 loader differs")
     reviewed = freeze.get("reviewed_implementation_sha")
     if not isinstance(reviewed, str) or len(reviewed) != 40:
         raise FormalRunnerError("reviewed implementation identity missing")
@@ -326,7 +332,7 @@ def evaluate(cells: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
         "predictive": all(primary["ic"][key]["mean"] is not None and primary["ic"][key]["mean"] > 0 for key in ("oos", "holdout")) and primary["ic"]["oos_holdout"]["t_stat"] is not None and primary["ic"]["oos_holdout"]["t_stat"] >= 1.50,
         "regimes": all(regime[key]["count"] >= 20 and regime[key]["mean"] is not None and regime[key]["mean"] > 0 and regime[key]["baseline_return"] > 0 for key in ("calm", "high")),
         "multi_period": sum(baseline[key]["return"] > 0 for key in ("oos_h1", "oos_h2", "holdout_h1", "holdout_h2")) >= 3 and all(baseline[key]["max_drawdown"] >= -0.25 for key in ("oos_h1", "oos_h2", "holdout_h1", "holdout_h2")),
-        "neighborhood": sum(cell["portfolio"][str(core.COST)]["oos"]["return"] > 0 and cell["portfolio"][str(core.COST)]["holdout"]["return"] > 0 and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] is not None and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] >= 0.50 for cell in cells.values()) >= 3,
+        "neighborhood": (primary["portfolio"][str(core.COST)]["oos"]["return"] > 0 and primary["portfolio"][str(core.COST)]["holdout"]["return"] > 0 and primary["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] is not None and primary["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] >= 0.50) and sum(cell["portfolio"][str(core.COST)]["oos"]["return"] > 0 and cell["portfolio"][str(core.COST)]["holdout"]["return"] > 0 and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] is not None and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] >= 0.50 for cell in cells.values()) >= 3,
         "concentration": concentration["max_abs_incumbent_or_target_weight"] <= 0.15 and concentration["largest_symbol_absolute_net_contribution_share"] <= 0.20 and concentration["top_five_absolute_net_contribution_share"] <= 0.60,
         "lifecycle": concentration["largest_lifecycle_event_impact"] <= 0.20,
     }
