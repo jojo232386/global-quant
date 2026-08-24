@@ -141,6 +141,55 @@ def test_each_cross_split_or_dataset_horizon_is_runtime_ic_excluded_before_price
         assert contract.ic_included is False
 
 
+class ReadCountingVerifiedFormalFixture:
+    is_verified_formal = True
+    is_synthetic = False
+
+    def __init__(self):
+        self.reads = 0
+
+    def _read(self):
+        self.reads += 1
+        raise AssertionError("contract mismatch must reject before a fixture read")
+
+    universe = lambda self, timestamp: self._read()
+    decision_bar = lambda self, symbol, timestamp: self._read()
+    execution_open = lambda self, symbol, timestamp: self._read()
+    completed_bar = lambda self, symbol, timestamp: self._read()
+    lifecycle_as_of = lambda self, symbol, timestamp: self._read()
+    forward_return = lambda self, symbol, start, stop: self._read()
+
+
+def _preflight_contract(row):
+    return formal.HorizonContract(
+        decision_ms=day(*map(int, str(row["decision"]).split("-"))),
+        execution_ms=day(*map(int, str(row["execution"]).split("-"))),
+        endpoint_ms=day(*map(int, str(row["endpoint"]).split("-"))),
+        split=str(row["split"]),
+        ic_included=bool(row["ic_included"]),
+    )
+
+
+def test_verified_formal_binds_every_contract_to_static_preflight_before_reads():
+    fixture = ReadCountingVerifiedFormalFixture()
+    consumer = formal.FormalConsumer(fixture, GOLD_CONFIG)
+    boundaries = [
+        row for row in horizon.build_rows()
+        if row["reason"] in {horizon.HORIZON_CROSSES_SPLIT, horizon.HORIZON_CROSSES_SPLIT_AND_DATASET}
+    ]
+    assert [row["split"] for row in boundaries] == ["train", "oos", "holdout"]
+    for row in boundaries:
+        consumer.validate_contract(_preflight_contract(row))
+        expected = _preflight_contract(row)
+        tampered = formal.HorizonContract(
+            expected.decision_ms, expected.execution_ms, expected.endpoint_ms,
+            expected.split, True,
+        )
+        with pytest.raises(core.PreFormalError, match="differs from horizon preflight"):
+            consumer.execute(tampered)
+    assert fixture.reads == 0
+
+
 def test_complete_horizon_missing_endpoint_is_data_unavailable_not_truncated():
     base = day(2021, 4, 1)
     fixture = SyntheticFixture(base)
@@ -216,10 +265,10 @@ def test_formal_consumer_matches_reviewed_core_semantics_on_same_synthetic_fixtu
         assert formal.FormalConsumer._semantic_tuple(received) == formal.FormalConsumer._semantic_tuple(expected)
 
 
-def test_actual_adapter_and_legacy_formal_entry_remain_execution_locked():
+def test_actual_adapter_is_consumer_ready_and_legacy_formal_entry_remains_locked():
     adapter = formal.PriceV1FormalAdapter(FakePriceDataset({"OLD": {}}), lifecycle.LifecycleResolver({}))
-    with pytest.raises(formal.FormalMetricsExposureError, match="prohibited"):
-        formal.FormalConsumer(adapter, GOLD_CONFIG)
+    consumer = formal.FormalConsumer(adapter, GOLD_CONFIG)
+    assert consumer.fixture is adapter
     assert core.FORMAL_RUN_ID is None
     with pytest.raises(core.FormalRunLockedError, match="FORMAL_RUN_LOCKED"):
         core.formal_run()

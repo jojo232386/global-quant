@@ -25,6 +25,7 @@ COMPOSITE_PATH = Path(__file__).with_name("expl-017-price-lifecycle-composite.js
 TERMINATED_CONFIRMED = "TERMINATED_CONFIRMED"
 TERMINATED_UNCONFIRMED = "TERMINATED_UNCONFIRMED"
 DATA_CORRUPTION = "DATA_CORRUPTION"
+EVENT_TYPE = "USD_M_PERPETUAL_TERMINATION"
 
 
 class LifecycleError(RuntimeError):
@@ -110,11 +111,14 @@ def load_sidecar(path: Path = SIDECAR_PATH) -> tuple[dict[str, LifecycleEvent], 
         if not isinstance(raw, Mapping):
             raise LifecycleError("malformed lifecycle exception")
         symbol = raw.get("symbol")
+        event_type = raw.get("event_type")
         classification = raw.get("classification")
         if not isinstance(symbol, str) or not symbol.isalnum() or symbol != symbol.upper():
             raise LifecycleError("malformed lifecycle symbol")
         if classification not in {TERMINATED_CONFIRMED, TERMINATED_UNCONFIRMED}:
             raise LifecycleError("invalid lifecycle classification")
+        if event_type != EVENT_TYPE:
+            raise LifecycleError("invalid lifecycle event type")
         if symbol in events:
             raise LifecycleError("duplicate lifecycle symbol")
         effective = _parse_utc(str(raw.get("terminal_effective_at_utc")), field="effective")
@@ -122,15 +126,14 @@ def load_sidecar(path: Path = SIDECAR_PATH) -> tuple[dict[str, LifecycleEvent], 
         last_bar = _day_start(str(raw.get("last_valid_daily_bar_utc")), field="last valid bar")
         if published > effective:
             raise LifecycleError("announcement published after terminal effective time")
-        if classification == TERMINATED_CONFIRMED:
-            source = raw.get("evidence_source")
-            identity = raw.get("evidence_identity")
-            if not isinstance(source, Mapping) or not isinstance(identity, Mapping):
-                raise LifecycleError("confirmed terminal lacks primary evidence")
-            if not all(isinstance(source.get(key), str) and source[key] for key in ("announcement_url", "trade_archive_url")):
-                raise LifecycleError("confirmed terminal source incomplete")
-            if not all(isinstance(identity.get(key), str) and len(identity[key]) == 64 for key in ("announcement_response_sha256", "trade_archive_sha256")):
-                raise LifecycleError("confirmed terminal identity incomplete")
+        source = raw.get("evidence_source")
+        identity = raw.get("evidence_identity")
+        if not isinstance(source, Mapping) or not isinstance(identity, Mapping):
+            raise LifecycleError("lifecycle event lacks primary evidence")
+        if not all(isinstance(source.get(key), str) and source[key] for key in ("announcement_url", "trade_archive_url")):
+            raise LifecycleError("lifecycle event source incomplete")
+        if not all(isinstance(identity.get(key), str) and len(identity[key]) == 64 for key in ("announcement_response_sha256", "trade_archive_sha256")):
+            raise LifecycleError("lifecycle event identity incomplete")
         events[symbol] = LifecycleEvent(symbol, classification, effective, published, last_bar)
 
     confirmed = sum(item.classification == TERMINATED_CONFIRMED for item in events.values())

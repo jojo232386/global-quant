@@ -25,6 +25,7 @@ def test_sidecar_is_exception_only_and_bound_to_exact_price_v1_identity():
         for event in events.values()
     ) == 11
     assert events["AKROUSDT"].classification == lifecycle.TERMINATED_UNCONFIRMED
+    assert lifecycle.EVENT_TYPE == "USD_M_PERPETUAL_TERMINATION"
     assert len(lifecycle.verify_composite_identity(sidecar_sha)) == 64
 
 
@@ -57,6 +58,17 @@ def test_malformed_or_post_effective_primary_evidence_fails_closed(tmp_path):
     payload = target.read_text(encoding="utf-8")
     target.write_text(payload.replace("2022-04-04T05:21:50.096000Z", "2022-04-12T05:21:50.096000Z", 1), encoding="utf-8")
     with pytest.raises(lifecycle.LifecycleError, match="published after"):
+        lifecycle.load_sidecar(target)
+
+
+def test_every_exception_needs_a_typed_event_and_akro_keeps_auditable_conflict_evidence(tmp_path):
+    payload = lifecycle.SIDECAR_PATH.read_text(encoding="utf-8")
+    assert '"event_type":"USD_M_PERPETUAL_TERMINATION"' in payload
+    assert '"symbol":"AKROUSDT"' in payload
+    assert 'AKROUSDT/AKROUSDT-aggTrades-2022-05-27.zip' in payload
+    target = tmp_path / "sidecar.json"
+    target.write_text(payload.replace('"event_type":"USD_M_PERPETUAL_TERMINATION",', "", 1), encoding="utf-8")
+    with pytest.raises(lifecycle.LifecycleError, match="event type"):
         lifecycle.load_sidecar(target)
 
 

@@ -2,12 +2,13 @@
 
 This is deliberately not a formal-run entry point.  It adapts immutable Price
 V1 plus the exception-only Lifecycle V1 sidecar to the reviewed IMPL-014
-engine, and supports synthetic correctness fixtures only.  ``formal_run`` in
-``expl_017`` remains locked and no actual Train/OOS/Holdout metric is read.
+engine. ``formal_run`` in ``expl_017`` remains locked and no actual
+Train/OOS/Holdout metric is read in IMPL-016.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import pathlib
 import statistics
@@ -53,6 +54,8 @@ class HorizonContract:
             raise core.PreFormalError("horizon endpoint mismatch")
         if self.split not in {"train", "oos", "holdout"}:
             raise core.PreFormalError("horizon split invalid")
+        if type(self.ic_included) is not bool:
+            raise core.PreFormalError("horizon IC inclusion must be boolean")
 
 
 class PriceV1FormalAdapter:
@@ -127,7 +130,29 @@ def load_verified_price_lifecycle_adapter(data_root: pathlib.Path):
         raise FormalDataUnavailable("DATA_UNAVAILABLE: verified Price V1 identity differs")
     events, sidecar_sha = lifecycle.load_sidecar()
     lifecycle.verify_composite_identity(sidecar_sha)
+    _verify_price_v1_scope(dataset, events)
     return PriceV1FormalAdapter(dataset, lifecycle.LifecycleResolver(events))
+
+
+def _verify_price_v1_scope(dataset, events: Mapping[str, lifecycle.LifecycleEvent]) -> None:
+    """Recompute the exception-only audit from immutable loaded Price V1 bytes."""
+    cutoff = int(dt.datetime(2023, 12, 31, tzinfo=dt.UTC).timestamp() * 1000)
+    if len(dataset.bars) != 208 or set(dataset.bars) != set(dataset.last_timestamp):
+        raise FormalDataUnavailable("DATA_UNAVAILABLE: Price V1 symbol identity differs")
+    early: set[str] = set()
+    for symbol, series in dataset.bars.items():
+        timestamps = sorted(series)
+        if not timestamps or dataset.last_timestamp[symbol] != timestamps[-1]:
+            raise FormalDataUnavailable("DATA_UNAVAILABLE: Price V1 terminal index differs")
+        if any(right != left + core.DAY_MS for left, right in zip(timestamps, timestamps[1:])):
+            raise FormalDataUnavailable("DATA_UNAVAILABLE: Price V1 internal gap")
+        if timestamps[-1] == cutoff:
+            continue
+        if timestamps[-1] > cutoff:
+            raise FormalDataUnavailable("DATA_UNAVAILABLE: Price V1 exceeds cutoff")
+        early.add(symbol)
+    if len(early) != 12 or len(dataset.bars) - len(early) != 196 or early != set(events):
+        raise FormalDataUnavailable("DATA_UNAVAILABLE: lifecycle exception scope differs")
 
 
 def _average_ranks(values: Mapping[str, float]) -> dict[str, float]:
@@ -173,14 +198,17 @@ class ConsumerDecision:
 class FormalConsumer:
     """Three cost paths sharing one reviewed-engine semantics contract.
 
-    The consumer is intentionally restricted to synthetic fixtures in this
-    implementation attempt.  This provides a complete executable correctness
-    path without reading an actual formal performance value.
+    Verified Price V1 adapters are accepted so the consumer can be completely
+    bound before a later freeze.  Their contracts must exactly match the
+    already-reviewed static containment schedule.  This class does not
+    schedule a formal run, print, or serialize a metric.
     """
 
     def __init__(self, fixture, config: core.Config):
-        if getattr(fixture, "is_synthetic", False) is not True:
-            raise FormalMetricsExposureError("actual formal performance is prohibited")
+        self._synthetic = getattr(fixture, "is_synthetic", False) is True
+        self._verified_formal = getattr(fixture, "is_verified_formal", False) is True
+        if not (self._synthetic or self._verified_formal):
+            raise FormalMetricsExposureError("synthetic or verified formal fixture required")
         self.fixture = fixture
         self.config = config
         self.engines = {
@@ -197,6 +225,37 @@ class FormalConsumer:
         }
 
     @staticmethod
+    def _preflight_contracts() -> dict[int, HorizonContract]:
+        import expl_017_horizon_preflight as horizon
+
+        def timestamp(value: object) -> int:
+            parsed = dt.date.fromisoformat(str(value))
+            return int(
+                dt.datetime.combine(parsed, dt.time(), tzinfo=dt.UTC).timestamp()
+                * 1000
+            )
+
+        return {
+            timestamp(row["decision"]): HorizonContract(
+                decision_ms=timestamp(row["decision"]),
+                execution_ms=timestamp(row["execution"]),
+                endpoint_ms=timestamp(row["endpoint"]),
+                split=str(row["split"]),
+                ic_included=bool(row["ic_included"]),
+            )
+            for row in horizon.build_rows()
+        }
+
+    def validate_contract(self, contract: HorizonContract) -> None:
+        """Validate before any fixture accessor can read a price."""
+        contract.validate()
+        if not self._verified_formal:
+            return
+        expected = self._preflight_contracts().get(contract.decision_ms)
+        if expected != contract:
+            raise core.PreFormalError("verified formal contract differs from horizon preflight")
+
+    @staticmethod
     def _semantic_tuple(state: core.State) -> tuple[object, ...]:
         return (
             state.selected,
@@ -209,7 +268,7 @@ class FormalConsumer:
         )
 
     def execute(self, contract: HorizonContract) -> ConsumerDecision:
-        contract.validate()
+        self.validate_contract(contract)
         states = {
             cost: engine.execute(core.Decision(contract.decision_ms, contract.split))
             for cost, engine in self.engines.items()
