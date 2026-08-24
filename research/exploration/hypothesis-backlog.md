@@ -304,6 +304,15 @@ vol as a gate or target, not as a signal direction.
   terminal event from a future missing bar is prohibited lookahead. The only
   historical lifecycle audit is outside this lineage and is itself FAIL on
   `AKROUSDT:TERMINATED_UNCONFIRMED`, so it was not imported or used.
+  With explicit authorization, `EXPL-017-IMPL-016` added a separate,
+  exception-only Lifecycle V1 sidecar bound to immutable Price V1. Its scope
+  is 196 continuous symbols plus 12 early-ending exceptions: 11 confirmed
+  terminals and unresolved `AKROUSDT`, which stays active until a required
+  missing bar produces `DATA_UNAVAILABLE`. The complete Price/PIT/lifecycle,
+  signed IC, continuous three-cost portfolio, horizon, terminal exit, and
+  final-liquidation consumer passed independent review at implementation SHA
+  `df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a`. IMPL-016 is therefore
+  `CORRECTNESS_PASS_PRE_FREEZE`; this is not a formal result.
   Formal run count is zero and formal OOS/holdout performance remains unread;
   EXPL-017 stays active and has no market verdict or Factor Graveyard entry.
 
@@ -507,9 +516,9 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
-9. EXPL-017: PRE_FORMAL_ACTIVE; implementation attempt EXPL-017-IMPL-014 is
-   CORRECTNESS_PASS_CORE_ONLY and EXPL-017-IMPL-015 is
-   DATA_UNAVAILABLE_PRE_FORMAL. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
+9. EXPL-017: PRE_FORMAL_ACTIVE; EXPL-017-IMPL-016 is
+   CORRECTNESS_PASS_PRE_FREEZE after the separately bound Lifecycle V1 and
+   complete formal consumer passed independent review. EXPL-017-FORMAL-001 is PROCESS_DEFECT / NOT_RUN
    and EXPL-017-FORMAL-002 is INVALID_BEFORE_EXECUTION after contract review;
    aggregate formal run count remains zero, with no market verdict or Factor
    Graveyard entry.
