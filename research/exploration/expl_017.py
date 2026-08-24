@@ -60,7 +60,7 @@ class Config:
             and self.horizons == (1, 2)
             and self.volatility_window == 2
         )
-        if not (production or gold_fixture) or self.cost != COST:
+        if not (production or gold_fixture) or self.cost not in {0.0, COST, 0.003}:
             raise PreFormalError("frozen configuration violated")
 
 
@@ -184,8 +184,11 @@ class Portfolio:
 
 class Engine:
     def __init__(self, fixture, config: Config = Config()):
-        if getattr(fixture, "is_synthetic", False) is not True:
-            raise PreFormalError("synthetic fixtures only")
+        if not (
+            getattr(fixture, "is_synthetic", False) is True
+            or getattr(fixture, "is_verified_formal", False) is True
+        ):
+            raise PreFormalError("synthetic or verified formal fixture required")
         config.validate()
         self.fixture = fixture
         self.config = config
