@@ -84,6 +84,21 @@ def contracts(base: int) -> list[formal.HorizonContract]:
     ]
 
 
+def continuous_contracts(base: int) -> list[formal.HorizonContract]:
+    """Independent bounded schedule with one train-to-OOS label transition."""
+    output = contracts(base)
+    output.append(
+        formal.HorizonContract(
+            decision_ms=base + 63 * core.DAY_MS,
+            execution_ms=base + 64 * core.DAY_MS,
+            endpoint_ms=base + 71 * core.DAY_MS,
+            split="oos",
+            ic_included=True,
+        )
+    )
+    return output
+
+
 def test_normal_active_complete_ic_and_three_cost_paths_have_independent_expected_value():
     base = day(2021, 4, 1)
     fixture = SyntheticFixture(base)
@@ -190,6 +205,20 @@ def test_verified_formal_binds_every_contract_to_static_preflight_before_reads()
     assert fixture.reads == 0
 
 
+def test_verified_formal_schedule_must_be_complete_ordered_and_finalized_at_frozen_day_before_reads():
+    fixture = ReadCountingVerifiedFormalFixture()
+    consumer = formal.FormalConsumer(fixture, GOLD_CONFIG)
+    schedule = tuple(_preflight_contract(row) for row in horizon.build_rows())
+    assert len(schedule) == 157
+    assert consumer.validate_schedule(schedule, formal.FormalConsumer._frozen_final_timestamp()) == schedule
+    for invalid in (schedule[:-1], tuple(reversed(schedule))):
+        with pytest.raises(core.PreFormalError, match="schedule"):
+            consumer.execute_schedule(invalid, formal.FormalConsumer._frozen_final_timestamp())
+    with pytest.raises(core.PreFormalError, match="schedule"):
+        consumer.execute_schedule(schedule, formal.FormalConsumer._frozen_final_timestamp() - core.DAY_MS)
+    assert fixture.reads == 0
+
+
 def test_complete_horizon_missing_endpoint_is_data_unavailable_not_truncated():
     base = day(2021, 4, 1)
     fixture = SyntheticFixture(base)
@@ -251,6 +280,111 @@ def test_pit_mismatch_and_internal_required_gap_fail_closed():
         adapter.universe(-1)
     with pytest.raises(formal.FormalDataUnavailable, match="DATA_UNAVAILABLE"):
         adapter.completed_bar("OLD", day(2022, 1, 2))
+
+
+class PreFormalUnavailableFixture(SyntheticFixture):
+    def __init__(self, base, failure):
+        super().__init__(base)
+        self.failure = failure
+        self.root = KeyError("independent missing input")
+
+    def universe(self, effective_timestamp):
+        if self.failure == "universe":
+            raise formal.FormalDataUnavailable("DATA_UNAVAILABLE: preserved PIT") from self.root
+        return super().universe(effective_timestamp)
+
+    def lifecycle_as_of(self, symbol, timestamp):
+        if self.failure == "lifecycle":
+            raise formal.FormalDataUnavailable("DATA_UNAVAILABLE: preserved lifecycle") from self.root
+        return super().lifecycle_as_of(symbol, timestamp)
+
+
+@pytest.mark.parametrize("failure, expected", [("universe", "PIT"), ("lifecycle", "lifecycle")])
+def test_core_preserves_adapter_data_unavailable_class_and_cause(failure, expected):
+    fixture = PreFormalUnavailableFixture(day(2021, 4, 1), failure)
+    with pytest.raises(formal.FormalDataUnavailable, match=expected) as raised:
+        core.Engine(fixture, GOLD_CONFIG).execute(core.Decision(fixture.base, "train"))
+    assert isinstance(raised.value.__cause__, KeyError)
+
+
+class NoMetricScheduleFixture(SyntheticFixture):
+    def forward_return(self, symbol, execution_ms, endpoint_ms):
+        raise AssertionError("accounting schedule must not compute IC or performance")
+
+
+def test_consumer_schedule_has_continuous_three_cost_accounting_across_split_and_finalizes():
+    base = day(2021, 4, 1)
+    final_timestamp = base + 67 * core.DAY_MS
+    consumer = formal.FormalConsumer(NoMetricScheduleFixture(base), GOLD_CONFIG)
+    outcome = consumer.execute_schedule(continuous_contracts(base), final_timestamp)
+    assert len(outcome.states) == 10
+    assert outcome.states[-2][core.COST].regime in {"calm", "high"}
+    assert outcome.states[-1][core.COST].regime in {"calm", "high"}
+    assert set(outcome.accounting) == {0.0, core.COST, 0.003}
+    for cost, ledger in outcome.accounting.items():
+        assert [entry.timestamp for entry in ledger] == list(
+            range(base, final_timestamp + core.DAY_MS, core.DAY_MS)
+        )
+        assert ledger[-1].finalization is True
+        assert ledger[-1].notionals == ()
+        assert ledger[-1].turnover > 0
+        assert ledger[-1].cost >= 0
+        assert outcome.lifecycle_exits[cost]
+    assert outcome.accounting[0.0][-1].cost == 0.0
+    assert outcome.accounting[core.COST][-1].cost > 0.0
+    assert outcome.accounting[0.003][-1].cost > outcome.accounting[core.COST][-1].cost
+    assert not hasattr(outcome, "ic")
+
+
+def test_finalization_independently_marks_open_to_close_then_charges_each_exit():
+    final_timestamp = day(2021, 6, 7)
+    fixture = SyntheticFixture(day(2021, 4, 1))
+    fixture.bars["A"][final_timestamp] = core.CompletedBar(100.0, 120.0)
+    fixture.bars["E"][final_timestamp] = core.CompletedBar(100.0, 80.0)
+    engine = core.Engine(fixture, GOLD_CONFIG)
+    engine.portfolio.cash = 1.0
+    engine.portfolio.notionals = {"A": 0.5, "E": -0.5}
+    engine.last_mark_ms = final_timestamp
+    engine.last_execution_ms = final_timestamp - core.DAY_MS
+    exits = engine.finalize(final_timestamp)
+    # Manual cash/notional algebra: after final mark, A=0.6 and E=-0.4.
+    nav_before_a = 1.2
+    a_cost = 0.6 * core.COST
+    nav_after_a = nav_before_a - a_cost
+    e_cost = 0.4 * core.COST
+    expected_turnover = 0.6 / nav_before_a + 0.4 / nav_after_a
+    assert [(item.symbol, item.timestamp) for item in exits] == [
+        ("A", final_timestamp), ("E", final_timestamp)
+    ]
+    assert exits[0].nav_before == pytest.approx(nav_before_a)
+    assert exits[0].turnover == pytest.approx(0.5)
+    assert exits[0].cost == pytest.approx(a_cost)
+    final_entry = engine.accounting[-1]
+    assert final_entry.turnover == pytest.approx(expected_turnover)
+    assert final_entry.cost == pytest.approx(a_cost + e_cost)
+    assert final_entry.nav == pytest.approx(nav_after_a - e_cost)
+
+
+def test_adapter_resolver_terminal_exit_enters_consumer_accounting_without_forward_fill():
+    terminal = day(2022, 5, 3)
+    event = lifecycle.LifecycleEvent(
+        "OLD", lifecycle.TERMINATED_CONFIRMED,
+        terminal + 4 * 60 * 60 * 1000, terminal - 2 * 60 * 60 * 1000, terminal,
+    )
+    adapter = formal.PriceV1FormalAdapter(
+        FakePriceDataset({"OLD": {terminal: FakeBar(100, 110)}}),
+        lifecycle.LifecycleResolver({"OLD": event}),
+    )
+    engine = core.Engine(adapter, GOLD_CONFIG)
+    engine.portfolio.cash = 1.0
+    engine.portfolio.notionals = {"OLD": 0.5}
+    engine.last_mark_ms = terminal
+    engine.last_execution_ms = terminal - core.DAY_MS
+    exits = engine.advance_to(terminal + core.DAY_MS)
+    assert [(item.symbol, item.timestamp) for item in exits] == [("OLD", terminal)]
+    assert engine.portfolio.notionals == {}
+    assert engine.accounting[-1].exits == exits
+    assert engine.accounting[-1].nav == pytest.approx(1.0 + 0.55 - 0.55 * core.COST)
 
 
 def test_formal_consumer_matches_reviewed_core_semantics_on_same_synthetic_fixture():

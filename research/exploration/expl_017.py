@@ -80,6 +80,20 @@ class Exit:
 
 
 @dataclass(frozen=True)
+class AccountingEntry:
+    """One continuous portfolio accounting checkpoint, not a performance metric."""
+
+    timestamp: int
+    nav: float
+    cash: float
+    notionals: tuple[tuple[str, float], ...]
+    turnover: float
+    cost: float
+    exits: tuple[Exit, ...]
+    finalization: bool
+
+
+@dataclass(frozen=True)
 class State:
     selected: tuple[str, ...]
     momentum: dict[str, float]
@@ -105,6 +119,8 @@ class _Snapshot:
     train: list[float]
     fixed: float | None
     left_train: bool
+    accounting: list[AccountingEntry]
+    finalized_at: int | None
 
 
 def pos(value: float) -> bool:
@@ -200,6 +216,8 @@ class Engine:
         self.train: list[float] = []
         self.fixed: float | None = None
         self.left_train = False
+        self.accounting: list[AccountingEntry] = []
+        self.finalized_at: int | None = None
 
     def _snapshot(self) -> _Snapshot:
         return _Snapshot(
@@ -212,6 +230,8 @@ class Engine:
             train=list(self.train),
             fixed=self.fixed,
             left_train=self.left_train,
+            accounting=list(self.accounting),
+            finalized_at=self.finalized_at,
         )
 
     def _restore(self, snapshot: _Snapshot) -> None:
@@ -224,6 +244,39 @@ class Engine:
         self.train = list(snapshot.train)
         self.fixed = snapshot.fixed
         self.left_train = snapshot.left_train
+        self.accounting = list(snapshot.accounting)
+        self.finalized_at = snapshot.finalized_at
+
+    def _record(
+        self,
+        timestamp: int,
+        turnover: float = 0.0,
+        cost: float = 0.0,
+        exits: tuple[Exit, ...] = (),
+        finalization: bool = False,
+    ) -> None:
+        """Keep one mergeable NAV/accounting checkpoint per UTC date."""
+        if self.accounting and timestamp < self.accounting[-1].timestamp:
+            raise PreFormalError("accounting timeline")
+        prior = self.accounting[-1] if self.accounting and self.accounting[-1].timestamp == timestamp else None
+        if prior is not None:
+            turnover += prior.turnover
+            cost += prior.cost
+            exits = prior.exits + exits
+            finalization = finalization or prior.finalization
+            self.accounting.pop()
+        self.accounting.append(
+            AccountingEntry(
+                timestamp=timestamp,
+                nav=self.portfolio.nav(),
+                cash=self.portfolio.cash,
+                notionals=tuple(sorted(self.portfolio.notionals.items())),
+                turnover=turnover,
+                cost=cost,
+                exits=exits,
+                finalization=finalization,
+            )
+        )
 
     def _decision(self, symbol: str, timestamp: int) -> DecisionBar:
         try:
@@ -259,6 +312,8 @@ class Engine:
     def _read_status(self, symbol: str, asof: int) -> LifecycleStatus:
         try:
             value = self.fixture.lifecycle_as_of(symbol, asof)
+        except PreFormalError:
+            raise
         except Exception as error:
             raise PreFormalError("lifecycle status unavailable") from error
         if not isinstance(value, LifecycleStatus):
@@ -284,6 +339,8 @@ class Engine:
     def _universe(self, effective_timestamp: int) -> tuple[str, ...]:
         try:
             raw = self.fixture.universe(effective_timestamp)
+        except PreFormalError:
+            raise
         except Exception as error:
             raise PreFormalError("PIT universe unavailable") from error
         if type(raw) not in {tuple, list}:
@@ -356,6 +413,12 @@ class Engine:
                 for symbol in self.portfolio.notionals
             }
             self.portfolio.mark(relatives)
+        self._record(
+            timestamp + DAY_MS if move else timestamp,
+            turnover=sum(item.turnover for item in exits),
+            cost=sum(item.cost for item in exits),
+            exits=tuple(exits),
+        )
         return tuple(exits)
 
     def _advance_to(
@@ -504,6 +567,8 @@ class Engine:
         }
 
     def _execute(self, decision: Decision) -> State:
+        if self.finalized_at is not None:
+            raise PreFormalError("execution after finalization")
         execution_timestamp = decision.close_ms + DAY_MS
         if (execution_timestamp - ANCHOR_MS) % (7 * DAY_MS):
             raise PreFormalError("not weekly")
@@ -522,6 +587,7 @@ class Engine:
         nav_before_trade = self.portfolio.nav()
         incumbent = self.portfolio.weights()
         turnover, cost = self.portfolio.trade(target, self.config.cost)
+        self._record(execution_timestamp, turnover, cost)
         self.last_execution_ms = execution_timestamp
         return State(
             selected,
@@ -541,6 +607,49 @@ class Engine:
         snapshot = self._snapshot()
         try:
             return self._execute(decision)
+        except BaseException:
+            self._restore(snapshot)
+            raise
+
+    def _finalize(self, final_timestamp: int) -> tuple[Exit, ...]:
+        if self.finalized_at is not None:
+            raise PreFormalError("duplicate finalization")
+        if self.last_execution_ms is None or self.last_mark_ms is None:
+            raise PreFormalError("finalization before execution")
+        if final_timestamp < self.last_mark_ms or (final_timestamp - ANCHOR_MS) % DAY_MS:
+            raise PreFormalError("finalization timeline")
+        prior_exits = list(self._advance_to(final_timestamp))
+        final_exits: list[Exit] = []
+        if self.portfolio.notionals:
+            bars = {
+                symbol: self._bar(symbol, final_timestamp)
+                for symbol in self.portfolio.notionals
+            }
+            self.portfolio.mark(
+                {
+                    symbol: bars[symbol].close / bars[symbol].open
+                    for symbol in self.portfolio.notionals
+                }
+            )
+            final_exits.extend(
+                self.portfolio.exit(symbol, self.config.cost, final_timestamp)
+                for symbol in sorted(self.portfolio.notionals)
+            )
+        self.finalized_at = final_timestamp
+        self._record(
+            final_timestamp,
+            turnover=sum(item.turnover for item in final_exits),
+            cost=sum(item.cost for item in final_exits),
+            exits=tuple(final_exits),
+            finalization=True,
+        )
+        return tuple(prior_exits + final_exits)
+
+    def finalize(self, final_timestamp: int) -> tuple[Exit, ...]:
+        """Mark the frozen final daily bar then force exits using Portfolio.exit."""
+        snapshot = self._snapshot()
+        try:
+            return self._finalize(final_timestamp)
         except BaseException:
             self._restore(snapshot)
             raise

@@ -195,6 +195,15 @@ class ConsumerDecision:
     ic: float | None
 
 
+@dataclass(frozen=True)
+class ConsumerSchedule:
+    """Unaggregated continuous accounting evidence; never a formal result."""
+
+    states: tuple[Mapping[float, core.State], ...]
+    accounting: Mapping[float, tuple[core.AccountingEntry, ...]]
+    lifecycle_exits: Mapping[float, tuple[core.Exit, ...]]
+
+
 class FormalConsumer:
     """Three cost paths sharing one reviewed-engine semantics contract.
 
@@ -256,6 +265,39 @@ class FormalConsumer:
             raise core.PreFormalError("verified formal contract differs from horizon preflight")
 
     @staticmethod
+    def _preflight_schedule() -> tuple[HorizonContract, ...]:
+        return tuple(FormalConsumer._preflight_contracts().values())
+
+    @staticmethod
+    def _frozen_final_timestamp() -> int:
+        return int(dt.datetime(2023, 12, 31, tzinfo=dt.UTC).timestamp() * 1000)
+
+    def validate_schedule(
+        self, contracts: Sequence[HorizonContract], final_timestamp: int
+    ) -> tuple[HorizonContract, ...]:
+        """Validate the complete contract before any fixture accessor can read."""
+        schedule = tuple(contracts)
+        if not schedule:
+            raise core.PreFormalError("empty schedule")
+        if any(
+            later.decision_ms <= earlier.decision_ms
+            for earlier, later in zip(schedule, schedule[1:])
+        ):
+            raise core.PreFormalError("schedule order")
+        for contract in schedule:
+            contract.validate()
+        if type(final_timestamp) is not int or (final_timestamp - core.ANCHOR_MS) % core.DAY_MS:
+            raise core.PreFormalError("final timestamp")
+        if final_timestamp < schedule[-1].execution_ms:
+            raise core.PreFormalError("finalization before last execution")
+        if self._verified_formal and (
+            schedule != self._preflight_schedule()
+            or final_timestamp != self._frozen_final_timestamp()
+        ):
+            raise core.PreFormalError("verified formal schedule differs from horizon preflight")
+        return schedule
+
+    @staticmethod
     def _semantic_tuple(state: core.State) -> tuple[object, ...]:
         return (
             state.selected,
@@ -296,3 +338,34 @@ class FormalConsumer:
             }
             ic = spearman(oriented, raw_returns)
         return ConsumerDecision(states=states, ic=ic)
+
+    def execute_schedule(
+        self, contracts: Sequence[HorizonContract], final_timestamp: int
+    ) -> ConsumerSchedule:
+        """Run one continuous, unaggregated accounting path per frozen cost.
+
+        This deliberately avoids forward-return/IC computation and emits no
+        return, Sharpe, drawdown, or other formal performance aggregation.
+        """
+        schedule = self.validate_schedule(contracts, final_timestamp)
+        states: list[Mapping[float, core.State]] = []
+        for contract in schedule:
+            current = {
+                cost: engine.execute(core.Decision(contract.decision_ms, contract.split))
+                for cost, engine in self.engines.items()
+            }
+            semantics = [self._semantic_tuple(item) for item in current.values()]
+            if any(item != semantics[0] for item in semantics[1:]):
+                raise core.PreFormalError("cost path signal semantic parity failed")
+            states.append(current)
+        final_exits = {
+            cost: engine.finalize(final_timestamp)
+            for cost, engine in self.engines.items()
+        }
+        return ConsumerSchedule(
+            states=tuple(states),
+            accounting={
+                cost: tuple(engine.accounting) for cost, engine in self.engines.items()
+            },
+            lifecycle_exits=final_exits,
+        )
