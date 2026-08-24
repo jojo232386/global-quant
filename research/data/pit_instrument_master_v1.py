@@ -62,10 +62,13 @@ CDX_RETRIEVED_UTC = "2026-08-24T14:44:44Z"
 ORIGINAL_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 SNAPSHOT_SHA256 = "0c3613accfe9acf01cb6fb0523835ee52dea17f1a7df9de84e6a1fe39e27dfd2"
 CDX_SHA256 = "b4e48f0a4e86b55f8158599d56adb0465d3a74b7aab3034ddfb7c818e2f59ac1"
+ACTIVITY_SHA256 = "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3"
+LIFECYCLE_SHA256 = "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc"
 SUPPLEMENTAL_LIFECYCLE_SHA256 = (
     "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8"
 )
-COVERAGE_END_UTC = "2023-11-15T00:00:00Z"
+COVERAGE_END_UTC = "2023-11-14T00:00:00Z"
+ZERO_TAIL_START_UTC = "2023-11-15T00:00:00Z"
 EXPECTED_COHORT_SIZE = 80
 CANONICAL_TERMINALS = {"BZRXUSDT", "YFIIUSDT"}
 SUPPLEMENTAL_TERMINALS = {"CVCUSDT", "HNTUSDT", "SRMUSDT"}
@@ -323,6 +326,8 @@ def capture_price_activity(
 
 
 def _load_activity() -> dict[str, Mapping[str, Any]]:
+    if sha256_file(ACTIVITY_PATH) != ACTIVITY_SHA256:
+        raise InstrumentMasterError("Price V1 activity artifact SHA-256 mismatch")
     payload = _load_json(ACTIVITY_PATH)
     if not isinstance(payload, Mapping) or payload.get("artifact_class") != ACTIVITY_CLASS:
         raise InstrumentMasterError("Price V1 activity artifact identity differs")
@@ -367,7 +372,18 @@ def _load_activity() -> dict[str, Mapping[str, Any]]:
         last = _parse_utc(row.get("last_bar_open_utc"), field="last bar")
         if not first <= last_positive <= last:
             raise InstrumentMasterError("Price V1 activity timestamps differ")
-        if not isinstance(row.get("source_file_sha256"), str) or len(row["source_file_sha256"]) != 64:
+        if row.get("source_role") != f"kline.{symbol}":
+            raise InstrumentMasterError("Price V1 activity role identity differs")
+        if type(row.get("row_count")) is not int or row["row_count"] <= 0:
+            raise InstrumentMasterError("Price V1 activity row count differs")
+        if (
+            not isinstance(row.get("source_file_sha256"), str)
+            or len(row["source_file_sha256"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in row["source_file_sha256"]
+            )
+        ):
             raise InstrumentMasterError("Price V1 activity file identity is absent")
         output[symbol] = row
     return output
@@ -464,7 +480,7 @@ def _load_supplemental_events() -> tuple[
         raise InstrumentMasterError("unresolved coverage stop is absent")
     required_stop = {
         "classification": "LIFECYCLE_UNRESOLVED_NO_TERMINAL_INFERENCE",
-        "coverage_end_exclusive_utc": COVERAGE_END_UTC,
+        "coverage_end_exclusive_utc": ZERO_TAIL_START_UTC,
         "last_positive_quote_volume_bar_open_utc": "2023-11-14T00:00:00.000Z",
         "first_zero_quote_volume_tail_bar_open_utc": "2023-11-15T00:00:00.000Z",
         "trailing_zero_quote_volume_day_count": EXPECTED_ZERO_TAILS[
@@ -500,7 +516,11 @@ def build_master() -> dict[str, Any]:
     if set(activity) != set(cohort):
         raise InstrumentMasterError("historical cohort and Price V1 activity differ")
 
+    if sha256_file(LIFECYCLE_PATH) != LIFECYCLE_SHA256:
+        raise InstrumentMasterError("canonical Lifecycle V1 SHA-256 mismatch")
     events, lifecycle_sha = load_sidecar(LIFECYCLE_PATH)
+    if lifecycle_sha != LIFECYCLE_SHA256:
+        raise InstrumentMasterError("canonical Lifecycle V1 identity differs")
     lifecycle_raw = _load_json(LIFECYCLE_PATH)
     raw_events = {row["symbol"]: row for row in lifecycle_raw["exceptions"]}
     canonical_events = {symbol: event for symbol, event in events.items() if symbol in cohort}
@@ -640,16 +660,16 @@ def build_master() -> dict[str, Any]:
             "coverage_start_inclusive_utc": response_utc,
             "coverage_end_exclusive_utc": COVERAGE_END_UTC,
             "coverage_end_reason": (
-                "TOMOUSDT_POST_2023_11_14_LIFECYCLE_UNRESOLVED; "
-                "ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
+                "TOMOUSDT_2023_11_14_DAILY_BAR_OPEN_CANNOT_PROVE_INTRADAY_STATUS; "
+                "POST_BAR_ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
             ),
             "scope_limit": "FIXED_COHORT_NOT_COMPLETE_DYNAMIC_MARKET_UNIVERSE",
         },
         "input_lineage": {
             "wayback_exchange_info_sha256": SNAPSHOT_SHA256,
             "wayback_cdx_sha256": CDX_SHA256,
-            "price_activity_sha256": sha256_file(ACTIVITY_PATH),
-            "lifecycle_sidecar_sha256": lifecycle_sha,
+            "price_activity_sha256": ACTIVITY_SHA256,
+            "lifecycle_sidecar_sha256": LIFECYCLE_SHA256,
             "supplemental_terminal_evidence_sha256": supplemental_sha,
         },
         "availability_contract": {

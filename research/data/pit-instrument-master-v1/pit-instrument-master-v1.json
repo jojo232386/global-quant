@@ -15,8 +15,8 @@
   },
   "cohort": {
     "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
-    "coverage_end_exclusive_utc": "2023-11-15T00:00:00Z",
-    "coverage_end_reason": "TOMOUSDT_POST_2023_11_14_LIFECYCLE_UNRESOLVED; ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE",
+    "coverage_end_exclusive_utc": "2023-11-14T00:00:00Z",
+    "coverage_end_reason": "TOMOUSDT_2023_11_14_DAILY_BAR_OPEN_CANNOT_PROVE_INTRADAY_STATUS; POST_BAR_ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE",
     "coverage_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
     "definition": "All 80 TRADING USDT-quoted PERPETUAL instruments in the archived official Binance USD-M exchangeInfo response at the frozen capture",
     "formally_tier2_admitted_symbol_count": 0,
@@ -106,7 +106,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -170,7 +170,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -234,7 +234,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -298,7 +298,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -362,7 +362,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -426,7 +426,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -490,7 +490,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -554,7 +554,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -618,7 +618,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -682,7 +682,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -746,7 +746,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -810,7 +810,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -874,7 +874,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -938,7 +938,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1002,7 +1002,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1066,7 +1066,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1202,7 +1202,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1266,7 +1266,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1330,7 +1330,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1467,7 +1467,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1531,7 +1531,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1595,7 +1595,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1659,7 +1659,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1723,7 +1723,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1787,7 +1787,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1851,7 +1851,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1915,7 +1915,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -1979,7 +1979,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2043,7 +2043,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2107,7 +2107,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2171,7 +2171,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2235,7 +2235,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2372,7 +2372,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2436,7 +2436,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2500,7 +2500,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2564,7 +2564,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2628,7 +2628,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2692,7 +2692,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2756,7 +2756,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2820,7 +2820,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2884,7 +2884,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -2948,7 +2948,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3012,7 +3012,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3076,7 +3076,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3140,7 +3140,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3204,7 +3204,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3268,7 +3268,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3332,7 +3332,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3396,7 +3396,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3460,7 +3460,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3524,7 +3524,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3588,7 +3588,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3652,7 +3652,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3716,7 +3716,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3780,7 +3780,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3844,7 +3844,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -3981,7 +3981,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4045,7 +4045,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4109,7 +4109,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4173,7 +4173,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4237,7 +4237,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4301,7 +4301,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4365,7 +4365,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4429,7 +4429,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4493,7 +4493,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4557,7 +4557,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4621,7 +4621,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4685,7 +4685,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4749,7 +4749,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4813,7 +4813,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -4949,7 +4949,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -5013,7 +5013,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -5077,7 +5077,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -5141,7 +5141,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }
@@ -5205,7 +5205,7 @@
       },
       "status_intervals": [
         {
-          "end_exclusive_utc": "2023-11-15T00:00:00Z",
+          "end_exclusive_utc": "2023-11-14T00:00:00Z",
           "start_inclusive_utc": "2021-01-04T19:51:02.039Z",
           "status": "TRADING_CONFIRMED"
         }

@@ -26,10 +26,10 @@ def test_committed_master_matches_deterministic_rebuild() -> None:
         "formally_tier2_admitted_symbol_count": 0,
         "tier2_data_foundation_ready": False,
         "coverage_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
-        "coverage_end_exclusive_utc": "2023-11-15T00:00:00Z",
+        "coverage_end_exclusive_utc": "2023-11-14T00:00:00Z",
         "coverage_end_reason": (
-            "TOMOUSDT_POST_2023_11_14_LIFECYCLE_UNRESOLVED; "
-            "ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
+            "TOMOUSDT_2023_11_14_DAILY_BAR_OPEN_CANNOT_PROVE_INTRADAY_STATUS; "
+            "POST_BAR_ZERO_VOLUME_TAIL_NOT_TERMINAL_EVIDENCE"
         ),
         "scope_limit": "FIXED_COHORT_NOT_COMPLETE_DYNAMIC_MARKET_UNIVERSE",
     }
@@ -111,9 +111,8 @@ def test_price_activity_is_hash_bound_gap_free_and_vintage_fail_closed() -> None
     payload = master.load_master()
     activity = json.loads(master.ACTIVITY_PATH.read_text(encoding="utf-8"))
 
-    assert payload["input_lineage"]["price_activity_sha256"] == master.sha256_file(
-        master.ACTIVITY_PATH
-    )
+    assert payload["input_lineage"]["price_activity_sha256"] == master.ACTIVITY_SHA256
+    assert master.sha256_file(master.ACTIVITY_PATH) == master.ACTIVITY_SHA256
     assert activity["source"]["integrity_verdict"] == "VERIFIED"
     assert activity["source"]["quality_verdict"] == "PASS"
     assert activity["source"]["numeric_vintage_lineage"] == "VINTAGE_UNVERIFIED"
@@ -189,13 +188,16 @@ def test_supplemental_terminals_are_hash_bound_and_tomo_stops_global_coverage() 
         for symbol in master.SUPPLEMENTAL_TERMINALS
     )
     assert records["TOMOUSDT"]["terminal_evidence"] is None
-    assert "TOMOUSDT" in master.universe_at(payload, "2023-11-14T23:59:59Z")
+    assert "TOMOUSDT" in master.universe_at(payload, "2023-11-13T23:59:59Z")
+    with pytest.raises(master.InstrumentMasterError, match="outside the proven cohort window"):
+        master.universe_at(payload, "2023-11-14T00:00:00Z")
 
 
 @pytest.mark.parametrize(
     "timestamp",
     [
         "2021-01-04T19:51:02.038Z",
+        "2023-11-14T00:00:00Z",
         "2023-11-15T00:00:00Z",
         "2023-12-31T00:00:00Z",
         "2025-01-01T00:00:00Z",
@@ -256,9 +258,38 @@ def test_duplicate_activity_identity_fails_closed(
     path = tmp_path / "activity.json"
     path.write_text(json.dumps(activity), encoding="utf-8")
     monkeypatch.setattr(master, "ACTIVITY_PATH", path)
+    monkeypatch.setattr(master, "ACTIVITY_SHA256", master.sha256_file(path))
 
     with pytest.raises(master.InstrumentMasterError, match="duplicate"):
         master._load_activity()
+
+
+def test_activity_artifact_tampering_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    activity = json.loads(master.ACTIVITY_PATH.read_text(encoding="utf-8"))
+    activity["records"][0]["source_file_sha256"] = "0" * 64
+    path = tmp_path / "activity.json"
+    path.write_text(json.dumps(activity), encoding="utf-8")
+    monkeypatch.setattr(master, "ACTIVITY_PATH", path)
+
+    with pytest.raises(master.InstrumentMasterError, match="artifact SHA-256 mismatch"):
+        master._load_activity()
+
+
+def test_canonical_lifecycle_tampering_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    payload = master.LIFECYCLE_PATH.read_text(encoding="utf-8")
+    path = tmp_path / "lifecycle.json"
+    path.write_text(
+        payload.replace("2021-12-19T02:00:00Z", "2021-12-19T02:01:00Z", 1),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(master, "LIFECYCLE_PATH", path)
+
+    with pytest.raises(master.InstrumentMasterError, match="Lifecycle V1 SHA-256 mismatch"):
+        master.build_master()
 
 
 def test_supplemental_terminal_evidence_tampering_fails_closed(

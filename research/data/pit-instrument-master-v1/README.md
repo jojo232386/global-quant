@@ -14,9 +14,11 @@ rows, but a row with zero quote volume is not promoted to trading activity.
 `BZRXUSDT` and `YFIIUSDT` reuse the existing official terminal evidence;
 `CVCUSDT`, `HNTUSDT`, and `SRMUSDT` bind the same class of official announcement
 plus aggregate-trade evidence in a cohort-only supplement. `TOMOUSDT` has an
-unresolved zero-volume tail after 2023-11-14, so the whole query window stops
-before that tail. `AKROUSDT` is outside the cohort and remains explicitly
-quarantined because its official notice conflicts with later official trades.
+unresolved zero-volume tail after 2023-11-14. Because the positive 2023-11-14
+daily aggregate is identified by its bar-open time and cannot prove continuous
+intraday status, the whole query window conservatively stops at that boundary.
+`AKROUSDT` is outside the cohort and remains explicitly quarantined because its
+official notice conflicts with later official trades.
 
 ## Evidence and lineage
 
@@ -60,6 +62,6 @@ python3 -m research.data.pit_instrument_master_v1 universe-at 2022-06-30T23:59:5
 ```
 
 `universe-at` is fail-closed outside
-`[2021-01-04T19:51:02.039Z, 2023-11-15T00:00:00Z)`. It returns only this fixed
+`[2021-01-04T19:51:02.039Z, 2023-11-14T00:00:00Z)`. It returns only this fixed
 cohort's confirmed active intervals. It must not be labeled the full Binance
 market universe or used to claim Tier 2, Strategy, Dry-run, or Live readiness.
