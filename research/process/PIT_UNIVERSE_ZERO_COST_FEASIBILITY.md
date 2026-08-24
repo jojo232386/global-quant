@@ -1,6 +1,6 @@
 # PIT Listing / Universe zero-cost feasibility
 
-Status: `BEST_ZERO_COST_PIT_UNIVERSE_PATH_EXHAUSTED`
+Status: `FULL_DYNAMIC_MARKET_PATH_EXHAUSTED`; fixed cohort follow-up is partial
 
 Review date: `2026-08-24 UTC`
 
@@ -73,3 +73,21 @@ listing/termination effective time, publication/availability time, contract
 specifications, correction history, and independently auditable coverage. Until
 then the zero-cost pivot is exhausted and later data routes are outside this
 mission's authorized scope.
+
+## Fixed-cohort follow-up
+
+The later [PIT Data Foundation V1](PIT_DATA_FOUNDATION_V1.md) mission found a
+route that does not contradict the full-market stop above. A Wayback capture of
+the official Binance USD-M `exchangeInfo` endpoint freezes all 80 contracts
+trading at one historical timestamp. All 80 bind to Price V1. Five have
+confirmed official terminal evidence; an unresolved `TOMOUSDT` zero-volume tail
+and the bar-open timestamp limitation force the global query window to end at
+`2023-11-14T00:00:00Z`. The cohort is not selected from today's survivors or
+later returns, and zero-volume padding is not treated as continued activity.
+
+That evidence unlocks only a bounded, fixed `PARTIAL_PIT_COHORT_CANDIDATE`.
+It does not reconstruct later listings, prove a complete dynamic
+market domain, or remove the Price/Funding/OI numeric vintage blocker. The
+correct follow-up result is `PARTIAL_PIT_UNIVERSE_UNLOCKED`, not a reversal of
+the full-market or Candidate B data-admission stop. It also does not claim
+coverage through 2023-12-31.
