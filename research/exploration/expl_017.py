@@ -91,6 +91,7 @@ class AccountingEntry:
     cost: float
     exits: tuple[Exit, ...]
     finalization: bool
+    phase: str
 
 
 @dataclass(frozen=True)
@@ -254,11 +255,27 @@ class Engine:
         cost: float = 0.0,
         exits: tuple[Exit, ...] = (),
         finalization: bool = False,
+        phase: str = "OPEN",
     ) -> None:
-        """Keep one mergeable NAV/accounting checkpoint per UTC date."""
+        """Keep one mergeable NAV/accounting checkpoint per UTC date/phase."""
+        if phase not in {"OPEN", "FINAL_CLOSE"}:
+            raise PreFormalError("accounting phase")
         if self.accounting and timestamp < self.accounting[-1].timestamp:
             raise PreFormalError("accounting timeline")
-        prior = self.accounting[-1] if self.accounting and self.accounting[-1].timestamp == timestamp else None
+        if (
+            self.accounting
+            and self.accounting[-1].timestamp == timestamp
+            and self.accounting[-1].phase == "FINAL_CLOSE"
+            and phase != "FINAL_CLOSE"
+        ):
+            raise PreFormalError("accounting after final close")
+        prior = (
+            self.accounting[-1]
+            if self.accounting
+            and self.accounting[-1].timestamp == timestamp
+            and self.accounting[-1].phase == phase
+            else None
+        )
         if prior is not None:
             turnover += prior.turnover
             cost += prior.cost
@@ -275,6 +292,7 @@ class Engine:
                 cost=cost,
                 exits=exits,
                 finalization=finalization,
+                phase=phase,
             )
         )
 
@@ -618,7 +636,7 @@ class Engine:
             raise PreFormalError("finalization before execution")
         if final_timestamp < self.last_mark_ms or (final_timestamp - ANCHOR_MS) % DAY_MS:
             raise PreFormalError("finalization timeline")
-        prior_exits = list(self._advance_to(final_timestamp))
+        self._advance_to(final_timestamp)
         final_exits: list[Exit] = []
         if self.portfolio.notionals:
             bars = {
@@ -656,8 +674,9 @@ class Engine:
             cost=sum(item.cost for item in final_exits),
             exits=tuple(final_exits),
             finalization=True,
+            phase="FINAL_CLOSE",
         )
-        return tuple(prior_exits + final_exits)
+        return tuple(final_exits)
 
     def finalize(self, final_timestamp: int) -> tuple[Exit, ...]:
         """Mark the frozen final daily bar then force exits using Portfolio.exit."""

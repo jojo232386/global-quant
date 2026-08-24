@@ -322,14 +322,19 @@ def test_consumer_schedule_has_continuous_three_cost_accounting_across_split_and
     assert outcome.decisions[-1].states[core.COST].regime in {"calm", "high"}
     assert set(outcome.accounting) == {0.0, core.COST, 0.003}
     for cost, ledger in outcome.accounting.items():
-        assert [entry.timestamp for entry in ledger] == list(
+        open_entries = [entry for entry in ledger if entry.phase == "OPEN"]
+        final_entries = [entry for entry in ledger if entry.phase == "FINAL_CLOSE"]
+        assert [entry.timestamp for entry in open_entries] == list(
             range(base, final_timestamp + core.DAY_MS, core.DAY_MS)
         )
-        assert ledger[-1].finalization is True
-        assert ledger[-1].notionals == ()
-        assert ledger[-1].turnover > 0
-        assert ledger[-1].cost >= 0
-        assert outcome.lifecycle_exits[cost]
+        assert len(final_entries) == 1
+        assert final_entries[0].timestamp == final_timestamp
+        assert final_entries[0].finalization is True
+        assert final_entries[0].notionals == ()
+        assert final_entries[0].turnover > 0
+        assert final_entries[0].cost >= 0
+        assert outcome.lifecycle_exits[cost] == ()
+        assert outcome.final_liquidation_exits[cost]
     assert outcome.accounting[0.0][-1].cost == 0.0
     assert outcome.accounting[core.COST][-1].cost > 0.0
     assert outcome.accounting[0.003][-1].cost > outcome.accounting[core.COST][-1].cost
@@ -341,32 +346,68 @@ def test_consumer_schedule_has_continuous_three_cost_accounting_across_split_and
 def test_finalization_independently_marks_open_to_close_then_charges_each_exit():
     final_timestamp = day(2021, 6, 7)
     fixture = SyntheticFixture(day(2021, 4, 1))
-    fixture.bars["A"][final_timestamp] = core.CompletedBar(100.0, 120.0)
-    fixture.bars["E"][final_timestamp] = core.CompletedBar(100.0, 80.0)
+    penultimate_timestamp = final_timestamp - core.DAY_MS
+    fixture.bars["A"][penultimate_timestamp] = core.CompletedBar(100.0, 100.0)
+    fixture.bars["E"][penultimate_timestamp] = core.CompletedBar(100.0, 100.0)
+    fixture.bars["A"][final_timestamp] = core.CompletedBar(120.0, 144.0)
+    fixture.bars["E"][final_timestamp] = core.CompletedBar(80.0, 64.0)
     engine = core.Engine(fixture, GOLD_CONFIG)
     engine.portfolio.cash = 1.0
     engine.portfolio.notionals = {"A": 0.5, "E": -0.5}
-    engine.last_mark_ms = final_timestamp
-    engine.last_execution_ms = final_timestamp - core.DAY_MS
+    engine.last_mark_ms = penultimate_timestamp
+    engine.last_execution_ms = penultimate_timestamp - core.DAY_MS
     exits = engine.finalize(final_timestamp)
-    # Manual cash/notional algebra: after final mark, A=0.6 and E=-0.4.
-    nav_before_a = 1.2
-    a_cost = 0.6 * core.COST
-    e_cost = 0.4 * core.COST
-    expected_turnover = (0.6 + 0.4) / nav_before_a
+    # Frozen interval starts: penultimate open -> final open gives A=.6/E=-.4
+    # and NAV=1.2; final open -> final close gives A=.72/E=-.32 and NAV=1.4.
+    final_open_nav = 1.2
+    nav_before_a = 1.4
+    a_cost = 0.72 * core.COST
+    e_cost = 0.32 * core.COST
+    expected_turnover = (0.72 + 0.32) / nav_before_a
     assert [(item.symbol, item.timestamp) for item in exits] == [
         ("A", final_timestamp), ("E", final_timestamp)
     ]
     assert exits[0].nav_before == pytest.approx(nav_before_a)
-    assert exits[0].turnover == pytest.approx(0.5)
+    assert exits[0].turnover == pytest.approx(0.72 / nav_before_a)
     assert exits[0].cost == pytest.approx(a_cost)
     assert exits[1].nav_before == pytest.approx(nav_before_a)
-    assert exits[1].turnover == pytest.approx(0.4 / nav_before_a)
+    assert exits[1].turnover == pytest.approx(0.32 / nav_before_a)
     assert exits[1].cost == pytest.approx(e_cost)
-    final_entry = engine.accounting[-1]
+    open_entry, final_entry = engine.accounting[-2:]
+    assert (open_entry.timestamp, open_entry.phase) == (final_timestamp, "OPEN")
+    assert open_entry.nav == pytest.approx(final_open_nav)
+    assert (final_entry.timestamp, final_entry.phase) == (final_timestamp, "FINAL_CLOSE")
     assert final_entry.turnover == pytest.approx(expected_turnover)
     assert final_entry.cost == pytest.approx(a_cost + e_cost)
     assert final_entry.nav == pytest.approx(nav_before_a - a_cost - e_cost)
+
+
+class HeldTerminalScheduleFixture(SyntheticFixture):
+    def __init__(self, base, terminal):
+        super().__init__(base)
+        self.symbols = (*self.symbols, "F")
+        self.bars["F"] = dict(self.bars["D"])
+        self.terminal = terminal
+
+    def lifecycle_as_of(self, symbol, timestamp):
+        if symbol == "E" and timestamp >= self.terminal:
+            return core.LifecycleStatus(False, self.terminal)
+        return core.LifecycleStatus(True)
+
+
+def test_schedule_separates_held_confirmed_terminal_from_final_target_to_cash_exits():
+    base = day(2021, 4, 1)
+    terminal = base + 59 * core.DAY_MS  # after the first live target, before next decision
+    final_timestamp = base + 67 * core.DAY_MS
+    outcome = formal.FormalConsumer(
+        HeldTerminalScheduleFixture(base, terminal), GOLD_CONFIG
+    ).execute_schedule(continuous_contracts(base), final_timestamp)
+    for cost in (0.0, core.COST, 0.003):
+        assert [(item.symbol, item.timestamp) for item in outcome.lifecycle_exits[cost]] == [
+            ("E", terminal)
+        ]
+        assert all(item.symbol != "E" for item in outcome.final_liquidation_exits[cost])
+        assert outcome.final_liquidation_exits[cost]
 
 
 def test_adapter_resolver_terminal_exit_enters_consumer_accounting_without_forward_fill():

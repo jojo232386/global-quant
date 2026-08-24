@@ -202,6 +202,7 @@ class ConsumerSchedule:
     decisions: tuple[ConsumerDecision, ...]
     accounting: Mapping[float, tuple[core.AccountingEntry, ...]]
     lifecycle_exits: Mapping[float, tuple[core.Exit, ...]]
+    final_liquidation_exits: Mapping[float, tuple[core.Exit, ...]]
 
 
 class FormalConsumer:
@@ -359,5 +360,14 @@ class FormalConsumer:
             accounting={
                 cost: tuple(engine.accounting) for cost, engine in self.engines.items()
             },
-            lifecycle_exits=final_exits,
+            lifecycle_exits={
+                cost: tuple(
+                    exit
+                    for entry in engine.accounting
+                    if entry.phase == "OPEN"
+                    for exit in entry.exits
+                )
+                for cost, engine in self.engines.items()
+            },
+            final_liquidation_exits=final_exits,
         )
