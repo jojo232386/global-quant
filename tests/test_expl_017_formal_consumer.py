@@ -307,19 +307,19 @@ def test_core_preserves_adapter_data_unavailable_class_and_cause(failure, expect
     assert isinstance(raised.value.__cause__, KeyError)
 
 
-class NoMetricScheduleFixture(SyntheticFixture):
-    def forward_return(self, symbol, execution_ms, endpoint_ms):
-        raise AssertionError("accounting schedule must not compute IC or performance")
-
-
 def test_consumer_schedule_has_continuous_three_cost_accounting_across_split_and_finalizes():
     base = day(2021, 4, 1)
     final_timestamp = base + 67 * core.DAY_MS
-    consumer = formal.FormalConsumer(NoMetricScheduleFixture(base), GOLD_CONFIG)
+    consumer = formal.FormalConsumer(SyntheticFixture(base), GOLD_CONFIG)
     outcome = consumer.execute_schedule(continuous_contracts(base), final_timestamp)
-    assert len(outcome.states) == 10
-    assert outcome.states[-2][core.COST].regime in {"calm", "high"}
-    assert outcome.states[-1][core.COST].regime in {"calm", "high"}
+    assert len(outcome.decisions) == 10
+    assert all(item.ic is None for item in outcome.decisions[:8])
+    # Independent fixture construction makes momentum and forward returns
+    # strictly ordered A < ... < E: calm IC is +1, while the later high-vol
+    # reversal orientation is -1.
+    assert [item.ic for item in outcome.decisions[8:]] == pytest.approx([1.0, -1.0])
+    assert outcome.decisions[-2].states[core.COST].regime in {"calm", "high"}
+    assert outcome.decisions[-1].states[core.COST].regime in {"calm", "high"}
     assert set(outcome.accounting) == {0.0, core.COST, 0.003}
     for cost, ledger in outcome.accounting.items():
         assert [entry.timestamp for entry in ledger] == list(
@@ -333,7 +333,9 @@ def test_consumer_schedule_has_continuous_three_cost_accounting_across_split_and
     assert outcome.accounting[0.0][-1].cost == 0.0
     assert outcome.accounting[core.COST][-1].cost > 0.0
     assert outcome.accounting[0.003][-1].cost > outcome.accounting[core.COST][-1].cost
-    assert not hasattr(outcome, "ic")
+    assert not hasattr(outcome, "total_return")
+    assert not hasattr(outcome, "sharpe")
+    assert not hasattr(outcome, "max_drawdown")
 
 
 def test_finalization_independently_marks_open_to_close_then_charges_each_exit():
@@ -350,19 +352,21 @@ def test_finalization_independently_marks_open_to_close_then_charges_each_exit()
     # Manual cash/notional algebra: after final mark, A=0.6 and E=-0.4.
     nav_before_a = 1.2
     a_cost = 0.6 * core.COST
-    nav_after_a = nav_before_a - a_cost
     e_cost = 0.4 * core.COST
-    expected_turnover = 0.6 / nav_before_a + 0.4 / nav_after_a
+    expected_turnover = (0.6 + 0.4) / nav_before_a
     assert [(item.symbol, item.timestamp) for item in exits] == [
         ("A", final_timestamp), ("E", final_timestamp)
     ]
     assert exits[0].nav_before == pytest.approx(nav_before_a)
     assert exits[0].turnover == pytest.approx(0.5)
     assert exits[0].cost == pytest.approx(a_cost)
+    assert exits[1].nav_before == pytest.approx(nav_before_a)
+    assert exits[1].turnover == pytest.approx(0.4 / nav_before_a)
+    assert exits[1].cost == pytest.approx(e_cost)
     final_entry = engine.accounting[-1]
     assert final_entry.turnover == pytest.approx(expected_turnover)
     assert final_entry.cost == pytest.approx(a_cost + e_cost)
-    assert final_entry.nav == pytest.approx(nav_after_a - e_cost)
+    assert final_entry.nav == pytest.approx(nav_before_a - a_cost - e_cost)
 
 
 def test_adapter_resolver_terminal_exit_enters_consumer_accounting_without_forward_fill():

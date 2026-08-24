@@ -631,10 +631,24 @@ class Engine:
                     for symbol in self.portfolio.notionals
                 }
             )
+            nav_before_exit = self.portfolio.nav()
+            incumbent = self.portfolio.weights()
+            notionals = dict(self.portfolio.notionals)
+            turnover, cost = self.portfolio.trade({}, self.config.cost)
+            if not math.isclose(turnover, sum(abs(weight) for weight in incumbent.values())):
+                raise PreFormalError("final liquidation turnover")
             final_exits.extend(
-                self.portfolio.exit(symbol, self.config.cost, final_timestamp)
-                for symbol in sorted(self.portfolio.notionals)
+                Exit(
+                    symbol=symbol,
+                    timestamp=final_timestamp,
+                    nav_before=nav_before_exit,
+                    turnover=abs(incumbent[symbol]),
+                    cost=abs(notionals[symbol]) * self.config.cost,
+                )
+                for symbol in sorted(notionals)
             )
+            if not math.isclose(sum(item.cost for item in final_exits), cost):
+                raise PreFormalError("final liquidation cost")
         self.finalized_at = final_timestamp
         self._record(
             final_timestamp,

@@ -199,7 +199,7 @@ class ConsumerDecision:
 class ConsumerSchedule:
     """Unaggregated continuous accounting evidence; never a formal result."""
 
-    states: tuple[Mapping[float, core.State], ...]
+    decisions: tuple[ConsumerDecision, ...]
     accounting: Mapping[float, tuple[core.AccountingEntry, ...]]
     lifecycle_exits: Mapping[float, tuple[core.Exit, ...]]
 
@@ -344,26 +344,18 @@ class FormalConsumer:
     ) -> ConsumerSchedule:
         """Run one continuous, unaggregated accounting path per frozen cost.
 
-        This deliberately avoids forward-return/IC computation and emits no
-        return, Sharpe, drawdown, or other formal performance aggregation.
+        This calls the reviewed per-decision consumer exactly once per row,
+        retaining its unaggregated IC evidence while emitting no return,
+        Sharpe, drawdown, or other formal performance aggregation.
         """
         schedule = self.validate_schedule(contracts, final_timestamp)
-        states: list[Mapping[float, core.State]] = []
-        for contract in schedule:
-            current = {
-                cost: engine.execute(core.Decision(contract.decision_ms, contract.split))
-                for cost, engine in self.engines.items()
-            }
-            semantics = [self._semantic_tuple(item) for item in current.values()]
-            if any(item != semantics[0] for item in semantics[1:]):
-                raise core.PreFormalError("cost path signal semantic parity failed")
-            states.append(current)
+        decisions = tuple(self.execute(contract) for contract in schedule)
         final_exits = {
             cost: engine.finalize(final_timestamp)
             for cost, engine in self.engines.items()
         }
         return ConsumerSchedule(
-            states=tuple(states),
+            decisions=decisions,
             accounting={
                 cost: tuple(engine.accounting) for cost, engine in self.engines.items()
             },
