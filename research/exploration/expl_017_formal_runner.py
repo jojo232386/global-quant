@@ -14,6 +14,7 @@ import json
 import math
 import pathlib
 import statistics
+import subprocess
 from typing import Any, Mapping, Sequence
 
 import expl_017 as core
@@ -23,6 +24,8 @@ import expl_017_formal_consumer as consumer
 FORMAL_RUN_ID = "EXPL-017-FORMAL-003"
 FREEZE_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-freeze.json")
 REVIEW_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-contract-review.json")
+RESULT_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-result.json")
+CLAIM_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-run-claim.json")
 
 
 class FormalRunnerError(core.PreFormalError):
@@ -47,6 +50,9 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
         raise FormalRunnerError("wrong formal run identity")
     if freeze.get("status") != "FROZEN_AWAITING_INDEPENDENT_CONTRACT_REVIEW":
         raise FormalRunnerError("formal freeze is not eligible")
+    execution = freeze.get("formal_execution")
+    if not isinstance(execution, Mapping) or execution.get("canonical_claim_path") != CLAIM_PATH.name or execution.get("canonical_result_path") != RESULT_PATH.name:
+        raise FormalRunnerError("formal canonical artifact paths differ")
     identity = freeze.get("identity")
     if not isinstance(identity, Mapping):
         raise FormalRunnerError("formal identity missing")
@@ -65,6 +71,15 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
             raise FormalRunnerError(f"formal {name} identity differs")
     if identity["formal_consumer"]["sha256"] != _sha256(pathlib.Path(consumer.__file__)):
         raise FormalRunnerError("loaded formal consumer differs")
+    reviewed = freeze.get("reviewed_implementation_sha")
+    if not isinstance(reviewed, str) or len(reviewed) != 40:
+        raise FormalRunnerError("reviewed implementation identity missing")
+    check = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reviewed, "HEAD"],
+        cwd=root, check=False, capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        raise FormalRunnerError("reviewed implementation is not in runtime lineage")
     return freeze
 
 
@@ -138,6 +153,15 @@ def _returns(ledger: Sequence[core.AccountingEntry]) -> tuple[tuple[int, float],
     return tuple(output)
 
 
+def _daily_net_pnl(ledger: Sequence[core.AccountingEntry]) -> tuple[tuple[int, float], ...]:
+    opens = [entry for entry in ledger if entry.phase == "OPEN"]
+    output = [(previous.timestamp, current.nav - previous.nav) for previous, current in zip(opens, opens[1:])]
+    final = next((entry for entry in ledger if entry.phase == "FINAL_CLOSE"), None)
+    if final is not None:
+        output.append((opens[-1].timestamp, final.nav - opens[-1].nav))
+    return tuple(output)
+
+
 def _path_metrics(ledger: Sequence[core.AccountingEntry], periods: set[str]) -> Mapping[str, float | int | None]:
     returns: list[float] = []
     for timestamp, value in _returns(ledger):
@@ -168,8 +192,11 @@ def _contributions(outcome: consumer.ConsumerSchedule, schedule: Sequence[consum
     opens = [entry for entry in ledger if entry.phase == "OPEN"]
     states = {contract.execution_ms: item.states[core.COST] for item, contract in zip(outcome.decisions, schedule)}
     contribution: dict[str, float] = {}
+    lifecycle_keys = {
+        (item.symbol, item.timestamp)
+        for item in outcome.lifecycle_exits[core.COST]
+    }
     lifecycle_events: list[float] = []
-    daily_absolute: list[float] = []
 
     def add(symbol: str, value: float, daily: dict[str, float]) -> None:
         if not math.isfinite(value):
@@ -194,7 +221,8 @@ def _contributions(outcome: consumer.ConsumerSchedule, schedule: Sequence[consum
                 sign = 1.0 if before.get(symbol, 0.0) >= 0 else -1.0
                 value = sign * exit.nav_before * exit.turnover - before.get(symbol, 0.0) - exit.cost
                 add(symbol, value, daily)
-                lifecycle_events.append(value)
+                if (exit.symbol, exit.timestamp) in lifecycle_keys:
+                    lifecycle_events.append(value)
             else:
                 add(symbol, pretrade.get(symbol, 0.0) - before.get(symbol, 0.0), daily)
         if state is not None and state.cost:
@@ -204,7 +232,6 @@ def _contributions(outcome: consumer.ConsumerSchedule, schedule: Sequence[consum
                 raise FormalRunnerError("unallocatable reviewed trade cost")
             for symbol, amount in changes.items():
                 add(symbol, -state.cost * amount / total, daily)
-        daily_absolute.append(sum(abs(value) for value in daily.values()))
 
     for previous, current in zip(opens, opens[1:]):
         interval(previous, current)
@@ -214,14 +241,19 @@ def _contributions(outcome: consumer.ConsumerSchedule, schedule: Sequence[consum
     absolute = {symbol: abs(value) for symbol, value in contribution.items()}
     total = sum(absolute.values())
     ordered = sorted(absolute.values(), reverse=True)
+    total_absolute_daily_net_pnl = sum(
+        abs(value)
+        for timestamp, value in _daily_net_pnl(ledger)
+        if _split(timestamp) in {"oos", "holdout"}
+    )
     return {
         "per_symbol_net_contribution": dict(sorted(contribution.items())),
         "largest_symbol_absolute_net_contribution_share": (ordered[0] / total if total else 0.0),
         "top_five_absolute_net_contribution_share": (sum(ordered[:5]) / total if total else 0.0),
         "lifecycle_event_count": len(lifecycle_events),
         "largest_single_lifecycle_event_absolute_net_pnl": max((abs(value) for value in lifecycle_events), default=0.0),
-        "total_absolute_daily_net_pnl": sum(daily_absolute),
-        "largest_lifecycle_event_impact": (max((abs(value) for value in lifecycle_events), default=0.0) / sum(daily_absolute) if sum(daily_absolute) else 0.0),
+        "total_absolute_daily_net_pnl": total_absolute_daily_net_pnl,
+        "largest_lifecycle_event_impact": (max((abs(value) for value in lifecycle_events), default=0.0) / total_absolute_daily_net_pnl if total_absolute_daily_net_pnl else 0.0),
     }
 
 
@@ -237,24 +269,23 @@ def summarize(outcome: consumer.ConsumerSchedule, schedule: Sequence[consumer.Ho
         str(cost): {label: _path_metrics(ledger, periods) for label, periods in period_sets.items()}
         for cost, ledger in outcome.accounting.items()
     }
-    ic: dict[str, list[float]] = {"train": [], "oos": [], "holdout": []}
+    ic: dict[str, list[float]] = {"oos": [], "holdout": []}
     regimes: dict[str, list[float]] = {"calm": [], "high": []}
     max_weight = 0.0
     regime_returns: dict[str, list[float]] = {"calm": [], "high": []}
     regimes_by_execution = {contract.execution_ms: item.states[core.COST].regime for item, contract in zip(outcome.decisions, schedule)}
-    baseline_opens = [entry for entry in outcome.accounting[core.COST] if entry.phase == "OPEN"]
-    for previous, current in zip(baseline_opens, baseline_opens[1:]):
-        if _split(previous.timestamp) in {"oos", "holdout"}:
-            candidates = [timestamp for timestamp in regimes_by_execution if timestamp <= previous.timestamp]
+    for timestamp, value in _returns(outcome.accounting[core.COST]):
+        if _split(timestamp) in {"oos", "holdout"}:
+            candidates = [time for time in regimes_by_execution if time <= timestamp]
             regime = regimes_by_execution[max(candidates)] if candidates else None
             if regime in regime_returns:
-                regime_returns[regime].append(current.nav / previous.nav - 1.0)
+                regime_returns[regime].append(value)
     for item, contract in zip(outcome.decisions, schedule):
         state = item.states[core.COST]
         weights = [abs(value) for value in (*state.target.values(), *state.incumbent.values())]
         if weights:
             max_weight = max(max_weight, *weights)
-        if item.ic is not None:
+        if item.ic is not None and contract.split in ic:
             ic[contract.split].append(item.ic)
             if state.regime in regimes:
                 regimes[state.regime].append(item.ic)
@@ -302,20 +333,64 @@ def evaluate(cells: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
     return {"gates": gates, "classification": "EXPLORATION_PASS" if all(gates.values()) else "HYPOTHESIS_FAIL"}
 
 
-def run(data_root: pathlib.Path, result_path: pathlib.Path) -> Mapping[str, Any]:
-    """Perform the single authorized formal run and atomically write its artifact."""
+def _atomic_json(path: pathlib.Path, payload: Mapping[str, Any]) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    if temporary.exists():
+        raise FormalRunnerError("formal artifact temporary path already exists")
+    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _claim(freeze: Mapping[str, Any]) -> None:
+    """Durably consume the one-shot before any Price V1 metric is computed."""
+    if RESULT_PATH.exists() or CLAIM_PATH.exists():
+        raise FormalRunnerError("FORMAL_RUN_ALREADY_CLAIMED")
+    claim = {
+        "formal_run_id": FORMAL_RUN_ID,
+        "freeze_contract_sha256": _sha256(FREEZE_PATH),
+        "reviewed_implementation_sha": freeze["reviewed_implementation_sha"],
+        "formal_run_count": 1,
+        "metrics_exposed_at_claim": False,
+    }
+    try:
+        with CLAIM_PATH.open("x", encoding="utf-8") as handle:
+            json.dump(claim, handle, sort_keys=True)
+            handle.write("\n")
+    except FileExistsError as error:
+        raise FormalRunnerError("FORMAL_RUN_ALREADY_CLAIMED") from error
+
+
+def run(data_root: pathlib.Path) -> Mapping[str, Any]:
+    """Perform the only authorized run at canonical paths and finalize once."""
     freeze = load_freeze()
     require_independent_approval()
-    if result_path.exists():
-        raise FormalRunnerError("formal result artifact already exists")
-    schedule = frozen_schedule()
-    cells: dict[str, Any] = {}
-    adapter = consumer.load_verified_price_lifecycle_adapter(data_root)
-    for params in freeze["parameters"]["neighborhood"]:
-        config = core.Config(n=params["top_n"], volatility_window=params["volatility_window_days"])
-        outcome = consumer.FormalConsumer(adapter, config).execute_schedule(schedule, consumer.FormalConsumer._frozen_final_timestamp())
-        cells[f"n{config.n}_v{config.volatility_window}"] = summarize(outcome, schedule)
-    payload = {"formal_run_id": FORMAL_RUN_ID, "freeze_contract_sha256": _sha256(FREEZE_PATH), "results": cells, "verdict": evaluate(cells)}
-    result_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    return payload
+    _claim(freeze)
+    try:
+        schedule = frozen_schedule()
+        cells: dict[str, Any] = {}
+        adapter = consumer.load_verified_price_lifecycle_adapter(data_root)
+        for params in freeze["parameters"]["neighborhood"]:
+            config = core.Config(n=params["top_n"], volatility_window=params["volatility_window_days"])
+            outcome = consumer.FormalConsumer(adapter, config).execute_schedule(schedule, consumer.FormalConsumer._frozen_final_timestamp())
+            cells[f"n{config.n}_v{config.volatility_window}"] = summarize(outcome, schedule)
+        payload = {
+            "formal_run_id": FORMAL_RUN_ID,
+            "formal_run_count": 1,
+            "freeze_contract_sha256": _sha256(FREEZE_PATH),
+            "reviewed_implementation_sha": freeze["reviewed_implementation_sha"],
+            "runtime_identity": freeze["identity"],
+            "results": cells,
+            "verdict": evaluate(cells),
+        }
+        _atomic_json(RESULT_PATH, payload)
+        return payload
+    except consumer.FormalDataUnavailable as error:
+        failure = {"formal_run_id": FORMAL_RUN_ID, "formal_run_count": 1, "freeze_contract_sha256": _sha256(FREEZE_PATH), "classification": "DATA_UNAVAILABLE", "error": str(error), "metrics_exposed": False}
+    except BaseException as error:
+        failure = {"formal_run_id": FORMAL_RUN_ID, "formal_run_count": 1, "freeze_contract_sha256": _sha256(FREEZE_PATH), "classification": "PROCESS_DEFECT", "error": type(error).__name__, "metrics_exposed": False}
+    try:
+        _atomic_json(RESULT_PATH, failure)
+    except BaseException:
+        # The durable claim remains the fail-closed, non-rerunnable evidence.
+        pass
+    raise FormalRunnerError(failure["classification"])

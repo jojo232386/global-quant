@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -46,7 +47,17 @@ def test_runner_verifies_freeze_and_refuses_a_run_without_independent_approval(t
     freeze = runner.load_freeze()
     assert freeze["formal_run_id"] == "EXPL-017-FORMAL-003"
     with pytest.raises(runner.FormalRunnerError, match="approval"):
-        runner.run(tmp_path, tmp_path / "formal-result.json")
+        runner.run(tmp_path)
+
+
+def test_durable_claim_is_canonical_and_rejects_every_later_invocation(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "CLAIM_PATH", tmp_path / "claim.json")
+    monkeypatch.setattr(runner, "RESULT_PATH", tmp_path / "result.json")
+    monkeypatch.setattr(runner, "FREEZE_PATH", ROOT / "research" / "exploration" / "expl-017-formal-003-freeze.json")
+    runner._claim({"reviewed_implementation_sha": "d" * 40})
+    assert json.loads(runner.CLAIM_PATH.read_text())["formal_run_count"] == 1
+    with pytest.raises(runner.FormalRunnerError, match="ALREADY_CLAIMED"):
+        runner._claim({"reviewed_implementation_sha": "d" * 40})
 
 
 def test_summarizer_uses_only_consumer_ledger_for_required_report_sections():
@@ -68,3 +79,18 @@ def test_summarizer_uses_only_consumer_ledger_for_required_report_sections():
     assert set(report) >= {"portfolio", "cost_impact", "ic", "regimes", "concentration", "lifecycle", "turnover"}
     assert set(report["portfolio"][str(core.COST)]) >= {"train", "oos", "holdout", "oos_holdout", "oos_h1", "oos_h2", "holdout_h1", "holdout_h2"}
     assert "per_symbol_net_contribution" in report["concentration"]
+
+
+def _entry(timestamp, nav, notionals=(), exits=(), phase="OPEN"):
+    return core.AccountingEntry(timestamp, nav, nav, tuple(notionals), 0.0, 0.0, tuple(exits), phase == "FINAL_CLOSE", phase)
+
+
+def test_lifecycle_denominator_is_portfolio_daily_pnl_and_excludes_final_liquidation():
+    first, second = _stamp(2022, 1, 3), _stamp(2022, 1, 4)
+    final_exit = core.Exit("A", second, 1.1, 0.5, 0.0)
+    ledger = (_entry(first, 1.0, (("A", 0.5), ("B", -0.5))), _entry(second, 1.0, (("A", 0.6), ("B", -0.6))), _entry(second, 0.95, (), (final_exit,), "FINAL_CLOSE"))
+    outcome = consumer.ConsumerSchedule((), {core.COST: ledger}, {core.COST: ()}, {core.COST: (final_exit,)})
+    report = runner._contributions(outcome, ())
+    assert report["lifecycle_event_count"] == 0
+    assert report["total_absolute_daily_net_pnl"] == pytest.approx(0.05)
+    assert report["largest_lifecycle_event_impact"] == 0.0

@@ -259,7 +259,8 @@ def test_confirmed_terminal_uses_only_its_final_close_and_unconfirmed_fails_clos
         FakePriceDataset({"OLD": {execution: FakeBar(100, 100), terminal: FakeBar(90, 110)}}),
         lifecycle.LifecycleResolver({"OLD": event}),
     )
-    assert adapter.forward_return("OLD", execution, endpoint) == pytest.approx(0.10)
+    with pytest.raises(formal.FormalDataUnavailable, match="DATA_UNAVAILABLE"):
+        adapter.forward_return("OLD", execution, endpoint)
 
     unresolved = lifecycle.LifecycleEvent(
         "OLD", lifecycle.TERMINATED_UNCONFIRMED, terminal, terminal - core.DAY_MS, terminal

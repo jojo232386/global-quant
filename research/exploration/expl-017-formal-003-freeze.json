@@ -11,10 +11,10 @@
     "EXPL-017-FORMAL-001": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN",
     "EXPL-017-FORMAL-002": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN"
   },
-  "supersedes_pre_review_freeze": {
-    "freeze_sha": "de91c0a904a7c7b3faa0c95f18ad4f731e90fb2e",
-    "reason": "Pre-review reporting wrapper lacked required frozen diagnostics; no approval, Price V1 execution, or formal metric exposure occurred."
-  },
+  "supersedes_pre_review_freezes": [
+    {"freeze_sha": "de91c0a904a7c7b3faa0c95f18ad4f731e90fb2e", "reason": "Pre-review reporting wrapper lacked required frozen diagnostics; no approval, Price V1 execution, or formal metric exposure occurred."},
+    {"freeze_sha": "d22cfe39ccaa931658fe48f46de89ba0bd924568", "reason": "Independent review requested corrections to endpoint IC, one-shot durability, lifecycle denominator, regime attribution, and runtime/result identity; no approval or metric exposure occurred."}
+  ],
   "identity": {
     "price_v1": {
       "dataset_id": "pre2024-usdm-archive-extended-1d",
@@ -53,13 +53,13 @@
     },
     "formal_consumer": {
       "path": "research/exploration/expl_017_formal_consumer.py",
-      "sha256": "87b7f1b861d6e8e190bc1d6fe5f83ae1de360cba5a664d74c1c582133394943a",
+      "sha256": "57f72614fe926caed21e8bca6c366e5a40446459b68ccf0a045110721330f1ce",
       "entrypoint": "load_verified_price_lifecycle_adapter(data_root) then FormalConsumer(adapter, Config(...)).execute_schedule(frozen_schedule, frozen_final_timestamp)",
       "rule": "Reuse this reviewed core adapter and consumer; do not reimplement momentum, volatility, NAV, turnover, lifecycle accounting, or IC."
     },
     "formal_runner": {
       "path": "research/exploration/expl_017_formal_runner.py",
-      "sha256": "9da17954476b5604cb73351f2cab7723fa024a8f5fad1f1dc003981e25166e92",
+      "sha256": "80957409273760c56fad3e25dd9cd894f651c1ac2129ad57d552782248ba87f0",
       "entrypoint": "run(data_root, result_path) after a separate approved contract-review artifact binds this exact freeze SHA",
       "rule": "This thin entry verifies the freeze, invokes only the bound adapter and consumer for all frozen cells, and writes exactly one result artifact."
     },
@@ -111,6 +111,8 @@
   "formal_execution": {
     "maximum_run_count": 1,
     "current_run_count": 0,
+    "canonical_claim_path": "expl-017-formal-003-run-claim.json",
+    "canonical_result_path": "expl-017-formal-003-result.json",
     "metrics_exposed": false,
     "result_artifact": "A single immutable result artifact must contain primary, neighborhood, no-cost/baseline/stress, split/regime/IC/concentration/lifecycle diagnostics and final classification.",
     "authorization": "No execution is authorized by this freeze alone; require independent contract approval before the one authorized invocation.",

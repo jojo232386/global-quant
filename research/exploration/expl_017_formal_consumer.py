@@ -102,18 +102,11 @@ class PriceV1FormalAdapter:
         return core.LifecycleStatus(view.active, view.terminal_timestamp)
 
     def forward_return(self, symbol: str, execution_ms: int, endpoint_ms: int) -> float:
-        """Use exact endpoint open, or a PIT-confirmed terminal final close only."""
+        """IC requires the exact frozen endpoint open; terminal close is portfolio-only."""
         if endpoint_ms != execution_ms + FORWARD_HORIZON_DAYS * core.DAY_MS:
             raise core.PreFormalError("partial or truncated IC horizon")
         start = self.execution_open(symbol, execution_ms)
-        try:
-            end = self.execution_open(symbol, endpoint_ms)
-        except FormalDataUnavailable as original:
-            event = self.resolver.terminal_event_as_of(symbol, endpoint_ms)
-            if event is None or not (execution_ms <= event.last_valid_bar_ms < endpoint_ms):
-                raise original
-            terminal = self.completed_bar(symbol, event.last_valid_bar_ms)
-            return terminal.close / start - 1.0
+        end = self.execution_open(symbol, endpoint_ms)
         return end / start - 1.0
 
 
