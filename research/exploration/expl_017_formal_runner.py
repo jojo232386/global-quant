@@ -22,6 +22,7 @@ import expl_017_formal_consumer as consumer
 
 FORMAL_RUN_ID = "EXPL-017-FORMAL-003"
 FREEZE_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-freeze.json")
+REVIEW_PATH = pathlib.Path(__file__).with_name("expl-017-formal-003-contract-review.json")
 
 
 class FormalRunnerError(core.PreFormalError):
@@ -50,7 +51,7 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
     if not isinstance(identity, Mapping):
         raise FormalRunnerError("formal identity missing")
     root = pathlib.Path(__file__).resolve().parents[2]
-    for name in ("lifecycle_v1", "composite", "gold_oracle", "reviewed_core", "formal_consumer", "horizon_preflight"):
+    for name in ("lifecycle_v1", "composite", "gold_oracle", "reviewed_core", "formal_consumer", "horizon_preflight", "formal_runner"):
         item = identity.get(name)
         if not isinstance(item, Mapping):
             raise FormalRunnerError(f"formal {name} identity missing")
@@ -65,6 +66,20 @@ def load_freeze(path: pathlib.Path = FREEZE_PATH) -> Mapping[str, Any]:
     if identity["formal_consumer"]["sha256"] != _sha256(pathlib.Path(consumer.__file__)):
         raise FormalRunnerError("loaded formal consumer differs")
     return freeze
+
+
+def require_independent_approval(freeze_path: pathlib.Path = FREEZE_PATH, review_path: pathlib.Path = REVIEW_PATH) -> None:
+    """Require a separate immutable reviewer artifact, not a caller-supplied flag."""
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise FormalRunnerError("independent formal contract approval absent") from error
+    if not (
+        review.get("formal_run_id") == FORMAL_RUN_ID
+        and review.get("approve") is True
+        and review.get("reviewed_freeze_contract_sha256") == _sha256(freeze_path)
+    ):
+        raise FormalRunnerError("independent formal contract approval invalid")
 
 
 def _timestamp(value: object) -> int:
@@ -159,11 +174,10 @@ def summarize(outcome: consumer.ConsumerSchedule, schedule: Sequence[consumer.Ho
     }
 
 
-def run(data_root: pathlib.Path, result_path: pathlib.Path, *, approved: bool = False) -> Mapping[str, Any]:
+def run(data_root: pathlib.Path, result_path: pathlib.Path) -> Mapping[str, Any]:
     """Perform the single authorized formal run and atomically write its artifact."""
-    if approved is not True:
-        raise FormalRunnerError("independent formal contract approval required")
     freeze = load_freeze()
+    require_independent_approval()
     if result_path.exists():
         raise FormalRunnerError("formal result artifact already exists")
     schedule = frozen_schedule()

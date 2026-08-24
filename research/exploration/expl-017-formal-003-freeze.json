@@ -55,8 +55,8 @@
     },
     "formal_runner": {
       "path": "research/exploration/expl_017_formal_runner.py",
-      "sha256": "d6cbf108fc2c235083bff72c4b10460a9a5f8a9247d50c790a7d400da1d1e178",
-      "entrypoint": "run(data_root, result_path, approved=True)",
+      "sha256": "4ca1ddcf675775be72f264b74c8da7ad272baa474f423d13cd8a2553744333d0",
+      "entrypoint": "run(data_root, result_path) after a separate approved contract-review artifact binds this exact freeze SHA",
       "rule": "This thin entry verifies the freeze, invokes only the bound adapter and consumer for all frozen cells, and writes exactly one result artifact."
     },
     "horizon_preflight": {
