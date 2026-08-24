@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-008",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "d71e6add5381d6fb10414b8a35aa7d76b92f8e66",
+    "finding": "the as-of lifecycle contract accepted truthy non-boolean active values and did not reject attempted reactivation of an already persisted terminal name"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-009 under the unchanged hypothesis and oracle; strictly validate lifecycle field types, timestamp alignment and monotone terminal state."
+}

@@ -1,0 +1,114 @@
+{
+  "artifact_class": "FORMAL_FREEZE_CONTRACT",
+  "contract_version": 1,
+  "created_at_utc": "2026-08-23T21:30:54Z",
+  "formal_run_id": "EXPL-017-FORMAL-001",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-014",
+  "reviewed_implementation_sha": "f143ad8ee09479e7c74d95acf3af29bdca5bbbd2",
+  "status_evidence_sha": "20879e58134cfd07294d657bb20b13f6c8e03346",
+  "reviewed_implementation_file": {
+    "path": "research/exploration/expl_017.py",
+    "sha256": "64ba1cf651e4cb323c77d9b1d196fe1c7009924f1a8e9604509f6bd7cb3ea7e0"
+  },
+  "dataset": {
+    "dataset_id": "pre2024-usdm-archive-extended-1d",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "stage": "curated",
+    "integrity": "VERIFIED",
+    "quality": "PASS",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_universe_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "registered_file_count": 210,
+    "symbol_count": 208,
+    "labels": [
+      "archive-extended",
+      "survivor-biased",
+      "exploration-only"
+    ],
+    "funding_modeled": false
+  },
+  "gold_oracle": {
+    "oracle_id": "EXPL-017-GOLD-ORACLE-002",
+    "path": "tests/oracles/expl_017_impl_002_oracle.py",
+    "sha256": "bb90212c6511af01222d6fa0cea2f60f62cb0a922eb44d65d462dc65af12a8e5",
+    "identity_statement": "EXPL-017-GOLD-ORACLE-002 is the earlier independent oracle and has remained unmodified. EXPL-017-IMPL-014 binds to and reuses this exact SHA in its tests. It must not be rewritten, regenerated, renamed, or replaced."
+  },
+  "mechanism": "Cross-sectional momentum changes sign with the broad PIT-universe volatility state: slow information diffusion supports continuation in calm markets, while forced deleveraging, correlation spikes, and rebound support relative reversal in high-volatility markets.",
+  "formula": {
+    "decision_and_execution": "Use completed UTC daily information through close t; execute targets at UTC open t+1. The first earned interval starts at open t+1.",
+    "pit_universe": "Use the monthly PIT membership effective at execution open t+1. Never substitute a current or future universe.",
+    "selection": "Within that PIT membership, retain only names active as of decision close t, rank by median quote_volume over the 90 completed UTC bars t-89 through t descending with canonical symbol ascending as tie-break, and take the first N. A terminal event later than t cannot filter the decision. Missing required history or a selected missing execution open is DATA_UNAVAILABLE.",
+    "momentum": "For each selected name and h in {7,14,28}, compute close(t)/close(t-h)-1. Rank each horizon cross-section ascending onto [0,1] with average ranks for ties, then take the arithmetic mean of the three normalized ranks.",
+    "broad_volatility": "For each selected name, compute the sample standard deviation of the W completed close-to-close returns through t times sqrt(365); take the cross-sectional median.",
+    "regime_boundary": "For each valid 2021 train decision, compare the current broad volatility only with the expanding median of prior valid train decisions after at least eight priors, then append the current value. Equality is calm. The first eight valid train decisions hold cash. OOS and holdout use one fixed median of every valid 2021 train broad-volatility value; no OOS or holdout value enters the boundary.",
+    "positions": "Calm: long the highest momentum quintile and short the lowest. High volatility: long the lowest quintile and short the highest. Leg size is floor(0.20*N). Each leg has absolute gross 0.5, is equal-weighted, and canonical symbol breaks score ties. Target gross is 1 and target net is 0.",
+    "schedule": "Rebalance every seven calendar days at UTC open, anchored at 2021-01-01T00:00:00Z. Positions and NAV remain continuous across split boundaries.",
+    "return_path": "Mark a continuous portfolio daily. Nonterminal holdings earn open d to open d+1. A held verified terminal bar earns open-to-final-close, is forcibly liquidated at that close, pays exit cost, and is never forward-filled. Final portfolio liquidation occurs at 2023-12-31 close.",
+    "turnover": "At every target trade use sum over the union of symbols of abs(target_weight - incumbent_weight), where incumbent weights are drifted signed notionals divided by true portfolio NAV immediately before trade. Include both legs, terminal exits, and final liquidation.",
+    "portfolio_accounting": "Trade target notionals are target weights times pre-cost NAV. Costs reduce cash and NAV. Simulate no-cost, baseline-cost, and stress-cost paths independently because costs affect later NAV-normalized incumbent weights.",
+    "cross_sectional_predictive_statistic": "At each non-warmup decision calculate Spearman correlation between the momentum score and the same selected names' frozen seven-day forward return. Forward return is open t+1 to open t+8, or open t+1 to verified terminal close with exit semantics. Signed IC equals raw IC in calm and negative raw IC in high volatility. Report arithmetic mean IC and the ordinary non-overlapping t-statistic mean/(sample_std/sqrt(n)); zero variance cannot pass.",
+    "metric_conventions": "Assign each daily return to its interval-start UTC date. Total return is compounded. Sharpe is mean daily net return divided by sample standard deviation times sqrt(365), with zero risk-free rate. Max drawdown is the minimum compounded-equity/previous-peak-1. Turnover is the sum of one-way turnover. Cost impact is no-cost compounded total return minus the corresponding cost-path compounded total return."
+  },
+  "parameters": {
+    "primary": {
+      "top_n": 30,
+      "momentum_horizons_days": [7, 14, 28],
+      "volatility_window_days": 30,
+      "rebalance_days": 7,
+      "volume_window_days": 90,
+      "leg_fraction": 0.2,
+      "train_prior_regime_observations": 8,
+      "annualization_days": 365,
+      "baseline_cost_per_unit_one_way_turnover": 0.0015,
+      "stress_cost_per_unit_one_way_turnover": 0.003
+    },
+    "permitted_neighborhood": [
+      {"top_n": 20, "volatility_window_days": 21},
+      {"top_n": 20, "volatility_window_days": 30},
+      {"top_n": 30, "volatility_window_days": 21},
+      {"top_n": 30, "volatility_window_days": 30}
+    ],
+    "neighborhood_role": "The four cells are simultaneous frozen robustness diagnostics. The primary remains top_n=30 and volatility_window_days=30 regardless of outcomes; no cell may replace or rescue it."
+  },
+  "periods": {
+    "warmup_only": ["2020-01-01", "2020-12-31"],
+    "train": ["2021-01-01", "2021-12-31"],
+    "oos": ["2022-01-01", "2022-12-31"],
+    "final_holdout": ["2023-01-01", "2023-12-31"],
+    "half_year_diagnostics": ["2022-H1", "2022-H2", "2023-H1", "2023-H2"],
+    "containment": "No bar dated 2024-01-01 or later may be read. Split metrics slice one continuous path; split boundaries do not liquidate or reset the portfolio."
+  },
+  "classification_precedence": [
+    "PROCESS_DEFECT",
+    "DATA_UNAVAILABLE",
+    "HYPOTHESIS_FAIL",
+    "EXPLORATION_PASS"
+  ],
+  "pass_fail_gates": {
+    "identity_and_execution": "Every frozen identity and correctness check must pass and the formal run count must equal exactly one; otherwise no market verdict is permitted.",
+    "primary_oos": "Baseline-cost OOS total_return > 0, Sharpe >= 0.50, and max_drawdown >= -0.25.",
+    "primary_holdout": "Baseline-cost final-holdout total_return > 0, Sharpe >= 0.50, and max_drawdown >= -0.25.",
+    "primary_combined": "Baseline-cost combined OOS+holdout total_return > 0 and Sharpe >= 0.75.",
+    "cost_stress": "At 30 bps per unit one-way turnover, OOS and final-holdout total_return must each be > 0 and combined OOS+holdout Sharpe must be >= 0.50.",
+    "predictive": "Signed mean IC must be > 0 in OOS and in final holdout; combined OOS+holdout signed-IC t-statistic must be >= 1.50.",
+    "regimes": "Across combined OOS+holdout, calm and high-volatility regimes must each have at least 20 non-warmup decisions, positive baseline-cost compounded return, and positive mean signed IC.",
+    "multi_period": "At least three of the four frozen half-year baseline-cost total returns must be > 0; no half-year max_drawdown may be below -0.25.",
+    "parameter_neighborhood": "At least three of four frozen cells, necessarily including the primary, must have baseline-cost total_return > 0 in both OOS and final holdout and combined OOS+holdout Sharpe >= 0.50.",
+    "concentration": "For the primary combined OOS+holdout path, max observed absolute incumbent or target weight must be <= 0.15, the largest symbol absolute net-contribution share must be <= 0.20, and the top-five absolute net-contribution share must be <= 0.60.",
+    "lifecycle": "Every observed held terminal must use the frozen forced-exit accounting, with no forward fill or substitution. The largest single lifecycle event absolute net-PnL impact divided by total absolute daily net PnL in combined OOS+holdout must be <= 0.20. Zero lifecycle events is permitted and must be reported.",
+    "all_required": "EXPLORATION_PASS requires every gate above. Any market gate failure is HYPOTHESIS_FAIL. An execution/code invariant failure is PROCESS_DEFECT. Frozen required data being absent or unable to satisfy the contract is DATA_UNAVAILABLE."
+  },
+  "formal_execution": {
+    "maximum_run_count": 1,
+    "one_process_outputs": "The single invocation must compute the primary, all frozen neighborhood cells, no-cost/baseline/stress paths, split/regime/IC/concentration/lifecycle diagnostics, classification, and one immutable result artifact.",
+    "rerun_policy": "After any formal performance value is exposed, EXPL-017-FORMAL-001 must never run again. No parameter, mechanism, universe, lifecycle, cost, split, threshold, primary, or gate rescue is allowed.",
+    "result_ceiling": "Because Price V1 is survivor-biased and exploration-only, the maximum alpha_status is EXPLORATION_PASS. PROMOTABLE_ALPHA, STRATEGY_READY, and LIVE_READY are prohibited."
+  },
+  "pre_freeze_performance_state": {
+    "formal_run_count": 0,
+    "formal_performance_computed": false,
+    "formal_performance_printed": false,
+    "formal_performance_serialized": false
+  }
+}

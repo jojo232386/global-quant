@@ -1,0 +1,30 @@
+{
+  "artifact_class": "FORMAL_CONTRACT_REVIEW",
+  "formal_run_id": "EXPL-017-FORMAL-003",
+  "reviewed_head": "cdda9090d1b806508f36887cd89c10934b75c819",
+  "reviewed_freeze_contract_sha256": "0543eba0641077afc7fec2d40d4aeb6b2873cc10a4225bd1c2826213dc9d0071",
+  "approve": true,
+  "request_changes": null,
+  "stop": null,
+  "review_scope": [
+    "identity_binding",
+    "lookahead",
+    "pit",
+    "lifecycle",
+    "horizon",
+    "cost",
+    "turnover_and_accounting",
+    "formal_runner_core_parity",
+    "one_shot_result_integrity"
+  ],
+  "reviewer_role": "independent read-only sol_expert reviewer",
+  "formal_metrics_exposed": false,
+  "evidence": {
+    "focused_tests": "50 passed",
+    "existing_warnings": 72,
+    "worktree_clean_at_review": true,
+    "claim_artifact_absent_at_review": true,
+    "result_artifact_absent_at_review": true
+  },
+  "reviewed_at_utc": "2026-08-24T02:23:43Z"
+}

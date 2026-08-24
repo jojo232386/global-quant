@@ -1,0 +1,22 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-002",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "4ef942f1d0849cd33929ffa80b70e6332b8ec7cd",
+    "findings": [
+      "top-N selection silently substituted a lower-ranked name when a selected name lacked required history or its entry open instead of hard-stopping",
+      "helpers were not joined into an ordered synthetic state-transition path covering selection, entry, threshold state, terminal exit, and split-continuous holdings",
+      "terminal and split tests were helper-level and did not adversarially prove no pre-filter, skip, double exit, reset, or OOS threshold contamination"
+    ]
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-003 under the unchanged hypothesis and oracle; no formal performance until independent correctness approval."
+}

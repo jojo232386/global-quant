@@ -1,0 +1,17 @@
+{
+  "artifact_class": "EXPL_017_PRICE_LIFECYCLE_COMPOSITE",
+  "artifact_version": 1,
+  "contains_price_data": false,
+  "identity": {
+    "price_dataset_sha": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "price_manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "price_pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "lifecycle_dataset_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc"
+  },
+  "consumer_contract": {
+    "price_v1": "immutable and verified at load",
+    "lifecycle_v1": "exception-only, PIT-safe, and fail-closed",
+    "missing_bar_without_confirmed_terminal": "DATA_UNAVAILABLE",
+    "future_missing_bar_inference": false
+  }
+}

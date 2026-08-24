@@ -1,0 +1,21 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-003",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "24f0d7ddafa7f5b76261e6892c9f27acedf85dc8",
+    "findings": [
+      "entry-open validation also read and validated the unavailable execution-day close and quote volume",
+      "the ordered state-machine tests did not assert exact oracle NAV-normalized drift weights, both-leg turnover, and dollar cost across two decisions"
+    ]
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-004 under the unchanged hypothesis and oracle; no formal performance until independent correctness approval."
+}

@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-013",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "80df41d4e50210d64f315bf8ae6469bcae3d8502",
+    "finding": "Lead acceptance rejected the candidate before independent review because first-call and multi-day advance failures could still mutate lifecycle clocks and the required mutation-negative snapshot tests were absent"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-014 under the unchanged hypothesis and oracle; make advance and execute state transitions atomic with mutation-negative tests."
+}

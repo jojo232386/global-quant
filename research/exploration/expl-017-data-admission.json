@@ -1,0 +1,41 @@
+{
+  "admission": "PASS_FOR_EXPL_017",
+  "checked_at_utc": "2026-08-23T13:17:38Z",
+  "dataset": {
+    "dataset_id": "pre2024-usdm-archive-extended-1d",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "stage": "curated",
+    "integrity": "VERIFIED",
+    "quality": "PASS",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "labels": ["archive-extended", "survivor-biased", "exploration-only"],
+    "symbols": 208,
+    "quarantine": 0
+  },
+  "time_range": {
+    "bar_start_utc": "2020-01-01",
+    "bar_end_utc": "2023-12-31",
+    "pit_first_effective_month_utc": "2020-02-01",
+    "pit_last_effective_month_utc": "2024-01-01",
+    "pit_records": 48
+  },
+  "pit_universe": {
+    "rule": "monthly membership uses 90 completed UTC quote-volume bars and is effective the following month",
+    "identity_bound": true,
+    "known_limitation": "archive-extended but incomplete historical contract domain; survivor-biased"
+  },
+  "lifecycle": {
+    "internal_gaps": "hard stop",
+    "inactive_before_decision": "observable exclusion before ranking",
+    "selected_missing_entry_open": "hard stop",
+    "held_terminal_bar": "final open-to-close return, forced exit, exit cost",
+    "forward_fill": false
+  },
+  "fields": ["open_time_utc_ms", "open", "close", "quote_volume", "pit_universe"],
+  "signal_timestamp": "UTC close t after the completed daily bar",
+  "execution_timestamp": "UTC open t+1",
+  "first_return_interval": "UTC open t+1 to UTC open t+2",
+  "formal_window_containment": "2021-01-01 through 2023-12-31; pre-2021 warmup only; no 2024+ bars",
+  "classification_if_replay_fails": "DATA_UNAVAILABLE"
+}

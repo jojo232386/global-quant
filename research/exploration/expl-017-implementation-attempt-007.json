@@ -1,0 +1,18 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-007",
+  "status": "INVALID_PRE_FORMAL",
+  "formal_run_id": null,
+  "formal_freeze_sha": null,
+  "formal_oos_holdout_run": false,
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "invalidating_review": {
+    "reviewed_commit": "cb89d94ab479db73020641b5ffa716f4d5cd7788",
+    "finding": "an unheld stale-PIT name whose terminal bar preceded the decision had no current bar, but the implementation required one instead of consuming an as-of lifecycle event and excluding the known inactive name"
+  },
+  "oracle_status": "EXPL-017-GOLD-ORACLE-002 remains valid and predates production",
+  "allowed_next_step": "Create EXPL-017-IMPL-008 under the unchanged hypothesis and oracle; consume only lifecycle events observable as of decision close before accessing bars for names that remain active."
+}

@@ -55,3 +55,38 @@ PRODUCTION_READY = FALSE
 - Artifact: `expl-004-report.json`.
 - Re-entry rule: no multiplier or decile rescue under EXPL-004. A new id needs
   measured liquidity/execution data or a genuinely different mechanism.
+
+## EXPL-017 formal-003 · 2026-08-24
+
+Shared binding: curated Price V1 snapshot `a7d65a92`; exception-only
+Lifecycle V1 dataset `c7f0f9ea`; survivor-biased, exploration-only. Formal
+run `EXPL-017-FORMAL-003` ran exactly once under freeze contract SHA256
+`0543eba0641077afc7fec2d40d4aeb6b2873cc10a4225bd1c2826213dc9d0071`.
+
+### EXPL-017 · HYPOTHESIS_FAIL · momentum sign by broad-volatility state
+
+- Reason: the primary final-holdout Sharpe was `0.14 < 0.50`; the 30 bps
+  stress holdout return was `-8.93%`; holdout signed mean IC was `-0.05`
+  and combined IC t-stat was `0.79 < 1.50`; the high-volatility regime had
+  `12 < 20` admitted observations; and maximum absolute incumbent/target
+  weight was `16.30% > 15%`.
+- Counter-evidence preserved: baseline OOS return was `45.66%` with Sharpe
+  `1.44`, while final-holdout return fell to `0.37%`; multi-period,
+  neighborhood, and lifecycle gates passed. The frozen contract required all
+  gates, so partial success cannot rescue the hypothesis.
+- Artifact: `expl-017-formal-003-result.json`; SHA256
+  `c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f`.
+- Lessons learned: process-level interpretation and non-repeat rules are
+  recorded in `../process/LESSONS_FROM_EXPL_017.md`; this link does not alter
+  the frozen result or reopen the hypothesis.
+- Re-entry rule: no parameter, formula, split, cost, universe, lifecycle, or
+  threshold rescue under EXPL-017, and no rerun of FORMAL-003. A future id
+  requires a materially different mechanism and a fresh pre-result contract.
+
+```ini
+FUNDING_NOT_MODELED = TRUE
+ALPHA_STATUS = HYPOTHESIS_FAIL
+PROMOTABLE_ALPHA = FALSE
+STRATEGY_READY = FALSE
+LIVE_READY = FALSE
+```

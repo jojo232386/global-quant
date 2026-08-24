@@ -270,6 +270,58 @@ vol as a gate or target, not as a signal direction.
 - Delta vs closed: risk-overlay family; tested as an overlay on EXPL-001's
   base, not standalone.
 
+### EXPL-017 · cross-sectional momentum × broad-volatility state · FAIL
+- Hypothesis status: failed its single frozen formal run and is recorded in
+  the Factor Graveyard; parameter rescue and rerun are prohibited.
+- Mechanism: keep the frozen EXPL-001 7/14/28 cross-sectional momentum
+  measurement, remove its dispersion gate, and map the same rank to
+  continuation in calm broad-universe volatility and reversal in high
+  broad-universe volatility. Volatility is a market state, never a standalone
+  per-name direction rank or sizing input.
+- Delta: unlike EXPL-001 this is a two-direction state interaction, not an
+  always-continuation rank with an on/off dispersion gate; unlike EXPL-003 it
+  does not trade the volatility rank; unlike EXPL-004 it has no liquidity
+  tilt; unlike EXPL-008 it is PIT cross-sectional and reverses direction in
+  high volatility rather than gating BTC/ETH TSMOM off; unlike EXPL-014 it
+  does not vol-scale weights.
+- `EXPL-017-IMPL-001` through `EXPL-017-IMPL-013` are
+  `INVALID_PRE_FORMAL`:
+  implementation defects invalidated those attempts only.
+  `EXPL-017-IMPL-014` is retained as `CORRECTNESS_PASS_CORE_ONLY` at reviewed
+  implementation SHA `f143ad8ee09479e7c74d95acf3af29bdca5bbbd2`.
+  `EXPL-017-FORMAL-001` froze at `0e0b7f8` but is closed as
+  `PROCESS_DEFECT / NOT_RUN`: its last scheduled decision requires a
+  seven-day IC ending in 2024 while the same freeze prohibits 2024 bars.
+  `EXPL-017-FORMAL-002` passed its static horizon preflight (157 schedule
+  rows; IC 44/51/51 in train/OOS/holdout) and froze at `5e36196`, but an
+  independent contract review closed it as `INVALID_BEFORE_EXECUTION` because
+  the bound reviewed implementation remains formal-locked and no complete
+  formal IC/runtime consumer was committed before freeze.
+  `EXPL-017-IMPL-015` then attempted only the missing formal consumer, but
+  stopped before code as `DATA_UNAVAILABLE_PRE_FORMAL`: the exact VERIFIED
+  Price V1 snapshot has 208 kline roles plus PIT universe and summary, with no
+  lifecycle/event role capable of supplying `lifecycle_as_of`. Inferring a
+  terminal event from a future missing bar is prohibited lookahead. The only
+  historical lifecycle audit is outside this lineage and is itself FAIL on
+  `AKROUSDT:TERMINATED_UNCONFIRMED`, so it was not imported or used.
+  With explicit authorization, `EXPL-017-IMPL-016` added a separate,
+  exception-only Lifecycle V1 sidecar bound to immutable Price V1. Its scope
+  is 196 continuous symbols plus 12 early-ending exceptions: 11 confirmed
+  terminals and unresolved `AKROUSDT`, which stays active until a required
+  missing bar produces `DATA_UNAVAILABLE`. The complete Price/PIT/lifecycle,
+  signed IC, continuous three-cost portfolio, horizon, terminal exit, and
+  final-liquidation consumer passed independent review at implementation SHA
+  `df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a`. IMPL-016 is therefore
+  `CORRECTNESS_PASS_PRE_FREEZE`; this is not a formal result.
+  `EXPL-017-FORMAL-003` froze against that reviewed IMPL-016 consumer, passed
+  independent contract review, and ran exactly once. The immutable result is
+  formal classification `HYPOTHESIS_FAIL`: primary holdout Sharpe was `0.14`;
+  30 bps stress holdout return was `-8.93%`; holdout signed mean IC was
+  `-0.05` and combined IC t-stat was `0.79`; the high-volatility regime had only 12
+  admitted observations; and maximum absolute incumbent/target weight was
+  `16.30%`. Multi-period, neighborhood, and lifecycle gates passed, but every
+  frozen gate was required. No rerun or parameter rescue is allowed.
+
 ## Family D — Regime and breadth
 
 ### EXPL-011 · breadth risk switch · DRAFT
@@ -470,6 +522,10 @@ vol as a gate or target, not as a signal direction.
    force-run on two symbols).
 8. EXPL-002: BLOCKED_ON_DATA (funding audit failed; price readiness does not
    unlock a funding-conditioned card).
+9. EXPL-017: FAIL after the one-shot `EXPL-017-FORMAL-003` run; formal
+   classification `HYPOTHESIS_FAIL`;
+   formal run count is one, frozen failed gates are preserved, and the result
+   is recorded in the Factor Graveyard with no rerun or parameter rescue.
 
 ## Escalation note
 

@@ -1,0 +1,50 @@
+{
+  "artifact_class": "FORMAL_RUN_PROCESS_DEFECT_RECORD",
+  "formal_run_id": "EXPL-017-FORMAL-001",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-014",
+  "classification": "PROCESS_DEFECT",
+  "formal_result": "NOT_RUN",
+  "formal_run_count": 0,
+  "market_conclusion": null,
+  "alpha_status": null,
+  "factor_graveyard_entry": false,
+  "freeze_sha": "0e0b7f8afcb6b241b9b0ae8987efcad36b4f069f",
+  "freeze_contract_sha256": "8f181044b38a304e2775a303a6d94875db8d0cf40dae774665e6de663ce15ca9",
+  "reviewed_implementation_sha": "f143ad8ee09479e7c74d95acf3af29bdca5bbbd2",
+  "status_evidence_sha": "20879e58134cfd07294d657bb20b13f6c8e03346",
+  "dataset_snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+  "gold_oracle_sha256": "bb90212c6511af01222d6fa0cea2f60f62cb0a922eb44d65d462dc65af12a8e5",
+  "identity_check": "PASS",
+  "pre_run_correctness": "PASS_BEFORE_CONTRACT_AUDIT_STOP",
+  "performance_state": {
+    "formal_dataset_loaded_by_formal_runner": false,
+    "formal_performance_computed": false,
+    "formal_performance_printed": false,
+    "formal_performance_serialized": false,
+    "formal_result_artifact_created": false
+  },
+  "defect": {
+    "category": "FROZEN_ENDPOINT_AND_IC_CONTAINMENT_CONTRADICTION",
+    "schedule_evidence": {
+      "last_decision_close": "2023-12-28",
+      "last_execution_open": "2023-12-29",
+      "required_seven_day_ic_end_open": "2024-01-05"
+    },
+    "contract_conflict": "The freeze requires a seven-day forward IC for every non-warmup decision, prohibits reading any bar dated 2024-01-01 or later, and permits an early IC endpoint only for a verified terminal event. The ordinary 2023-12-31 final liquidation is not defined as an IC substitute.",
+    "why_no_interpretation_is_allowed": "Omitting the last IC observation, truncating it at final liquidation, or reading 2024 bars would respectively change the formula/success sample, lifecycle semantics, or frozen split containment.",
+    "required_action": "Close EXPL-017-FORMAL-001 without execution. A separately authorized FORMAL_RUN_ID with a newly committed freeze must define a final eligible decision rule whose complete IC horizon is contained, while preserving the unchanged EXPL-017 hypothesis and prior evidence."
+  },
+  "executor": {
+    "result": "STOP_CONTRACT_AMBIGUITY",
+    "files_changed": false,
+    "formal_performance_read": false
+  },
+  "independent_reviewer": {
+    "approve_stop": true,
+    "stop": true,
+    "classification": "PROCESS_DEFECT",
+    "formal_result": "NOT_RUN",
+    "formal_run_count": 0
+  }
+}

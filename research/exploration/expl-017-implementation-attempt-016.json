@@ -1,0 +1,67 @@
+{
+  "artifact_class": "PRE_FORMAL_IMPLEMENTATION_ATTEMPT_RECORD",
+  "hypothesis_id": "EXPL-017",
+  "hypothesis_status": "ACTIVE_PRE_FORMAL",
+  "implementation_attempt_id": "EXPL-017-IMPL-016",
+  "status": "CORRECTNESS_PASS_PRE_FREEZE",
+  "implementation_sha": "df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a",
+  "mechanism_changed": false,
+  "formal_run_id": null,
+  "formal_003_created": false,
+  "freeze_created": false,
+  "formal_dataset_performance_path_run": false,
+  "formal_metrics_computed": false,
+  "formal_metrics_printed": false,
+  "formal_metrics_serialized": false,
+  "formal_run_count": 0,
+  "formal_result": "NOT_RUN",
+  "market_conclusion": null,
+  "factor_graveyard_entry": false,
+  "price_v1": {
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_universe_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "immutable": true,
+    "symbols": 208
+  },
+  "lifecycle_v1": {
+    "dataset_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+    "composite_identity_sha256": "5511caa8a0839fa9c0296f23e828988e6d1374d9cf3edaa2c8cb075e163050bd",
+    "continuous_symbols": 196,
+    "early_end_symbols": 12,
+    "internal_gap_symbols": 0,
+    "confirmed_terminals": 11,
+    "unresolved_terminals": 1,
+    "data_corruption": 0,
+    "akrousdt": "TERMINATED_UNCONFIRMED_FAIL_CLOSED"
+  },
+  "correctness_checks": {
+    "lifecycle_pit": "PASS",
+    "lifecycle_evidence": "PASS",
+    "no_future_delivery_filter": "PASS",
+    "data_unavailable_behavior": "PASS",
+    "formal_consumer": "PASS",
+    "formal_ic_consumer": "PASS",
+    "formal_portfolio_path": "PASS",
+    "core_parity": "PASS",
+    "horizon_runtime": "PASS",
+    "lookahead": "PASS",
+    "pit": "PASS",
+    "accounting": "PASS",
+    "formal_performance_lock": "PASS"
+  },
+  "independent_review": {
+    "approve": true,
+    "reviewed_sha": "df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a",
+    "request_changes": null,
+    "reviewer_role": "independent read-only reviewer",
+    "focused_tests": "53 passed",
+    "full_tests": "374 passed; 72 existing temporary-directory cleanup warnings"
+  },
+  "historical_formal_state": {
+    "EXPL-017-FORMAL-001": "INVALID_BEFORE_EXECUTION",
+    "EXPL-017-FORMAL-002": "INVALID_BEFORE_EXECUTION",
+    "artifacts_modified": false
+  },
+  "allowed_next_step": "STOP pre-freeze. Only a separate explicit authorization may create a new FORMAL_RUN_ID and freeze contract before any one-shot formal performance evaluation."
+}
