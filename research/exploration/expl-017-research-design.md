@@ -9,7 +9,7 @@ HYPOTHESIS_ID = EXPL-017
 IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-016
 IMPLEMENTATION_ATTEMPT_STATUS = CORRECTNESS_PASS_PRE_FREEZE
 PRIOR_IMPLEMENTATION_ATTEMPT_ID = EXPL-017-IMPL-001 THROUGH EXPL-017-IMPL-013 INVALID_PRE_FORMAL; EXPL-017-IMPL-014 CORRECTNESS_PASS_CORE_ONLY; EXPL-017-IMPL-015 DATA_UNAVAILABLE_PRE_FORMAL
-FORMAL_RUN_ID = NONE
+FORMAL_RUN_ID = EXPL-017-FORMAL-003 (frozen; awaiting independent contract review)
 MECHANISM = Cross-sectional momentum changes sign with the broad PIT universe volatility state: calm markets permit slow information diffusion and continuation, while high-volatility markets are dominated by forced deleveraging, correlation spikes, and rebound, producing relative reversal.
 WHY_EDGE_MAY_EXIST = Pool-wide volatility is a state variable for the price-formation mechanism, not a second standalone rank. Conditioning the same ex-ante momentum score on that state can reveal opposing conditional rank relations that cancel in an unconditional test.
 DELTA_FROM_FAILED_WORK = EXPL-001 always mapped winners long and losers short and used return dispersion only as an on/off gate; EXPL-017 removes that gate and reverses the rank-to-position mapping in high broad-market volatility. EXPL-003 ranked volatility itself as direction; EXPL-017 never ranks names by volatility for direction. EXPL-004 changed liquidity weights; EXPL-017 uses equal weights within legs. EXPL-008 was a BTC/ETH per-asset TSMOM low-vol on/off gate; EXPL-017 is a real PIT cross-section and tests a two-direction interaction. EXPL-014 is a sizing proposal; EXPL-017 keeps equal leg weights.
@@ -92,11 +92,10 @@ committed.
 Price V1 is survivor-biased and exploration-only. `PROMOTABLE_ALPHA`,
 `STRATEGY_READY`, and `LIVE_READY` are prohibited conclusions.
 
-This document fixes the EXPL-017 mechanism. It is not a formal freeze commit.
-No `FORMAL_RUN_ID` may exist until a clean implementation attempt passes the
-independent correctness review. EXPL-017-IMPL-014 has passed that review, but
-this task stops before freeze: `FORMAL_RUN_ID`, formal freeze, and formal
-OOS/holdout performance all remain `NONE` / `NOT RUN`.
+This document fixes the EXPL-017 mechanism. It is not itself the formal freeze.
+`EXPL-017-FORMAL-003` is separately frozen against the clean IMPL-016
+consumer and awaits independent contract review. Formal OOS/holdout performance
+remains `NOT RUN` and must not be read before that review approves the freeze.
 
 `EXPL-017-GOLD-ORACLE-002` was committed before either production attempt and
 its arithmetic passed independent review. It is reused byte-for-byte by

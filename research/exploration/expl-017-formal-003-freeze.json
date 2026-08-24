@@ -1,0 +1,117 @@
+{
+  "artifact_class": "FORMAL_FREEZE_CONTRACT",
+  "contract_version": 3,
+  "created_at_utc": "2026-08-24T00:00:00Z",
+  "formal_run_id": "EXPL-017-FORMAL-003",
+  "hypothesis_id": "EXPL-017",
+  "implementation_attempt_id": "EXPL-017-IMPL-016",
+  "reviewed_implementation_sha": "df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a",
+  "status": "FROZEN_AWAITING_INDEPENDENT_CONTRACT_REVIEW",
+  "superseded_formal_attempts": {
+    "EXPL-017-FORMAL-001": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN",
+    "EXPL-017-FORMAL-002": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN"
+  },
+  "identity": {
+    "price_v1": {
+      "dataset_id": "pre2024-usdm-archive-extended-1d",
+      "snapshot_sha256": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+      "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+      "pit_universe_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+      "symbol_count": 208,
+      "labels": ["survivor-biased", "exploration-only"],
+      "last_allowed_bar": "2023-12-31",
+      "boundary_exclusive": "2024-01-01"
+    },
+    "lifecycle_v1": {
+      "path": "research/data/expl-017-lifecycle-v1.json",
+      "dataset_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+      "continuous_symbols": 196,
+      "early_end_symbols": 12,
+      "confirmed_terminals": 11,
+      "unresolved_terminals": 1,
+      "unresolved_symbol": "AKROUSDT",
+      "unresolved_rule": "Remain active until a required missing bar raises DATA_UNAVAILABLE; never infer a terminal event from a future missing bar."
+    },
+    "composite": {
+      "path": "research/data/expl-017-price-lifecycle-composite.json",
+      "sha256": "5511caa8a0839fa9c0296f23e828988e6d1374d9cf3edaa2c8cb075e163050bd",
+      "contains_price_data": false
+    },
+    "gold_oracle": {
+      "oracle_id": "EXPL-017-GOLD-ORACLE-002",
+      "path": "tests/oracles/expl_017_impl_002_oracle.py",
+      "sha256": "bb90212c6511af01222d6fa0cea2f60f62cb0a922eb44d65d462dc65af12a8e5",
+      "rule": "Earlier independent oracle; do not regenerate, replace, or derive it from the consumer."
+    },
+    "reviewed_core": {
+      "path": "research/exploration/expl_017.py",
+      "sha256": "39060b88f4596783b80df4ddae5b8c5952ec67621a69789c17278a69b367ae02"
+    },
+    "formal_consumer": {
+      "path": "research/exploration/expl_017_formal_consumer.py",
+      "sha256": "87b7f1b861d6e8e190bc1d6fe5f83ae1de360cba5a664d74c1c582133394943a",
+      "entrypoint": "load_verified_price_lifecycle_adapter(data_root) then FormalConsumer(adapter, Config(...)).execute_schedule(frozen_schedule, frozen_final_timestamp)",
+      "rule": "Reuse this reviewed core adapter and consumer; do not reimplement momentum, volatility, NAV, turnover, lifecycle accounting, or IC."
+    },
+    "formal_runner": {
+      "path": "research/exploration/expl_017_formal_runner.py",
+      "sha256": "d6cbf108fc2c235083bff72c4b10460a9a5f8a9247d50c790a7d400da1d1e178",
+      "entrypoint": "run(data_root, result_path, approved=True)",
+      "rule": "This thin entry verifies the freeze, invokes only the bound adapter and consumer for all frozen cells, and writes exactly one result artifact."
+    },
+    "horizon_preflight": {
+      "artifact_path": "research/exploration/expl-017-formal-002-horizon-preflight.json",
+      "artifact_sha256": "7dd47bf88491576fb1f7f68fc1fb7554037e1fa4d648ed2cd603ebd0f8c65113",
+      "generator_path": "research/exploration/expl_017_horizon_preflight.py",
+      "generator_sha256": "70135128777cfa8c659ac5415a457efa1f200e84fbddb618c40981f46893af1e",
+      "schedule_count": 157,
+      "ic_included_count": 146,
+      "ic_excluded_count": 11,
+      "split_counts": {"train": [53, 44], "oos": [52, 51], "holdout": [52, 51]}
+    }
+  },
+  "mechanism": "Cross-sectional momentum changes sign with the broad PIT-universe volatility state: continuation in calm markets and relative reversal in high-volatility markets.",
+  "formula": {
+    "timing": "Use completed UTC data through close t; execute at UTC open t+1; first earned interval is open t+1 to the next open.",
+    "pit_universe": "Use monthly PIT membership effective at execution t+1 and names active as of decision close t only.",
+    "selection": "Rank PIT-active names by median quote_volume over 90 completed bars t-89 through t, descending then canonical symbol; missing required history or execution open is DATA_UNAVAILABLE.",
+    "momentum": "For h in {7,14,28}, compute close(t)/close(t-h)-1, average tied cross-sectional normalized ranks, then average horizons.",
+    "broad_volatility": "For selected names, take sample stdev of 30 completed close-to-close returns times sqrt(365), then cross-sectional median.",
+    "regime": "Train uses expanding median of prior valid train values after eight priors; equality is calm. OOS and holdout use the fixed median of all valid 2021 train values only.",
+    "positions": "Calm long highest and short lowest quintile; high volatility reverses that mapping. Each leg absolute gross 0.5, equal weighted; gross 1 and net 0.",
+    "schedule": "157 decisions every seven calendar days, UTC, anchored 2021-01-01. All decisions remain in one continuous portfolio across splits.",
+    "lifecycle": "Confirmed held terminal earns final open-to-final-close return, is forcibly liquidated with exit cost, and is never forward-filled. No terminal or final close substitutes for an IC endpoint open.",
+    "turnover_accounting": "At target trade, turnover is sum abs(target weight - incumbent drifted signed-notional weight) over the union, using true pre-trade NAV. Include both legs, terminal exits, and final liquidation. Independently simulate no-cost, 15 bps, and 30 bps cost paths.",
+    "ic": "For every preflight-admitted decision, calculate Spearman of the regime-signed momentum and complete same-name execution-open to endpoint-open seven-day return. Excluded rows remain in the portfolio path but not IC."
+  },
+  "parameters": {
+    "primary": {"top_n": 30, "momentum_horizons_days": [7, 14, 28], "volatility_window_days": 30, "rebalance_days": 7, "volume_window_days": 90, "leg_fraction": 0.2, "train_prior_regime_observations": 8, "annualization_days": 365},
+    "neighborhood": [{"top_n": 20, "volatility_window_days": 21}, {"top_n": 20, "volatility_window_days": 30}, {"top_n": 30, "volatility_window_days": 21}, {"top_n": 30, "volatility_window_days": 30}],
+    "rule": "All four are simultaneous frozen diagnostics. Primary stays (30,30); no cell may rescue it."
+  },
+  "periods": {"warmup_only": ["2020-01-01", "2020-12-31"], "train": ["2021-01-01", "2021-12-31"], "oos": ["2022-01-01", "2022-12-31"], "final_holdout": ["2023-01-01", "2023-12-31"]},
+  "costs": {"baseline_per_unit_one_way_turnover": 0.0015, "baseline_components": {"fee": 0.0005, "slippage": 0.001}, "stress_per_unit_one_way_turnover": 0.003, "funding_modeled": false},
+  "horizon_rules": {"admission": "execution+7 calendar days must be strictly before both split end-exclusive and dataset boundary-exclusive timestamps; first eight train decisions are warmup and excluded.", "prohibited_substitutions": ["truncated return", "partial horizon", "terminal close substitute", "final liquidation substitute", "2024+ data"], "boundary_examples": [{"split": "train", "decision": "2021-12-30", "ic_included": false}, {"split": "oos", "decision": "2022-12-29", "ic_included": false}, {"split": "holdout", "decision": "2023-12-28", "ic_included": false}]},
+  "pass_fail_criteria": {
+    "identity_execution": "Every identity and runtime invariant must pass and formal run count must equal one; otherwise no market verdict.",
+    "primary": "Baseline OOS and holdout total return > 0, Sharpe >= 0.50, max drawdown >= -0.25; combined OOS+holdout total return > 0 and Sharpe >= 0.75.",
+    "stress": "At 30 bps, OOS and holdout total return > 0 and combined Sharpe >= 0.50.",
+    "predictive": "OOS and holdout signed mean IC > 0 and combined OOS+holdout signed IC t-stat >= 1.50.",
+    "regimes": "Each regime has at least 20 admitted IC decisions, positive baseline compounded return, and positive signed mean IC.",
+    "multi_period": "At least three of four frozen half-years have positive baseline return and none has max drawdown below -0.25.",
+    "neighborhood": "At least three of four cells, including primary, are positive in OOS and holdout and have combined Sharpe >= 0.50.",
+    "concentration": "Maximum absolute incumbent or target weight <= 0.15, largest absolute net-contribution share <= 0.20, top-five <= 0.60.",
+    "lifecycle": "All observed held terminals use forced exits; exact IC endpoints only; lifecycle event impact / total absolute combined OOS+holdout daily net PnL <= 0.20. Zero events is permitted.",
+    "classification": ["PROCESS_DEFECT", "DATA_UNAVAILABLE", "HYPOTHESIS_FAIL", "EXPLORATION_PASS"]
+  },
+  "formal_execution": {
+    "maximum_run_count": 1,
+    "current_run_count": 0,
+    "metrics_exposed": false,
+    "result_artifact": "A single immutable result artifact must contain primary, neighborhood, no-cost/baseline/stress, split/regime/IC/concentration/lifecycle diagnostics and final classification.",
+    "authorization": "No execution is authorized by this freeze alone; require independent contract approval before the one authorized invocation.",
+    "rerun_policy": "After any formal performance value is exposed this formal ID must never run again; no mechanism, formula, parameter, split, cost, universe, lifecycle, horizon, threshold, or gate rescue.",
+    "result_ceiling": "Price V1 is survivor-biased and exploration-only: at most EXPLORATION_PASS; PROMOTABLE_ALPHA, STRATEGY_READY, and LIVE_READY are prohibited."
+  },
+  "pre_freeze_performance_state": {"formal_run_count": 0, "formal_performance_computed": false, "formal_performance_printed": false, "formal_performance_serialized": false}
+}

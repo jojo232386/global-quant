@@ -313,8 +313,10 @@ vol as a gate or target, not as a signal direction.
   final-liquidation consumer passed independent review at implementation SHA
   `df9d506b0f6bc61bf596e1eb1b6b90a2de8c238a`. IMPL-016 is therefore
   `CORRECTNESS_PASS_PRE_FREEZE`; this is not a formal result.
-  Formal run count is zero and formal OOS/holdout performance remains unread;
-  EXPL-017 stays active and has no market verdict or Factor Graveyard entry.
+  `EXPL-017-FORMAL-003` is frozen against that reviewed IMPL-016 consumer and
+  awaits independent contract review. Formal run count is zero and formal
+  OOS/holdout performance remains unread; EXPL-017 stays active and has no
+  market verdict or Factor Graveyard entry.
 
 ## Family D — Regime and breadth
 
