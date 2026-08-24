@@ -47,7 +47,7 @@ def test_runner_verifies_freeze_and_refuses_a_run_without_independent_approval(t
     freeze = runner.load_freeze()
     assert freeze["formal_run_id"] == "EXPL-017-FORMAL-003"
     with pytest.raises(runner.FormalRunnerError, match="approval"):
-        runner.run(tmp_path)
+        runner.require_independent_approval(review_path=tmp_path / "missing-review.json")
 
 
 def test_durable_claim_is_canonical_and_rejects_every_later_invocation(tmp_path, monkeypatch):
