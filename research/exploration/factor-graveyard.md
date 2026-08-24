@@ -76,6 +76,9 @@ run `EXPL-017-FORMAL-003` ran exactly once under freeze contract SHA256
   gates, so partial success cannot rescue the hypothesis.
 - Artifact: `expl-017-formal-003-result.json`; SHA256
   `c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f`.
+- Lessons learned: process-level interpretation and non-repeat rules are
+  recorded in `../process/LESSONS_FROM_EXPL_017.md`; this link does not alter
+  the frozen result or reopen the hypothesis.
 - Re-entry rule: no parameter, formula, split, cost, universe, lifecycle, or
   threshold rescue under EXPL-017, and no rerun of FORMAL-003. A future id
   requires a materially different mechanism and a fresh pre-result contract.
