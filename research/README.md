@@ -5,10 +5,10 @@ active runtime, and it does not authorize live trading.
 
 ## Loop
 
-The cross-study operating rules are frozen in
-`process/GMAQ_RESEARCH_PROTOCOL_V2.md`. EXPL-017's completed negative result
-and its process review are documented under `process/`; they do not authorize
-a replacement experiment.
+The cross-study operating rules for future work are in
+`process/GMAQ_RESEARCH_PROTOCOL_V3.md`; Protocol v2 and EXPL-017's completed
+negative result remain immutable historical evidence under `process/`. Neither
+authorizes a replacement experiment.
 
 1. Preregister the hypothesis before looking at results:
    `preregistration/HYPOTHESIS_TEMPLATE.md`

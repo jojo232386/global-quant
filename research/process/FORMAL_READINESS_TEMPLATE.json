@@ -1,0 +1,10 @@
+{
+  "DATASET_READY": false,
+  "PIT_READY": false,
+  "LIFECYCLE_READY": false,
+  "GOLD_SAMPLE_READY": false,
+  "CONSUMER_READY": false,
+  "HORIZON_READY": false,
+  "ACCOUNTING_READY": false,
+  "REPORT_READY": false
+}
