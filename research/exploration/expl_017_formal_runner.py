@@ -116,20 +116,35 @@ def _summary(values: Sequence[float]) -> Mapping[str, float | int | None]:
     return {"count": len(values), "mean": mean, "t_stat": t_stat}
 
 
-def _path_metrics(ledger: Sequence[core.AccountingEntry], split: str) -> Mapping[str, float | int | None]:
+def _period(timestamp: int) -> str | None:
+    stamp = dt.datetime.fromtimestamp(timestamp / 1000, tz=dt.UTC)
+    if stamp.year == 2021:
+        return "train"
+    if stamp.year == 2022:
+        return "oos_h1" if stamp.month <= 6 else "oos_h2"
+    if stamp.year == 2023:
+        return "holdout_h1" if stamp.month <= 6 else "holdout_h2"
+    return None
+
+
+def _returns(ledger: Sequence[core.AccountingEntry]) -> tuple[tuple[int, float], ...]:
     opens = [entry for entry in ledger if entry.phase == "OPEN"]
     if len(opens) < 2:
         raise FormalRunnerError("insufficient continuous accounting")
-    returns: list[float] = []
-    for previous, current in zip(opens, opens[1:]):
-        # The ledger checkpoint at current open closes the interval that began
-        # at previous UTC open, which is the frozen reporting convention.
-        if _split(previous.timestamp) == split:
-            returns.append(current.nav / previous.nav - 1.0)
+    output = [(previous.timestamp, current.nav / previous.nav - 1.0) for previous, current in zip(opens, opens[1:])]
     final = next((entry for entry in ledger if entry.phase == "FINAL_CLOSE"), None)
-    if final is not None and split == "holdout":
-        last_open = opens[-1]
-        returns.append(final.nav / last_open.nav - 1.0)
+    if final is not None:
+        output.append((opens[-1].timestamp, final.nav / opens[-1].nav - 1.0))
+    return tuple(output)
+
+
+def _path_metrics(ledger: Sequence[core.AccountingEntry], periods: set[str]) -> Mapping[str, float | int | None]:
+    returns: list[float] = []
+    for timestamp, value in _returns(ledger):
+        current = _period(timestamp)
+        split = current.split("_")[0] if current else None
+        if current in periods or split in periods:
+            returns.append(value)
     equity = 1.0
     peak = 1.0
     drawdown = 0.0
@@ -142,20 +157,103 @@ def _path_metrics(ledger: Sequence[core.AccountingEntry], split: str) -> Mapping
     return {"return": equity - 1.0, "sharpe": sharpe, "max_drawdown": drawdown, "daily_count": len(returns)}
 
 
+def _contributions(outcome: consumer.ConsumerSchedule, schedule: Sequence[consumer.HorizonContract]) -> Mapping[str, Any]:
+    """Attribute realized baseline ledger changes without rereading prices.
+
+    Rebalance entries use the reviewed pre-trade incumbent state, so target
+    notional transfers cannot masquerade as symbol profit and loss.  Terminal
+    and final exits use the reviewed Exit amount/cost pair.
+    """
+    ledger = outcome.accounting[core.COST]
+    opens = [entry for entry in ledger if entry.phase == "OPEN"]
+    states = {contract.execution_ms: item.states[core.COST] for item, contract in zip(outcome.decisions, schedule)}
+    contribution: dict[str, float] = {}
+    lifecycle_events: list[float] = []
+    daily_absolute: list[float] = []
+
+    def add(symbol: str, value: float, daily: dict[str, float]) -> None:
+        if not math.isfinite(value):
+            raise FormalRunnerError("non-finite contribution")
+        contribution[symbol] = contribution.get(symbol, 0.0) + value
+        daily[symbol] = daily.get(symbol, 0.0) + value
+
+    def interval(previous: core.AccountingEntry, current: core.AccountingEntry) -> None:
+        if _split(previous.timestamp) not in {"oos", "holdout"}:
+            return
+        before = dict(previous.notionals)
+        daily: dict[str, float] = {}
+        state = states.get(current.timestamp)
+        pretrade = (
+            {symbol: weight * state.nav_before_trade for symbol, weight in state.incumbent.items()}
+            if state is not None else dict(current.notionals)
+        )
+        exits = {item.symbol: item for item in current.exits}
+        for symbol in set(before) | set(pretrade) | set(exits):
+            if symbol in exits:
+                exit = exits[symbol]
+                sign = 1.0 if before.get(symbol, 0.0) >= 0 else -1.0
+                value = sign * exit.nav_before * exit.turnover - before.get(symbol, 0.0) - exit.cost
+                add(symbol, value, daily)
+                lifecycle_events.append(value)
+            else:
+                add(symbol, pretrade.get(symbol, 0.0) - before.get(symbol, 0.0), daily)
+        if state is not None and state.cost:
+            changes = {symbol: abs(state.target.get(symbol, 0.0) - state.incumbent.get(symbol, 0.0)) for symbol in set(state.target) | set(state.incumbent)}
+            total = sum(changes.values())
+            if total <= 0:
+                raise FormalRunnerError("unallocatable reviewed trade cost")
+            for symbol, amount in changes.items():
+                add(symbol, -state.cost * amount / total, daily)
+        daily_absolute.append(sum(abs(value) for value in daily.values()))
+
+    for previous, current in zip(opens, opens[1:]):
+        interval(previous, current)
+    final = next((entry for entry in ledger if entry.phase == "FINAL_CLOSE"), None)
+    if final is not None:
+        interval(opens[-1], final)
+    absolute = {symbol: abs(value) for symbol, value in contribution.items()}
+    total = sum(absolute.values())
+    ordered = sorted(absolute.values(), reverse=True)
+    return {
+        "per_symbol_net_contribution": dict(sorted(contribution.items())),
+        "largest_symbol_absolute_net_contribution_share": (ordered[0] / total if total else 0.0),
+        "top_five_absolute_net_contribution_share": (sum(ordered[:5]) / total if total else 0.0),
+        "lifecycle_event_count": len(lifecycle_events),
+        "largest_single_lifecycle_event_absolute_net_pnl": max((abs(value) for value in lifecycle_events), default=0.0),
+        "total_absolute_daily_net_pnl": sum(daily_absolute),
+        "largest_lifecycle_event_impact": (max((abs(value) for value in lifecycle_events), default=0.0) / sum(daily_absolute) if sum(daily_absolute) else 0.0),
+    }
+
+
 def summarize(outcome: consumer.ConsumerSchedule, schedule: Sequence[consumer.HorizonContract]) -> Mapping[str, Any]:
     """Aggregate only the already-executed consumer ledger; never reread data."""
     if len(outcome.decisions) != len(schedule):
         raise FormalRunnerError("consumer schedule/result mismatch")
+    period_sets = {
+        "train": {"train"}, "oos": {"oos"}, "holdout": {"holdout"}, "oos_holdout": {"oos", "holdout"},
+        "oos_h1": {"oos_h1"}, "oos_h2": {"oos_h2"}, "holdout_h1": {"holdout_h1"}, "holdout_h2": {"holdout_h2"},
+    }
     by_cost = {
-        str(cost): {split: _path_metrics(ledger, split) for split in ("train", "oos", "holdout")}
+        str(cost): {label: _path_metrics(ledger, periods) for label, periods in period_sets.items()}
         for cost, ledger in outcome.accounting.items()
     }
     ic: dict[str, list[float]] = {"train": [], "oos": [], "holdout": []}
     regimes: dict[str, list[float]] = {"calm": [], "high": []}
     max_weight = 0.0
+    regime_returns: dict[str, list[float]] = {"calm": [], "high": []}
+    regimes_by_execution = {contract.execution_ms: item.states[core.COST].regime for item, contract in zip(outcome.decisions, schedule)}
+    baseline_opens = [entry for entry in outcome.accounting[core.COST] if entry.phase == "OPEN"]
+    for previous, current in zip(baseline_opens, baseline_opens[1:]):
+        if _split(previous.timestamp) in {"oos", "holdout"}:
+            candidates = [timestamp for timestamp in regimes_by_execution if timestamp <= previous.timestamp]
+            regime = regimes_by_execution[max(candidates)] if candidates else None
+            if regime in regime_returns:
+                regime_returns[regime].append(current.nav / previous.nav - 1.0)
     for item, contract in zip(outcome.decisions, schedule):
         state = item.states[core.COST]
-        max_weight = max(max_weight, *(abs(value) for value in (*state.target.values(), *state.incumbent.values())))
+        weights = [abs(value) for value in (*state.target.values(), *state.incumbent.values())]
+        if weights:
+            max_weight = max(max_weight, *weights)
         if item.ic is not None:
             ic[contract.split].append(item.ic)
             if state.regime in regimes:
@@ -166,12 +264,42 @@ def summarize(outcome: consumer.ConsumerSchedule, schedule: Sequence[consumer.Ho
             split: by_cost["0.0"][split]["return"] - by_cost[str(core.COST)][split]["return"]
             for split in ("train", "oos", "holdout")
         },
-        "ic": {split: _summary(values) for split, values in ic.items()},
-        "regimes": {regime: _summary(values) for regime, values in regimes.items()},
-        "concentration": {"max_abs_incumbent_or_target_weight": max_weight},
+        "ic": {
+            **{split: _summary(values) for split, values in ic.items()},
+            "oos_holdout": _summary([*ic["oos"], *ic["holdout"]]),
+        },
+        "regimes": {regime: {**_summary(values), "baseline_return": _path_metrics_from_returns(regime_returns[regime])} for regime, values in regimes.items()},
+        "concentration": {"max_abs_incumbent_or_target_weight": max_weight, **_contributions(outcome, schedule)},
         "lifecycle": {str(cost): len(exits) for cost, exits in outcome.lifecycle_exits.items()},
         "turnover": {str(cost): sum(entry.turnover for entry in ledger) for cost, ledger in outcome.accounting.items()}
     }
+
+
+def _path_metrics_from_returns(values: Sequence[float]) -> float:
+    result = 1.0
+    for value in values:
+        result *= 1.0 + value
+    return result - 1.0
+
+
+def evaluate(cells: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
+    """Evaluate every frozen market gate; no post-result discretion remains."""
+    primary = cells["n30_v30"]
+    baseline = primary["portfolio"][str(core.COST)]
+    stress = primary["portfolio"]["0.003"]
+    concentration = primary["concentration"]
+    regime = primary["regimes"]
+    gates = {
+        "primary": all(baseline[key]["return"] > 0 and baseline[key]["sharpe"] is not None and baseline[key]["sharpe"] >= 0.50 and baseline[key]["max_drawdown"] >= -0.25 for key in ("oos", "holdout")) and baseline["oos_holdout"]["return"] > 0 and baseline["oos_holdout"]["sharpe"] is not None and baseline["oos_holdout"]["sharpe"] >= 0.75,
+        "stress": all(stress[key]["return"] > 0 for key in ("oos", "holdout")) and stress["oos_holdout"]["sharpe"] is not None and stress["oos_holdout"]["sharpe"] >= 0.50,
+        "predictive": all(primary["ic"][key]["mean"] is not None and primary["ic"][key]["mean"] > 0 for key in ("oos", "holdout")) and primary["ic"]["oos_holdout"]["t_stat"] is not None and primary["ic"]["oos_holdout"]["t_stat"] >= 1.50,
+        "regimes": all(regime[key]["count"] >= 20 and regime[key]["mean"] is not None and regime[key]["mean"] > 0 and regime[key]["baseline_return"] > 0 for key in ("calm", "high")),
+        "multi_period": sum(baseline[key]["return"] > 0 for key in ("oos_h1", "oos_h2", "holdout_h1", "holdout_h2")) >= 3 and all(baseline[key]["max_drawdown"] >= -0.25 for key in ("oos_h1", "oos_h2", "holdout_h1", "holdout_h2")),
+        "neighborhood": sum(cell["portfolio"][str(core.COST)]["oos"]["return"] > 0 and cell["portfolio"][str(core.COST)]["holdout"]["return"] > 0 and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] is not None and cell["portfolio"][str(core.COST)]["oos_holdout"]["sharpe"] >= 0.50 for cell in cells.values()) >= 3,
+        "concentration": concentration["max_abs_incumbent_or_target_weight"] <= 0.15 and concentration["largest_symbol_absolute_net_contribution_share"] <= 0.20 and concentration["top_five_absolute_net_contribution_share"] <= 0.60,
+        "lifecycle": concentration["largest_lifecycle_event_impact"] <= 0.20,
+    }
+    return {"gates": gates, "classification": "EXPLORATION_PASS" if all(gates.values()) else "HYPOTHESIS_FAIL"}
 
 
 def run(data_root: pathlib.Path, result_path: pathlib.Path) -> Mapping[str, Any]:
@@ -187,7 +315,7 @@ def run(data_root: pathlib.Path, result_path: pathlib.Path) -> Mapping[str, Any]
         config = core.Config(n=params["top_n"], volatility_window=params["volatility_window_days"])
         outcome = consumer.FormalConsumer(adapter, config).execute_schedule(schedule, consumer.FormalConsumer._frozen_final_timestamp())
         cells[f"n{config.n}_v{config.volatility_window}"] = summarize(outcome, schedule)
-    payload = {"formal_run_id": FORMAL_RUN_ID, "freeze_contract_sha256": _sha256(FREEZE_PATH), "results": cells}
+    payload = {"formal_run_id": FORMAL_RUN_ID, "freeze_contract_sha256": _sha256(FREEZE_PATH), "results": cells, "verdict": evaluate(cells)}
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return payload

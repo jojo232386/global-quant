@@ -11,6 +11,10 @@
     "EXPL-017-FORMAL-001": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN",
     "EXPL-017-FORMAL-002": "INVALID_BEFORE_EXECUTION_PROCESS_DEFECT_NOT_RUN"
   },
+  "supersedes_pre_review_freeze": {
+    "freeze_sha": "de91c0a904a7c7b3faa0c95f18ad4f731e90fb2e",
+    "reason": "Pre-review reporting wrapper lacked required frozen diagnostics; no approval, Price V1 execution, or formal metric exposure occurred."
+  },
   "identity": {
     "price_v1": {
       "dataset_id": "pre2024-usdm-archive-extended-1d",
@@ -55,7 +59,7 @@
     },
     "formal_runner": {
       "path": "research/exploration/expl_017_formal_runner.py",
-      "sha256": "4ca1ddcf675775be72f264b74c8da7ad272baa474f423d13cd8a2553744333d0",
+      "sha256": "9da17954476b5604cb73351f2cab7723fa024a8f5fad1f1dc003981e25166e92",
       "entrypoint": "run(data_root, result_path) after a separate approved contract-review artifact binds this exact freeze SHA",
       "rule": "This thin entry verifies the freeze, invokes only the bound adapter and consumer for all frozen cells, and writes exactly one result artifact."
     },
