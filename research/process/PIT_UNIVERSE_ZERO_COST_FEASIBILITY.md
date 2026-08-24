@@ -81,9 +81,9 @@ route that does not contradict the full-market stop above. A Wayback capture of
 the official Binance USD-M `exchangeInfo` endpoint freezes all 80 contracts
 trading at one historical timestamp. All 80 bind to Price V1. Five have
 confirmed official terminal evidence; an unresolved `TOMOUSDT` zero-volume tail
-forces the global query window to end before 2023-11-15. The cohort is not
-selected from today's survivors or later returns, and zero-volume padding is
-not treated as continued activity.
+and the bar-open timestamp limitation force the global query window to end at
+`2023-11-14T00:00:00Z`. The cohort is not selected from today's survivors or
+later returns, and zero-volume padding is not treated as continued activity.
 
 That evidence unlocks only a bounded, fixed `PARTIAL_PIT_COHORT_CANDIDATE`.
 It does not reconstruct later listings, prove a complete dynamic

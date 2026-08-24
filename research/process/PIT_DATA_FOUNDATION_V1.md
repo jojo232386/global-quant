@@ -33,12 +33,13 @@ All 80 bind to Price V1. Seventy-four retain positive quote-volume activity
 through 2023-12-31; `BZRXUSDT` and `YFIIUSDT` retain their existing confirmed
 terminal events, while `CVCUSDT`, `HNTUSDT`, and `SRMUSDT` now bind additional
 official terminal evidence. `TOMOUSDT` has an unresolved zero-volume tail after
-2023-11-14, so the deterministic query window stops at 2023-11-15 rather than
-pretending its padded rows prove continued trading.
+2023-11-14. Because that positive daily aggregate is identified by its bar-open
+time and cannot prove continuous intraday status, the deterministic query window
+stops at `2023-11-14T00:00:00Z` rather than overstating the supported interval.
 
 Historical queries return 80 symbols in mid-2021, 78 in mid-2022, and 75 in
 mid-2023. The five later-delisted contracts remain present before their
-effective terminal times. Queries at or after 2023-11-15 fail closed. Symbols
+effective terminal times. Queries at or after 2023-11-14 fail closed. Symbols
 listed after the frozen capture are never admitted. This controls
 current-survivor bias for the covered cohort window; it does not claim complete
 rolling-market coverage or add later listings.

@@ -17,7 +17,9 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import os
 import pathlib
+import stat
 import sys
 from typing import Any, Mapping, Sequence
 
@@ -29,7 +31,6 @@ if str(ROOT) not in sys.path:
 from gmaq_data import verify_snapshot  # noqa: E402
 from research.data.expl_017_lifecycle_v1 import (  # noqa: E402
     TERMINATED_CONFIRMED,
-    load_sidecar,
 )
 from research.exploration.price_alpha_v1 import (  # noqa: E402
     DATASET as PRICE_DATASET,
@@ -112,9 +113,9 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def _wayback_cdx_digest(path: pathlib.Path) -> str:
+def _wayback_cdx_digest(raw: bytes) -> str:
     """Return Wayback's uppercase, unpadded Base32 SHA-1 content identifier."""
-    digest = hashlib.sha1(path.read_bytes()).digest()  # noqa: S324 - archive format
+    digest = hashlib.sha1(raw).digest()  # noqa: S324 - archive format
     return base64.b32encode(digest).decode("ascii").rstrip("=")
 
 
@@ -135,12 +136,41 @@ def _require_regular(path: pathlib.Path) -> None:
         raise InstrumentMasterError(f"evidence is not a regular file: {path}")
 
 
-def _load_json(path: pathlib.Path) -> Any:
+def _read_regular_bytes(path: pathlib.Path) -> bytes:
+    """Read one regular-file descriptor so validation and parsing share bytes."""
     _require_regular(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise InstrumentMasterError(f"evidence is unreadable: {path}") from error
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise InstrumentMasterError(f"evidence is not a regular file: {path}")
+            return handle.read()
+    except OSError as error:
+        raise InstrumentMasterError(f"evidence is unreadable: {path}") from error
+
+
+def _parse_json_bytes(raw: bytes, path: pathlib.Path) -> Any:
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise InstrumentMasterError(f"invalid JSON evidence: {path}") from error
+
+
+def _load_json(path: pathlib.Path) -> Any:
+    return _parse_json_bytes(_read_regular_bytes(path), path)
+
+
+def _load_pinned_json(
+    path: pathlib.Path, expected_sha256: str, *, label: str
+) -> tuple[Any, bytes]:
+    raw = _read_regular_bytes(path)
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise InstrumentMasterError(f"{label} SHA-256 mismatch")
+    return _parse_json_bytes(raw, path), raw
 
 
 def _utc_from_ms(value: int) -> str:
@@ -168,9 +198,11 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
 
 
 def _load_snapshot() -> tuple[dict[str, Mapping[str, Any]], str]:
-    if sha256_file(SNAPSHOT_PATH) != SNAPSHOT_SHA256:
-        raise InstrumentMasterError("historical exchangeInfo SHA-256 mismatch")
-    payload = _load_json(SNAPSHOT_PATH)
+    payload, _ = _load_pinned_json(
+        SNAPSHOT_PATH,
+        SNAPSHOT_SHA256,
+        label="historical exchangeInfo",
+    )
     if not isinstance(payload, Mapping):
         raise InstrumentMasterError("historical exchangeInfo must be an object")
     if payload.get("timezone") != "UTC" or payload.get("futuresType") != "U_MARGINED":
@@ -217,9 +249,7 @@ def _load_snapshot() -> tuple[dict[str, Mapping[str, Any]], str]:
 
 
 def _load_cdx() -> dict[str, str]:
-    if sha256_file(CDX_PATH) != CDX_SHA256:
-        raise InstrumentMasterError("Wayback CDX SHA-256 mismatch")
-    payload = _load_json(CDX_PATH)
+    payload, _ = _load_pinned_json(CDX_PATH, CDX_SHA256, label="Wayback CDX")
     expected_header = ["timestamp", "original", "digest", "statuscode", "mimetype"]
     if not isinstance(payload, list) or not payload or payload[0] != expected_header:
         raise InstrumentMasterError("Wayback CDX schema differs")
@@ -234,7 +264,12 @@ def _load_cdx() -> dict[str, str]:
         or not match["digest"]
     ):
         raise InstrumentMasterError("Wayback CDX capture metadata differs")
-    if match["digest"] != _wayback_cdx_digest(SNAPSHOT_PATH):
+    _, snapshot_raw = _load_pinned_json(
+        SNAPSHOT_PATH,
+        SNAPSHOT_SHA256,
+        label="historical exchangeInfo",
+    )
+    if match["digest"] != _wayback_cdx_digest(snapshot_raw):
         raise InstrumentMasterError("Wayback CDX digest does not bind the saved response body")
     return match
 
@@ -326,9 +361,11 @@ def capture_price_activity(
 
 
 def _load_activity() -> dict[str, Mapping[str, Any]]:
-    if sha256_file(ACTIVITY_PATH) != ACTIVITY_SHA256:
-        raise InstrumentMasterError("Price V1 activity artifact SHA-256 mismatch")
-    payload = _load_json(ACTIVITY_PATH)
+    payload, _ = _load_pinned_json(
+        ACTIVITY_PATH,
+        ACTIVITY_SHA256,
+        label="Price V1 activity artifact",
+    )
     if not isinstance(payload, Mapping) or payload.get("artifact_class") != ACTIVITY_CLASS:
         raise InstrumentMasterError("Price V1 activity artifact identity differs")
     source = payload.get("source")
@@ -392,9 +429,11 @@ def _load_activity() -> dict[str, Mapping[str, Any]]:
 def _load_supplemental_events() -> tuple[
     dict[str, Mapping[str, Any]], Mapping[str, Any]
 ]:
-    if sha256_file(SUPPLEMENTAL_LIFECYCLE_PATH) != SUPPLEMENTAL_LIFECYCLE_SHA256:
-        raise InstrumentMasterError("supplemental terminal artifact SHA-256 mismatch")
-    payload = _load_json(SUPPLEMENTAL_LIFECYCLE_PATH)
+    payload, _ = _load_pinned_json(
+        SUPPLEMENTAL_LIFECYCLE_PATH,
+        SUPPLEMENTAL_LIFECYCLE_SHA256,
+        label="supplemental terminal artifact",
+    )
     if (
         not isinstance(payload, Mapping)
         or payload.get("artifact_class") != SUPPLEMENTAL_LIFECYCLE_CLASS
@@ -516,17 +555,33 @@ def build_master() -> dict[str, Any]:
     if set(activity) != set(cohort):
         raise InstrumentMasterError("historical cohort and Price V1 activity differ")
 
-    if sha256_file(LIFECYCLE_PATH) != LIFECYCLE_SHA256:
-        raise InstrumentMasterError("canonical Lifecycle V1 SHA-256 mismatch")
-    events, lifecycle_sha = load_sidecar(LIFECYCLE_PATH)
-    if lifecycle_sha != LIFECYCLE_SHA256:
-        raise InstrumentMasterError("canonical Lifecycle V1 identity differs")
-    lifecycle_raw = _load_json(LIFECYCLE_PATH)
-    raw_events = {row["symbol"]: row for row in lifecycle_raw["exceptions"]}
-    canonical_events = {symbol: event for symbol, event in events.items() if symbol in cohort}
+    lifecycle_raw, _ = _load_pinned_json(
+        LIFECYCLE_PATH,
+        LIFECYCLE_SHA256,
+        label="canonical Lifecycle V1",
+    )
+    if (
+        not isinstance(lifecycle_raw, Mapping)
+        or lifecycle_raw.get("artifact_class") != "EXPL_017_LIFECYCLE_V1"
+        or not isinstance(lifecycle_raw.get("exceptions"), list)
+    ):
+        raise InstrumentMasterError("canonical Lifecycle V1 structure differs")
+    raw_events: dict[str, Mapping[str, Any]] = {}
+    for row in lifecycle_raw["exceptions"]:
+        if not isinstance(row, Mapping) or not isinstance(row.get("symbol"), str):
+            raise InstrumentMasterError("canonical Lifecycle V1 event is malformed")
+        if row["symbol"] in raw_events:
+            raise InstrumentMasterError("canonical Lifecycle V1 event is duplicate")
+        raw_events[row["symbol"]] = row
+    canonical_events = {
+        symbol: event for symbol, event in raw_events.items() if symbol in cohort
+    }
     if set(canonical_events) != CANONICAL_TERMINALS:
         raise InstrumentMasterError("canonical cohort terminal set differs")
-    if any(event.classification != TERMINATED_CONFIRMED for event in canonical_events.values()):
+    if any(
+        event.get("classification") != TERMINATED_CONFIRMED
+        for event in canonical_events.values()
+    ):
         raise InstrumentMasterError("frozen cohort contains an unresolved terminal")
     supplemental_events, coverage_stop = _load_supplemental_events()
     terminal_records = {
@@ -612,7 +667,7 @@ def build_master() -> dict[str, Any]:
                     "price_snapshot_id": PRICE_SNAPSHOT_ID,
                     "price_manifest_sha256": PRICE_MANIFEST_SHA256,
                     "price_pit_sha256": PRICE_PIT_SHA256,
-                    "lifecycle_sidecar_sha256": lifecycle_sha,
+                    "lifecycle_sidecar_sha256": LIFECYCLE_SHA256,
                     "supplemental_terminal_evidence_sha256": supplemental_sha,
                 },
                 "vintage_lineage": {
@@ -693,15 +748,12 @@ def build_master() -> dict[str, Any]:
 
 
 def load_master(path: pathlib.Path = MASTER_PATH) -> dict[str, Any]:
-    payload = _load_json(path)
+    raw = _read_regular_bytes(path)
+    payload = _parse_json_bytes(raw, path)
     if not isinstance(payload, dict) or payload.get("artifact_class") != MASTER_CLASS:
         raise InstrumentMasterError("instrument master identity differs")
     expected = build_master()
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise InstrumentMasterError("instrument master is unreadable") from error
-    if payload != expected or raw != _canonical_json(expected):
+    if payload != expected or raw != _canonical_json(expected).encode("utf-8"):
         raise InstrumentMasterError("instrument master differs from deterministic rebuild")
     return payload
 

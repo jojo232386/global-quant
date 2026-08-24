@@ -277,6 +277,30 @@ def test_activity_artifact_tampering_fails_closed(
         master._load_activity()
 
 
+def test_activity_hash_and_parser_consume_the_same_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    original = master.ACTIVITY_PATH.read_bytes()
+    path = tmp_path / "activity.json"
+    path.write_bytes(original)
+    tampered = json.loads(original)
+    tampered["records"][0]["source_file_sha256"] = "0" * 64
+    real_read = master._read_regular_bytes
+
+    def replace_after_read(target: pathlib.Path) -> bytes:
+        raw = real_read(target)
+        if target == path:
+            path.write_text(json.dumps(tampered), encoding="utf-8")
+        return raw
+
+    monkeypatch.setattr(master, "ACTIVITY_PATH", path)
+    monkeypatch.setattr(master, "_read_regular_bytes", replace_after_read)
+    loaded = master._load_activity()
+
+    first_symbol = json.loads(original)["records"][0]["symbol"]
+    assert loaded[first_symbol]["source_file_sha256"] != "0" * 64
+
+
 def test_canonical_lifecycle_tampering_fails_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
