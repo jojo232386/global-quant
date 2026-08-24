@@ -49,7 +49,7 @@
       "symbol": "HNTUSDT",
       "terminal_effective_at_utc": "2023-03-20T09:00:00.000Z",
       "trade_archive": {
-        "first_trade_at_utc": "2023-03-20T00:00:00.235Z",
+        "first_trade_at_utc": "2023-03-20T00:00:00.094Z",
         "last_trade_at_utc": "2023-03-20T09:00:23.879Z",
         "row_count": 28894,
         "settlement_tail_after_effective_seconds": 23.879
@@ -71,7 +71,7 @@
       "symbol": "SRMUSDT",
       "terminal_effective_at_utc": "2022-11-15T04:30:00.000Z",
       "trade_archive": {
-        "first_trade_at_utc": "2022-11-15T00:00:00.003Z",
+        "first_trade_at_utc": "2022-11-15T00:00:00.002Z",
         "last_trade_at_utc": "2022-11-15T04:30:02.092Z",
         "row_count": 284357,
         "settlement_tail_after_effective_seconds": 2.092

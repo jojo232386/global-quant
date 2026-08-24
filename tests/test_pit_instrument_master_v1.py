@@ -168,6 +168,14 @@ def test_supplemental_terminals_are_hash_bound_and_tomo_stops_global_coverage() 
         master.sha256_file(master.SUPPLEMENTAL_LIFECYCLE_PATH)
     )
     assert {row["symbol"] for row in evidence["events"]} == master.SUPPLEMENTAL_TERMINALS
+    assert {
+        row["symbol"]: (
+            row["trade_archive"]["first_trade_at_utc"],
+            row["trade_archive"]["last_trade_at_utc"],
+            row["trade_archive"]["row_count"],
+        )
+        for row in evidence["events"]
+    } == master.EXPECTED_SUPPLEMENTAL_ARCHIVE_SUMMARIES
     assert evidence["coverage_stop"]["symbol"] == "TOMOUSDT"
     assert evidence["coverage_stop"]["classification"] == (
         "LIFECYCLE_UNRESOLVED_NO_TERMINAL_INFERENCE"
@@ -266,6 +274,15 @@ def test_supplemental_terminal_evidence_tampering_fails_closed(
 
     with pytest.raises(master.InstrumentMasterError, match="SHA-256 mismatch"):
         master.build_master()
+
+
+def test_noncanonical_master_bytes_fail_closed(tmp_path: pathlib.Path) -> None:
+    payload = master.load_master()
+    path = tmp_path / "minified-master.json"
+    path.write_text(json.dumps(payload, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(master.InstrumentMasterError, match="deterministic rebuild"):
+        master.load_master(path)
 
 
 def test_overlapping_or_multiple_status_intervals_fail_closed() -> None:

@@ -63,12 +63,29 @@ ORIGINAL_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 SNAPSHOT_SHA256 = "0c3613accfe9acf01cb6fb0523835ee52dea17f1a7df9de84e6a1fe39e27dfd2"
 CDX_SHA256 = "b4e48f0a4e86b55f8158599d56adb0465d3a74b7aab3034ddfb7c818e2f59ac1"
 SUPPLEMENTAL_LIFECYCLE_SHA256 = (
-    "33c4cb0438bc9a1417ef620e71f97de3efaa0ffa82a29ba5f76c6d7045786561"
+    "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8"
 )
 COVERAGE_END_UTC = "2023-11-15T00:00:00Z"
 EXPECTED_COHORT_SIZE = 80
 CANONICAL_TERMINALS = {"BZRXUSDT", "YFIIUSDT"}
 SUPPLEMENTAL_TERMINALS = {"CVCUSDT", "HNTUSDT", "SRMUSDT"}
+EXPECTED_SUPPLEMENTAL_ARCHIVE_SUMMARIES = {
+    "CVCUSDT": (
+        "2022-11-29T00:00:03.564Z",
+        "2022-11-29T08:59:53.780Z",
+        20658,
+    ),
+    "HNTUSDT": (
+        "2023-03-20T00:00:00.094Z",
+        "2023-03-20T09:00:23.879Z",
+        28894,
+    ),
+    "SRMUSDT": (
+        "2022-11-15T00:00:00.002Z",
+        "2022-11-15T04:30:02.092Z",
+        284357,
+    ),
+}
 EXPECTED_TERMINALS = CANONICAL_TERMINALS | SUPPLEMENTAL_TERMINALS
 EXPECTED_QUARANTINE = "AKROUSDT"
 EXPECTED_ZERO_TAILS = {
@@ -410,6 +427,13 @@ def _load_supplemental_events() -> tuple[
             raise InstrumentMasterError("supplemental settlement tail differs")
         if type(archive.get("row_count")) is not int or archive["row_count"] <= 0:
             raise InstrumentMasterError("supplemental terminal archive count differs")
+        expected_archive_summary = EXPECTED_SUPPLEMENTAL_ARCHIVE_SUMMARIES.get(symbol)
+        if expected_archive_summary != (
+            archive.get("first_trade_at_utc"),
+            archive.get("last_trade_at_utc"),
+            archive.get("row_count"),
+        ):
+            raise InstrumentMasterError("supplemental terminal archive summary differs")
         if not source.get("announcement_url", "").startswith(
             "https://www.binance.com/en/support/announcement/detail/"
         ) or not source.get("cms_api_url", "").startswith(
@@ -653,7 +677,11 @@ def load_master(path: pathlib.Path = MASTER_PATH) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("artifact_class") != MASTER_CLASS:
         raise InstrumentMasterError("instrument master identity differs")
     expected = build_master()
-    if payload != expected:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise InstrumentMasterError("instrument master is unreadable") from error
+    if payload != expected or raw != _canonical_json(expected):
         raise InstrumentMasterError("instrument master differs from deterministic rebuild")
     return payload
 
