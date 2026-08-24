@@ -46,6 +46,11 @@ a replacement experiment.
   is `WAITING_FOR_PROSPECTIVE_WINDOW`. It cannot fetch or run formally before
   its frozen forward window completes and a new VERIFIED curated V1 dataset ID
   plus manifest/schema/file SHAs are bound. It is not a current PASS.
+- `data/pit-instrument-master-v1/` is a fixed 80-symbol historical cohort candidate with
+  a deterministic `universe_at(t)` query. It controls current-survivor
+  selection only inside its frozen 2021-2023 scope; it is not the complete
+  rolling Binance market, does not verify numeric Price/Funding/OI vintage,
+  and does not by itself admit a Tier 2 study.
 
 ## Layout
 
