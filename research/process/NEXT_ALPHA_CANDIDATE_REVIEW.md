@@ -68,7 +68,11 @@ mechanism and can introduce retrospective event selection.
 **Independent decision:** `DATA_BLOCKED`. The mechanism is distinct, but no
 implementation or EXPL
 identity is permitted until the funding/open-interest contract is independently
-reviewed and admitted.
+reviewed and admitted. The 2026-08-24
+[data-capability review](CAND_DERIVATIVES_POSITIONING_001_DATA_CAPABILITY_REVIEW.md)
+confirmed that daily OI endpoints are feasible without exact 288-slot
+completeness, but historical availability/revision and PIT-universe evidence
+remain insufficient for Tier 2.
 
 ## Candidate C — `CAND-FLOAT-DILUTION-001`
 
