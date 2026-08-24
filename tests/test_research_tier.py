@@ -121,6 +121,83 @@ def test_tier_1_is_exploration_only_and_cannot_jump() -> None:
         tier.validate_tier_record(dict(record, READY_FOR_TINY_LIVE=True))
 
 
+def test_fail_results_must_stop_even_after_identifier_changes() -> None:
+    tier_1_failure = dict(
+        tier_1_record(),
+        RECORD_ID="RENAMED-EXPLORATION-999",
+        RESULT_STATUS="FAIL",
+        NEXT_STAGE="CANDIDATE_REVIEW",
+    )
+    with pytest.raises(tier.TierRecordError, match="FAIL must set NEXT_STAGE = STOP"):
+        tier.validate_tier_record(tier_1_failure)
+
+    tier_2_failure = dict(
+        tier_2_record(),
+        RECORD_ID="RENAMED-CONFIRMATION-999",
+        HYPOTHESIS_ID="RENAMED-HYPOTHESIS-999",
+        PROGRAM_FORMAL_HYPOTHESIS_COUNTED=True,
+        RESULT_STATUS="FAIL",
+        NEXT_STAGE="FREEZE",
+    )
+    with pytest.raises(tier.TierRecordError, match="FAIL → STOP"):
+        tier.validate_tier_record(tier_2_failure)
+
+    tier_3_failure = dict(
+        tier_3_record(),
+        RECORD_ID="RENAMED-FORMAL-999",
+        HYPOTHESIS_ID="RENAMED-HYPOTHESIS-999",
+        RESULT_STATUS="FAIL",
+        NEXT_STAGE="STRATEGY",
+        READY_FOR_TINY_LIVE=False,
+    )
+    with pytest.raises(tier.TierRecordError, match="FAIL must set NEXT_STAGE = STOP"):
+        tier.validate_tier_record(tier_3_failure)
+
+
+def test_placeholders_and_incomplete_lineage_are_rejected() -> None:
+    with pytest.raises(tier.TierRecordError, match="actual limitation"):
+        tier.validate_tier_record(dict(tier_1_record(), DATA_LIMITATIONS="UNVERIFIED"))
+    with pytest.raises(tier.TierRecordError, match="must identify an existing record"):
+        tier.validate_tier_record(dict(tier_1_record(), RECORD_ID="UNASSIGNED"))
+
+    for key in (
+        "RECORD_ID",
+        "HYPOTHESIS_ID",
+        "PROGRAM_ID",
+        "TIER_1_RECORD_ID",
+        "CANDIDATE_REVIEW_RECORD_ID",
+        "DATA_ADMISSION_RECORD_ID",
+    ):
+        with pytest.raises(tier.TierRecordError, match="must identify an existing record"):
+            tier.validate_tier_record(dict(tier_2_record(), **{key: "UNASSIGNED"}))
+    with pytest.raises(tier.TierRecordError, match="actual limitation"):
+        tier.validate_tier_record(dict(tier_2_record(), UNIVERSE_DEFINITION="UNKNOWN"))
+    incomplete_admission = tier_2_record()
+    incomplete_admission.pop("DATA_ADMISSION_RECORD_ID")
+    with pytest.raises(tier.TierRecordError, match="keys differ"):
+        tier.validate_tier_record(incomplete_admission)
+
+    for key in ("TIER_2_RECORD_ID", "FREEZE_RECORD_ID", "FORMAL_RUN_ID"):
+        with pytest.raises(tier.TierRecordError, match="must identify an existing record"):
+            tier.validate_tier_record(dict(tier_3_record(), **{key: "UNASSIGNED"}))
+    incomplete_formal_lineage = tier_3_record()
+    incomplete_formal_lineage.pop("FORMAL_RUN_ID")
+    with pytest.raises(tier.TierRecordError, match="keys differ"):
+        tier.validate_tier_record(incomplete_formal_lineage)
+
+
+def test_tier_1_and_tier_2_cannot_enter_live_or_tiny_live() -> None:
+    with pytest.raises(tier.TierRecordError, match="cannot jump"):
+        tier.validate_tier_record(dict(tier_1_record(), NEXT_STAGE="LIVE"))
+    with pytest.raises(tier.TierRecordError, match="never be READY"):
+        tier.validate_tier_record(dict(tier_1_record(), READY_FOR_TINY_LIVE=True))
+
+    with pytest.raises(tier.TierRecordError, match="CONFIRMED_CANDIDATE → FREEZE"):
+        tier.validate_tier_record(dict(tier_2_record(), NEXT_STAGE="LIVE"))
+    with pytest.raises(tier.TierRecordError, match="never be READY"):
+        tier.validate_tier_record(dict(tier_2_record(), READY_FOR_TINY_LIVE=True))
+
+
 def test_tier_2_accepts_a_genuinely_new_future_window() -> None:
     record = tier_2_record()
     assert tier.validate_tier_record(record) == record
@@ -144,6 +221,19 @@ def test_renamed_ids_do_not_turn_seen_information_into_confirmation() -> None:
     )
     with pytest.raises(tier.TierRecordError, match="require independent confirmation"):
         tier.validate_tier_record(record)
+
+    renamed_formal_failure = dict(
+        tier_2_record(),
+        RECORD_ID="RENAMED-FORMAL-CONFIRMATION-999",
+        HYPOTHESIS_ID="RENAMED-FORMAL-HYPOTHESIS-999",
+        TIER_1_RECORD_ID="RENAMED-EXPLORATION-999",
+        CONFIRMATION_TIME_WINDOW_IDS=["GMAQ_2023"],
+        PROGRAM_FORMAL_HYPOTHESIS_COUNTED=True,
+        RESULT_STATUS="FAIL",
+        NEXT_STAGE="STOP",
+    )
+    with pytest.raises(tier.TierRecordError, match="cannot claim temporal independence"):
+        tier.validate_tier_record(renamed_formal_failure)
 
 
 def test_tier_2_accepts_truly_independent_source_or_sample() -> None:
@@ -217,8 +307,57 @@ def test_tier_3_only_allows_ready_after_all_reviews_and_formal_pass() -> None:
         tier.validate_tier_record(dict(record, RISK_REVIEW_COMPLETE=False))
     with pytest.raises(tier.TierRecordError, match="PASS from the frozen"):
         tier.validate_tier_record(dict(record, FORMAL_RUN_RESULT_STATUS="FAIL"))
+    with pytest.raises(tier.TierRecordError, match="FORMAL_RUN_COMPLETE is not complete"):
+        tier.validate_tier_record(dict(record, FORMAL_RUN_COMPLETE=False))
     with pytest.raises(tier.TierRecordError, match="Tier 2 CONFIRMED_CANDIDATE"):
         tier.validate_tier_record(dict(record, TIER_2_RESULT_STATUS="CONFIRMATION_BLOCKED"))
+    with pytest.raises(tier.TierRecordError, match="LIVE requires"):
+        tier.validate_tier_record(dict(record, READY_FOR_TINY_LIVE=False))
+
+
+def test_stage_prerequisites_and_blocked_admission_cannot_be_bypassed() -> None:
+    for gate in tier.TIER_2_GATES:
+        with pytest.raises(tier.TierRecordError, match=f"{gate} is not complete"):
+            tier.validate_tier_record(dict(tier_2_record(), **{gate: False}))
+
+    blocked = dict(
+        tier_2_record(),
+        CONFIRMATION_TIME_WINDOW_IDS=["GMAQ_2023"],
+        INDEPENDENCE_BASIS="INSUFFICIENT",
+        RESULT_STATUS="CONFIRMATION_BLOCKED",
+        BLOCK_REASON="ADDITIONAL_INDEPENDENT_EVIDENCE_REQUIRED",
+        NEXT_STAGE="STOP",
+    )
+    with pytest.raises(tier.TierRecordError, match="require independent confirmation"):
+        tier.validate_tier_record(
+            dict(
+                blocked,
+                RESULT_STATUS="CONFIRMED_CANDIDATE",
+                BLOCK_REASON="NONE",
+                NEXT_STAGE="FREEZE",
+            )
+        )
+
+    for predecessor_status in ("FAIL", "CONFIRMATION_BLOCKED"):
+        with pytest.raises(tier.TierRecordError, match="Tier 2 CONFIRMED_CANDIDATE"):
+            tier.validate_tier_record(
+                dict(tier_3_record(), TIER_2_RESULT_STATUS=predecessor_status)
+            )
+
+    review_prerequisites = (
+        ("DRY_RUN", {"STRATEGY_REVIEW_COMPLETE": False}),
+        ("RELIABILITY_REVIEW", {"DRY_RUN_COMPLETE": False}),
+        ("RISK_REVIEW", {"RELIABILITY_REVIEW_COMPLETE": False}),
+    )
+    for next_stage, missing_review in review_prerequisites:
+        incomplete = dict(
+            tier_3_record(),
+            NEXT_STAGE=next_stage,
+            READY_FOR_TINY_LIVE=False,
+            **missing_review,
+        )
+        with pytest.raises(tier.TierRecordError, match="requires prior Tier 3 reviews"):
+            tier.validate_tier_record(incomplete)
 
 
 def test_program_history_is_thin_auditable_and_retains_expl_017_failure() -> None:
