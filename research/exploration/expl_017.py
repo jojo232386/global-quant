@@ -679,7 +679,7 @@ class Engine:
         return tuple(final_exits)
 
     def finalize(self, final_timestamp: int) -> tuple[Exit, ...]:
-        """Mark the frozen final daily bar then force exits using Portfolio.exit."""
+        """Mark the frozen final bar, then trade the whole portfolio to cash."""
         snapshot = self._snapshot()
         try:
             return self._finalize(final_timestamp)
