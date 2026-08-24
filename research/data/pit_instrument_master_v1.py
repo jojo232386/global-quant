@@ -820,7 +820,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         value = load_master()
         if args.verify_price_v1:
             replay = capture_price_activity(args.data_root)
-            if replay != _load_json(ACTIVITY_PATH):
+            captured, _ = _load_pinned_json(
+                ACTIVITY_PATH,
+                ACTIVITY_SHA256,
+                label="Price V1 activity artifact",
+            )
+            if replay != captured:
                 raise InstrumentMasterError("Price V1 activity differs from live replay")
         print(
             "PIT_INSTRUMENT_MASTER_CHECK=PASS "

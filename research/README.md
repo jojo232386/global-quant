@@ -48,7 +48,8 @@ a replacement experiment.
   plus manifest/schema/file SHAs are bound. It is not a current PASS.
 - `data/pit-instrument-master-v1/` is a fixed 80-symbol historical cohort candidate with
   a deterministic `universe_at(t)` query. It controls current-survivor
-  selection only inside its frozen 2021-01-04 through 2023-11-14 scope; it is not the complete
+  selection only inside its frozen half-open interval
+  `[2021-01-04T19:51:02.039Z, 2023-11-14T00:00:00Z)`; it is not the complete
   rolling Binance market, does not verify numeric Price/Funding/OI vintage,
   and does not by itself admit a Tier 2 study.
 

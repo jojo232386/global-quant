@@ -301,6 +301,36 @@ def test_activity_hash_and_parser_consume_the_same_bytes(
     assert loaded[first_symbol]["source_file_sha256"] != "0" * 64
 
 
+def test_price_replay_rechecks_the_pinned_activity_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = master.ACTIVITY_PATH.read_bytes()
+    replacement = json.dumps(
+        json.loads(original), separators=(",", ":")
+    ).encode("utf-8")
+    real_read = master._read_regular_bytes
+    activity_reads = 0
+
+    def replace_before_replay_check(target: pathlib.Path) -> bytes:
+        nonlocal activity_reads
+        if target == master.ACTIVITY_PATH:
+            activity_reads += 1
+            if activity_reads >= 2:
+                return replacement
+        return real_read(target)
+
+    monkeypatch.setattr(master, "_read_regular_bytes", replace_before_replay_check)
+    monkeypatch.setattr(
+        master,
+        "capture_price_activity",
+        lambda *_args, **_kwargs: json.loads(original),
+    )
+
+    with pytest.raises(master.InstrumentMasterError, match="artifact SHA-256 mismatch"):
+        master.main(["check", "--verify-price-v1"])
+    assert activity_reads == 2
+
+
 def test_canonical_lifecycle_tampering_fails_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
