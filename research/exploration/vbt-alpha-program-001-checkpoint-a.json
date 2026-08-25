@@ -1,0 +1,29 @@
+{
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_CHECKPOINT_A",
+  "artifact_version": "1.0.0",
+  "program_id": "VBT_ALPHA_PROGRAM_001",
+  "review_mode": "INDEPENDENT_CODEX_CLI_READ_ONLY_PRE_PERFORMANCE",
+  "preregistration_commit": "c2cb8661b52625234e9dd11065a05b6655cc8673",
+  "initial_review_session_id": "01a03b1e-9700-7a11-9931-0cb4528a44a1",
+  "fix_review_session_id": "01a03b23-6533-7573-88bd-999c7fbf4eef",
+  "environment_verification_session_id": "01a03b25-4852-7201-a0d8-f33b221cf6e6",
+  "final_verdict": "PASS",
+  "request_changes": "NONE",
+  "regression_risk": "CLEARED",
+  "performance_run_before_review": false,
+  "performance_run_before_final_verdict": false,
+  "candidate_dispositions": [
+    "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001:APPROVED_FOR_SEQUENTIAL_TIER1_TEST",
+    "CAND-VBT-CORRELATION-CROWDING-001:APPROVED_ONLY_AFTER_COMMITTED_CANDIDATE_1_FAIL"
+  ],
+  "contract_repairs_before_performance": [
+    "Moved Candidate 1 to a fixed five-day grid with all 30 prior neighbor volumes inside support.",
+    "Bound high/low validation plus PIT instrument-master and Lifecycle V1 hashes.",
+    "Defined Candidate 2 return indices exactly.",
+    "Passed a metric-free synthetic vectorbt long/short and terminal lifecycle preflight.",
+    "Named the committed program-history and Factor Graveyard gate required before Candidate 2."
+  ],
+  "preflight_artifact": "research/oss/vbt-alpha-program-001-preflight.json",
+  "preflight_result": "PASS_METRIC_FREE",
+  "scope": "Tier 1 exploration only; no Tier 2, Formal, Strategy, Freqtrade runtime, dry-run, live, credentials, account, or order authorization"
+}

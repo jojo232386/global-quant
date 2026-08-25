@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ROOT / "research/exploration/vbt-alpha-program-001-preregistration.json"
+CHECKPOINT = ROOT / "research/exploration/vbt-alpha-program-001-checkpoint-a.json"
 
 
 def _record() -> dict:
@@ -103,3 +104,15 @@ def test_candidate_schedules_and_history_gate_are_exact() -> None:
     sequential = record["common_execution_and_evaluation"]["sequential_stop"]
     assert "vbt-alpha-program-001-program-history.json" in sequential
     assert "committed before Candidate 2 performance" in sequential
+
+
+def test_checkpoint_a_passed_before_performance() -> None:
+    checkpoint = json.loads(CHECKPOINT.read_text(encoding="utf-8"))
+    assert checkpoint["program_id"] == "VBT_ALPHA_PROGRAM_001"
+    assert checkpoint["preregistration_commit"] == "c2cb8661b52625234e9dd11065a05b6655cc8673"
+    assert checkpoint["final_verdict"] == "PASS"
+    assert checkpoint["request_changes"] == "NONE"
+    assert checkpoint["regression_risk"] == "CLEARED"
+    assert checkpoint["performance_run_before_review"] is False
+    assert checkpoint["performance_run_before_final_verdict"] is False
+    assert checkpoint["preflight_result"] == "PASS_METRIC_FREE"
