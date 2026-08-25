@@ -1,0 +1,52 @@
+{
+  "artifact_class": "GMAQ_FORWARD_PIT_CAPTURE_STATUS",
+  "artifact_version": "1.0.0",
+  "status": "RUNNING_PUBLIC_FORWARD_CAPTURE_OBSERVED",
+  "observed_at_utc": "2026-08-25T14:21:03Z",
+  "tracked_source": "research/data/forward_pit_capture.py",
+  "tracked_source_sha256": "c995c880506703f984b5c4c268b7d6ce91e820de0202708d4bc56bd0ced849b4",
+  "installed_copy": "/Users/ASUS/.local/libexec/gmaq-forward-pit-capture.py",
+  "installed_copy_sha256": "c995c880506703f984b5c4c268b7d6ce91e820de0202708d4bc56bd0ced849b4",
+  "output_directory": "/Users/ASUS/.local/share/gmaq-forward-pit-capture",
+  "launch_label": "com.gmaq.forward-pit-capture",
+  "capture_schedule": "Run immediately, then 3600 seconds after each invocation finishes.",
+  "coverage": {
+    "every_cycle": [
+      "full public instrument status response",
+      "full public price response",
+      "full public funding premium response"
+    ],
+    "open_interest": "20 sorted active USDT perpetual symbols per cycle with a rotating offset; raw status responses preserve the full contemporaneous symbol list"
+  },
+  "timestamp_semantics": {
+    "source_event_timestamps_utc_ms": "source-provided observed event or response timestamps only",
+    "source_scheduled_timestamps_utc_ms": "future schedule fields such as nextFundingTime only",
+    "local_arrival_utc": "local UTC arrival recorded after each response"
+  },
+  "foreground_probe": {
+    "records_appended_before_manual_stop": 24,
+    "http_200_records": {
+      "instrument_status": 1,
+      "price": 1,
+      "funding_premium": 1,
+      "open_interest": 21
+    },
+    "reason_for_bounded_background_shards": "A full sequential OI sweep was too slow through the current network path; the successful records were preserved and the background cycle was bounded instead of increasing infrastructure complexity."
+  },
+  "background_first_cycle": {
+    "verdict": "CAPTURED_RESEARCH_ONLY",
+    "records_appended": 23,
+    "http_200_records": {
+      "instrument_status": 1,
+      "price": 1,
+      "funding_premium": 1,
+      "open_interest": 20
+    },
+    "runner_state_after_cycle": "RUNNING_SLEEP_UNTIL_NEXT_HOURLY_CYCLE"
+  },
+  "credentials_used": false,
+  "account_endpoints_used": false,
+  "orders_submitted": false,
+  "alpha_prerequisite": false,
+  "research_tier_effect": "Prospective raw evidence only. It does not upgrade historical Price V1 or any prior Tier classification."
+}

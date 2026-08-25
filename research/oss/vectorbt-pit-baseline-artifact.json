@@ -1,0 +1,28 @@
+{
+  "alpha_claim": false,
+  "bounded_cohort_records_loaded": 80,
+  "deterministic_input_sha256": "61a13e170be341d49896962aa84c707433a415bcb7c46098194968478101cf84",
+  "execution": {
+    "decision": "completed UTC close at t-1 day",
+    "entry": "next UTC open at t",
+    "fee_rate": 0.0005,
+    "final_exit": "explicit UTC open",
+    "one_side_slippage": 0.001,
+    "terminal": "canonical terminal-day open-to-final-close then forced exit"
+  },
+  "framework": {
+    "name": "vectorbt",
+    "version": "1.1.0"
+  },
+  "order_observations": 11925,
+  "pit_observations": 148,
+  "poc_id": "OSS-VBT-PIT-EQUALWEIGHT-LONG-001",
+  "price_v1": {
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b"
+  },
+  "result": "BENCHMARK_ONLY_NOT_ALPHA",
+  "terminal_liquidations": 5,
+  "vectorbt_order_records": 11562
+}
