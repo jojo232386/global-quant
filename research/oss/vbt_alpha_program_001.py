@@ -92,12 +92,20 @@ SPECS = {
 
 
 def range_volume_signal(
-    dataset: PriceDataset, members: tuple[str, ...], decision: int, lookback: int
+    dataset: PriceDataset,
+    ranges: Mapping[str, Mapping[int, tuple[float, float]]],
+    members: tuple[str, ...],
+    decision: int,
+    lookback: int,
 ) -> dict[str, float]:
     output: dict[str, float] = {}
     for symbol in members:
         bar = _bar(dataset, symbol, decision)
-        if bar.high is None or bar.low is None or bar.high <= bar.low or bar.quote_volume <= 0:
+        try:
+            high, low = ranges[symbol][decision]
+        except KeyError as error:
+            raise POCDataError(f"DATA_ERROR_STOP: missing range {symbol}:{_iso(decision)}") from error
+        if high <= low or bar.quote_volume <= 0:
             raise POCDataError(f"DATA_ERROR_STOP: invalid range/volume {symbol}:{_iso(decision)}")
         volumes = [
             _bar(dataset, symbol, decision - offset * DAY_MS).quote_volume
@@ -105,7 +113,7 @@ def range_volume_signal(
         ]
         if any(not math.isfinite(value) or value <= 0 for value in volumes):
             raise POCDataError(f"DATA_ERROR_STOP: invalid prior volume {symbol}:{_iso(decision)}")
-        clv = (2.0 * bar.close - bar.high - bar.low) / (bar.high - bar.low)
+        clv = (2.0 * bar.close - high - low) / (high - low)
         output[symbol] = clv * math.log(bar.quote_volume / statistics.median(volumes))
     return output
 
@@ -142,10 +150,51 @@ def _signal(
     members: tuple[str, ...],
     decision: int,
     lookback: int,
+    ranges: Mapping[str, Mapping[int, tuple[float, float]]] | None,
 ) -> dict[str, float]:
     if spec.signal_kind == "range_volume_acceptance":
-        return range_volume_signal(dataset, members, decision, lookback)
+        if ranges is None:
+            raise POCDataError("DATA_ERROR_STOP: range overlay missing")
+        return range_volume_signal(dataset, ranges, members, decision, lookback)
     return correlation_crowding_signal(dataset, members, decision, lookback)
+
+
+def load_range_overlay(
+    dataset: PriceDataset, symbols: tuple[str, ...]
+) -> dict[str, dict[int, tuple[float, float]]]:
+    """Expose high/low from the same manifest-bound rows without altering the frozen loader."""
+    output: dict[str, dict[int, tuple[float, float]]] = {}
+    for symbol in symbols:
+        path = dataset.artifact_path / "data" / f"validated-{symbol}.jsonl"
+        points: dict[int, tuple[float, float]] = {}
+        try:
+            handle = path.open(encoding="utf-8")
+        except OSError as error:
+            raise POCDataError(f"DATA_ERROR_STOP: range overlay unreadable {symbol}") from error
+        with handle:
+            for line in handle:
+                row = json.loads(line)
+                timestamp = int(row["open_time_utc_ms"])
+                opened, high, low, closed, volume = (
+                    float(row[name])
+                    for name in ("open", "high", "low", "close", "quote_volume")
+                )
+                base = _bar(dataset, symbol, timestamp)
+                if (
+                    timestamp in points
+                    or not all(math.isfinite(value) for value in (opened, high, low, closed, volume))
+                    or min(opened, high, low, closed) <= 0
+                    or volume < 0
+                    or high < max(opened, closed)
+                    or low > min(opened, closed)
+                    or (opened, closed, volume) != (base.open, base.close, base.quote_volume)
+                ):
+                    raise POCDataError(f"DATA_ERROR_STOP: invalid range overlay {symbol}:{timestamp}")
+                points[timestamp] = (high, low)
+        if set(points) != set(dataset.bars[symbol]):
+            raise POCDataError(f"DATA_ERROR_STOP: range overlay coverage differs {symbol}")
+        output[symbol] = points
+    return output
 
 
 def _weights(signal: Mapping[str, float]) -> dict[str, float]:
@@ -197,7 +246,10 @@ def build_candidate_inputs(
     master: Mapping[str, Any],
     spec: CandidateSpec,
     lookback: int,
+    ranges: Mapping[str, Mapping[int, tuple[float, float]]] | None = None,
 ) -> CandidateInputs:
+    if sys.modules.get("pandas") is not pd:
+        sys.modules["pandas"] = pd
     symbols = _master_symbols(master)
     first, final_execution, final_exit = map(
         _timestamp, (spec.first_execution, spec.final_execution, spec.final_exit)
@@ -228,7 +280,7 @@ def build_candidate_inputs(
         if current in schedule:
             decision = current - DAY_MS
             decision_members = _universe(master, decision)
-            signals = _signal(spec, dataset, decision_members, decision, lookback)
+            signals = _signal(spec, dataset, decision_members, decision, lookback, ranges)
             targets = _weights(signals)
             execution_members = set(_universe(master, current))
             size.loc[row, :] = 0.0
@@ -424,8 +476,13 @@ def _clean(value: Any) -> Any:
 def run_candidate(candidate: str) -> dict[str, Any]:
     spec = SPECS[candidate]
     dataset, master = load_frozen_inputs()
-    primary = build_candidate_inputs(dataset, master, spec, spec.primary_lookback)
-    neighbor = build_candidate_inputs(dataset, master, spec, spec.neighbor_lookback)
+    ranges = (
+        load_range_overlay(dataset, _master_symbols(master))
+        if spec.signal_kind == "range_volume_acceptance"
+        else None
+    )
+    primary = build_candidate_inputs(dataset, master, spec, spec.primary_lookback, ranges)
+    neighbor = build_candidate_inputs(dataset, master, spec, spec.neighbor_lookback, ranges)
     gross = build_portfolio(primary.inputs, fee_rate=0.0, one_side_slippage=0.0)
     net = build_portfolio(primary.inputs, fee_rate=BASE_FEE, one_side_slippage=BASE_SLIPPAGE)
     stress = build_portfolio(primary.inputs, fee_rate=STRESS_FEE, one_side_slippage=STRESS_SLIPPAGE)

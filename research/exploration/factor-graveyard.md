@@ -212,7 +212,7 @@ LIVE_READY = FALSE
 ### HYP-VBT001-002 · TIER1_FAIL · cross-sectional correlation crowding
 
 - Reason: the frozen 30 bps stress result was `-55.32%` with Sharpe `-1.28`
-  and maximum drawdown `-59.35%`; mean rank IC was `-0.0833`, significantly
+  and maximum drawdown `-59.35%`; mean rank IC was about `-0.08`, significantly
   opposite to the hypothesis direction; all three calendar diagnostics and
   the single 30-day neighbor were negative, and the fixed contributor-removal
   sensitivity retained a negative stress mean.

@@ -59,8 +59,6 @@ class Bar:
     open: float
     close: float
     quote_volume: float
-    high: float | None = None
-    low: float | None = None
 
 
 @dataclass
@@ -198,21 +196,10 @@ def load_dataset(data_root: pathlib.Path = DATA_ROOT) -> PriceDataset:
                     raise PriceAlphaError(
                         f"DATA_ERROR_STOP: internal timestamp gap {symbol}:{iso(previous)}"
                     )
-                opened, high, low, closed, quote_volume = (
-                    float(row[name])
-                    for name in ("open", "high", "low", "close", "quote_volume")
-                )
-                values = (opened, high, low, closed, quote_volume)
-                if (
-                    not all(math.isfinite(value) for value in values)
-                    or min(opened, high, low, closed) <= 0
-                    or quote_volume < 0
-                    or high < max(opened, closed)
-                    or low > min(opened, closed)
-                    or high < low
-                ):
+                values = tuple(float(row[name]) for name in ("open", "close", "quote_volume"))
+                if not all(math.isfinite(value) for value in values) or values[0] <= 0 or values[1] <= 0 or values[2] < 0:
                     raise PriceAlphaError(f"DATA_ERROR_STOP: invalid price/volume {symbol}:{line_no}")
-                points[timestamp] = Bar(opened, closed, quote_volume, high, low)
+                points[timestamp] = Bar(*values)
                 previous = timestamp
         if not points:
             raise PriceAlphaError(f"DATA_ERROR_STOP: empty curated series {symbol}")

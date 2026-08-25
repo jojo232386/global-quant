@@ -40,13 +40,20 @@ def test_range_volume_signal_uses_completed_range_and_prior_volume_only() -> Non
                 open=100.0,
                 close=110.0 if offset == 0 else 100.0,
                 quote_volume=math.e * 100.0 if offset == 0 else 100.0,
-                high=110.0 if offset == 0 else 101.0,
-                low=90.0 if offset == 0 else 99.0,
             )
             for offset in range(31)
         }
     }
-    signal = program.range_volume_signal(_dataset(bars), ("AAAUSDT",), decision, 20)
+    ranges = {
+        "AAAUSDT": {
+            decision - offset * program.DAY_MS: (
+                110.0 if offset == 0 else 101.0,
+                90.0 if offset == 0 else 99.0,
+            )
+            for offset in range(31)
+        }
+    }
+    signal = program.range_volume_signal(_dataset(bars), ranges, ("AAAUSDT",), decision, 20)
     assert signal["AAAUSDT"] == pytest.approx(1.0)
 
 
@@ -59,7 +66,7 @@ def test_correlation_crowding_signal_is_finite_and_uses_exact_return_count() -> 
         value = 100.0
         for timestamp in range(decision - 30 * program.DAY_MS, decision + program.DAY_MS, program.DAY_MS):
             value *= 1.0 + (0.001 * (column + 1) + 0.0002 * math.sin(timestamp / program.DAY_MS + column))
-            points[timestamp] = Bar(value, value, 1.0, value, value)
+            points[timestamp] = Bar(value, value, 1.0)
         bars[symbol] = points
     signal = program.correlation_crowding_signal(_dataset(bars), members, decision, 20)
     assert set(signal) == set(members)
@@ -101,13 +108,15 @@ def test_turnover_reads_vectorbt_assets_without_a_grouping_override() -> None:
     assert result["median_one_way_turnover"] == pytest.approx(1.0)
 
 
-def test_frozen_price_loader_exposes_manifest_bound_high_and_low() -> None:
+def test_range_overlay_matches_the_unchanged_frozen_price_loader() -> None:
     dataset = load_dataset()
     symbol = sorted(dataset.bars)[0]
-    bar = dataset.bars[symbol][min(dataset.bars[symbol])]
-    assert bar.high is not None and bar.low is not None
-    assert bar.high >= max(bar.open, bar.close)
-    assert bar.low <= min(bar.open, bar.close)
+    overlay = program.load_range_overlay(dataset, (symbol,))
+    timestamp = min(dataset.bars[symbol])
+    bar = dataset.bars[symbol][timestamp]
+    high, low = overlay[symbol][timestamp]
+    assert high >= max(bar.open, bar.close)
+    assert low <= min(bar.open, bar.close)
 
 
 def test_both_candidate_failures_and_program_stop_are_recorded() -> None:

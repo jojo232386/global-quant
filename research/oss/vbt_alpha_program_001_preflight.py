@@ -26,6 +26,8 @@ from research.oss.vectorbt_pit_baseline import (
 
 
 def _inputs() -> BaselineInputs:
+    if sys.modules.get("pandas") is not pd:
+        sys.modules["pandas"] = pd
     index = pd.to_datetime(
         ["2023-01-01T00:00:00Z", "2023-01-01T12:00:00Z", "2023-01-02T00:00:00Z"]
     )
