@@ -1,0 +1,33 @@
+{
+  "artifact_class": "GMAQ_PRICE_LIFECYCLE_SPRINT_002_CHECKPOINT_A",
+  "artifact_version": "1.0.0",
+  "program_id": "PRICE_LIFECYCLE_SPRINT_002",
+  "review_mode": "CODEX_CLI_INDEPENDENT_READ_ONLY_PRE_PERFORMANCE",
+  "review_session_id": "01a03933-a1f5-7121-81e4-719f0d0c42a9",
+  "review_model": "gpt-5.6-sol",
+  "base_commit": "d0995a49c35b93f0c3681c73a01500a4decb0b29",
+  "final_verdict": "FAIL",
+  "performance_run_before_review": false,
+  "performance_run_after_review": false,
+  "custom_program_executed": false,
+  "candidate_dispositions": [
+    {
+      "candidate_id": "CAND-MARKET-BETA-RESIDUAL-MOMENTUM-001",
+      "status": "REJECTED_AS_VARIANT",
+      "reason": "Retains EXPL-001 information-diffusion and momentum mechanism while changing return representation through beta residualization."
+    },
+    {
+      "candidate_id": "CAND-RANGE-VOLUME-ABSORPTION-001",
+      "status": "NOT_RUN",
+      "reason": "The one-shot custom path stopped at Checkpoint A; no contract repair cycle or performance run is permitted."
+    }
+  ],
+  "blocking_findings": [
+    "candidate 1 is an old-factor variant rather than a materially new mechanism",
+    "decision-time PIT set versus t+1 execution eligibility is ambiguous",
+    "accounting, statistics, variant schedules, ties, subperiods, and concentration semantics are incompletely frozen",
+    "candidate 2 needs a high-low adapter that the claimed reused loader does not expose"
+  ],
+  "program_disposition": "CUSTOM_PATH_STOPPED_SWITCH_TO_OSS_FALLBACK",
+  "scope": "Tier 1 process review only; no Alpha performance, formal, Strategy, runtime, dry-run, live, credential, account, or order authorization"
+}

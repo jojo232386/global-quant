@@ -1,0 +1,143 @@
+{
+  "artifact_class": "GMAQ_PRICE_LIFECYCLE_SPRINT_002_PREREGISTRATION",
+  "artifact_version": "1.0.0",
+  "program_id": "PRICE_LIFECYCLE_SPRINT_002",
+  "research_tier": "TIER_1_EXPLORATION",
+  "status": "CHECKPOINT_A_FAIL_CUSTOM_PATH_STOPPED",
+  "frozen_before_performance": true,
+  "result_semantics": "Tier 1 exploration only. Price V1 is survivor-biased and exploration-only; Funding is not modeled. No result can authorize Strategy, runtime, dry-run, live trading, credentials, accounts, or orders.",
+  "data_contract": {
+    "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
+    "cohort_scope": "fixed 80-symbol PIT cohort; not a complete dynamic market universe",
+    "universe_rule": "At every decision use canonical universe_at(decision_timestamp) and require membership at the next execution boundary. Never substitute a current exchange symbol list or survivor-only universe.",
+    "support_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
+    "support_end_exclusive_utc": "2023-11-14T00:00:00Z",
+    "allowed_observations": [
+      "completed Price V1 daily OHLCV bars",
+      "completed Price V1 quote-asset volume",
+      "canonical Lifecycle V1 and bounded PIT instrument-master lifecycle intervals",
+      "canonical dataset identity, manifest, checksum, and PIT linkage"
+    ],
+    "forbidden_observations": [
+      "Funding",
+      "open interest",
+      "current exchange metadata",
+      "current symbol lists",
+      "future bars or missing-bar terminal inference",
+      "external data or candidate performance before this freeze"
+    ],
+    "price_identity": {
+      "dataset": "pre2024-usdm-archive-extended-1d",
+      "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+      "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+      "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+      "price_v1_pit_usage": "identity and loader validation only; Sprint 002 membership comes exclusively from bounded PIT instrument-master universe_at"
+    },
+    "pit_lifecycle_identity": {
+      "instrument_master_path": "research/data/pit-instrument-master-v1/pit-instrument-master-v1.json",
+      "instrument_master_sha256": "75184829cc7fb672f0bb3a26fa913c79ced177084303a1198088c76db2ba609d",
+      "price_activity_path": "research/data/pit-instrument-master-v1/price-v1-cohort-activity.json",
+      "price_activity_sha256": "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3",
+      "lifecycle_sidecar_path": "research/data/expl-017-lifecycle-v1.json",
+      "lifecycle_sidecar_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+      "supplemental_terminal_evidence_path": "research/data/pit-instrument-master-v1/pit-cohort-terminal-evidence-v1.json",
+      "supplemental_terminal_evidence_sha256": "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8",
+      "price_lifecycle_composite_path": "research/data/expl-017-price-lifecycle-composite.json",
+      "price_lifecycle_composite_sha256": "5511caa8a0839fa9c0296f23e828988e6d1374d9cf3edaa2c8cb075e163050bd",
+      "lifecycle_rule": "A confirmed terminal may be liquidated only using canonical terminal semantics. An unresolved terminal, internal gap, malformed PIT record, missing required decision/execution/forward bar, or any unexplained missing bar is DATA_ERROR_STOP. Never infer a terminal from a later missing bar."
+    }
+  },
+  "common_execution_and_accounting": {
+    "decision_timestamp": "completed UTC daily close t",
+    "execution_timestamp": "next UTC daily open t+1",
+    "portfolio": "equal-weight long highest 20 percent / short lowest 20 percent, floor one name per leg; each leg 0.50 gross, total gross 1.00, target net 0.00",
+    "minimum_eligible_symbols": 20,
+    "cost_assumption": "15 bps base and 30 bps coarse stress per one-way turnover; every pass criterion uses the 30 bps stress series",
+    "funding_omission": "Funding is not modeled; results are not derivative total-return claims.",
+    "sequential_stop": "Run candidate 1 first. If and only if it is TIER1_FAIL, run candidate 2. A candidate that passes every frozen gate stops the program; Candidate 2 must not run after Candidate 1 pass.",
+    "candidate_limit": 2
+  },
+  "screened_candidates": [
+    {
+      "candidate_id": "CAND-MARKET-BETA-RESIDUAL-MOMENTUM-001",
+      "selection_status": "REJECTED_AS_VARIANT_AT_CHECKPOINT_A",
+      "mechanism_family": "market-beta residual momentum",
+      "reason": "The claim is idiosyncratic information diffusion after removing contemporaneous equal-weight cohort market beta; it is not raw rank momentum, broad-volatility direction switching, or shock reversal."
+    },
+    {
+      "candidate_id": "CAND-RANGE-VOLUME-ABSORPTION-001",
+      "selection_status": "NOT_RUN_AFTER_CHECKPOINT_A_STOP",
+      "mechanism_family": "range-volume price acceptance",
+      "reason": "The claim is close-location acceptance on unusually high own turnover, not the failed cross-sectional change in volume share."
+    },
+    {
+      "candidate_id": "CAND-INTRADAY-RANGE-LOCATION-REVERSAL-001",
+      "selection_status": "NOT_SELECTED_OLD_VARIANT_RISK",
+      "reason": "Despite using intraday range location, its proposed payoff is reversal after a price dislocation and is too close to the closed idiosyncratic shock-reversal family."
+    },
+    {
+      "candidate_id": "CAND-BREADTH-CONDITIONED-RESIDUAL-MOMENTUM-001",
+      "selection_status": "NOT_SELECTED_OLD_VARIANT_RISK",
+      "reason": "A breadth state gate on residual momentum risks restating the previously closed momentum/state-gating family."
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "CAND-MARKET-BETA-RESIDUAL-MOMENTUM-001",
+      "hypothesis_id": "HYP-PLS002-001",
+      "order": 1,
+      "execution_status": "REJECTED_AS_VARIANT_AT_CHECKPOINT_A_NO_PERFORMANCE_RUN",
+      "mechanism_family": "market-beta residual momentum",
+      "economic_rationale": "A cross-sectional move that remains after contemporaneous common-cohort beta is removed can represent slower idiosyncratic information diffusion rather than market direction.",
+      "primary_signal": "At completed decision t, first form one deterministic candidate-eligible set from universe_at(t): members must also be active at t+1 and have all 61 required valid closes. For each eligible symbol i, form 60 completed daily close-to-close returns r_i and equal-weight market returns m over that same fixed eligible set on each of the same 60 dates. Estimate OLS r_i = alpha_i + beta_i*m + epsilon_i. signal_i is the sum of epsilon_i over the final 7 completed dates. Higher signal predicts continuation.",
+      "lookback": {"beta_returns": 60, "residual_sum_days": 7},
+      "holding_period": "7 calendar days, next UTC open through the UTC open seven calendar days later",
+      "rebalance_schedule": "every 7 calendar days from 2021-03-08T00:00:00Z through final execution 2023-11-06T00:00:00Z; final scheduled exit 2023-11-13T00:00:00Z",
+      "universe": "canonical universe_at(t), membership confirmed again at t+1, with 61 complete valid closes for every symbol and every active-cohort constituent used in each beta-date market return, finite nonzero market variance, a positive execution open, and lifecycle-valid data",
+      "missingness_rule": "A missing/invalid required close, execution open, PIT membership, lifecycle interval, market-return constituent, nonfinite OLS value, zero market variance, or incomplete holding endpoint is DATA_ERROR_STOP. Do not impute, substitute a current universe, or shrink below 20 eligible symbols.",
+      "sanity_variants": [
+        {"variant_id": "HYP-PLS002-001-V1", "change_from_primary": "Use a 5-completed-day residual sum; retain all other primary fields."},
+        {"variant_id": "HYP-PLS002-001-V2", "change_from_primary": "Use a 10-completed-day residual sum; retain all other primary fields."}
+      ]
+    },
+    {
+      "candidate_id": "CAND-RANGE-VOLUME-ABSORPTION-001",
+      "hypothesis_id": "HYP-PLS002-002",
+      "order": 2,
+      "execution_status": "NOT_RUN_CUSTOM_PATH_STOPPED_NO_PERFORMANCE_RUN",
+      "mechanism_family": "range-volume price acceptance",
+      "economic_rationale": "A close near one end of a daily range on unusually high own quote volume can represent accepted directional price discovery rather than a cross-sectional migration in volume share.",
+      "primary_signal": "For each eligible symbol i at completed decision t, CLV_i,t=(2*close_i,t-high_i,t-low_i,t)/(high_i,t-low_i,t). signal_i = CLV_i,t * log(quote_volume_i,t / median(quote_volume_i,t-20:t-1)). Higher signal predicts continuation.",
+      "lookback": {"trailing_quote_volume_median_days": 20},
+      "holding_period": "5 calendar days, next UTC open through the UTC open five calendar days later",
+      "rebalance_schedule": "every 5 calendar days from 2021-02-01T00:00:00Z through final execution 2023-11-03T00:00:00Z; final scheduled exit 2023-11-08T00:00:00Z",
+      "universe": "canonical universe_at(t), membership confirmed again at t+1, with a valid completed OHLC bar and 20 strictly positive finite prior quote-volume observations, a strictly positive current quote volume, high strictly greater than low, a positive execution open, and lifecycle-valid data",
+      "missingness_rule": "A missing/invalid required OHLC or volume value, high less than or equal to low, nonpositive volume, missing PIT membership, lifecycle defect, missing execution open, or incomplete holding endpoint makes the candidate DATA_ERROR_STOP. No imputation or silent universe substitution is permitted; fewer than 20 eligible symbols is DATA_ERROR_STOP.",
+      "sanity_variants": [
+        {"variant_id": "HYP-PLS002-002-V1", "change_from_primary": "Use a 15-completed-day trailing quote-volume median; retain all other primary fields."},
+        {"variant_id": "HYP-PLS002-002-V2", "change_from_primary": "Use a 30-completed-day trailing quote-volume median; retain all other primary fields."}
+      ]
+    }
+  ],
+  "tier1_pass_checks": {
+    "positive_stress_mean": "30 bps stress mean daily return > 0",
+    "sharpe_at_least_0_50": "30 bps stress annualized Sharpe >= 0.50",
+    "positive_rank_ic": "mean rank IC > 0",
+    "hac_p_at_most_0_05": "rank-IC HAC lag-3 one-sided normal p <= 0.05",
+    "two_nonnegative_subperiods": "at least two of frozen 2021, 2022, and 2023 diagnostic subperiod total returns are >= 0",
+    "drawdown_no_worse_than_minus_0_35": "30 bps stress maximum drawdown >= -0.35",
+    "concentration_at_most_0_20": "largest absolute contribution share <= 0.20",
+    "single_positive_removal": "the frozen largest strictly positive contributor removal has nonnegative 30 bps stress mean daily return",
+    "median_turnover_at_most_1_25": "median one-way turnover per scheduled rebalance <= 1.25",
+    "both_variants_positive": "each frozen variant has positive 30 bps stress mean and positive mean rank IC",
+    "pit_lifecycle_missingness_checks": "all PIT, lifecycle, timing, and missingness checks pass"
+  },
+  "checkpoint_a": {
+    "artifact": "research/exploration/price-lifecycle-sprint-002-checkpoint-a.json",
+    "verdict": "FAIL",
+    "performance_run_before_review": false,
+    "custom_program_executed": false,
+    "program_disposition": "STOPPED_WITHOUT_PERFORMANCE_AND_SWITCHED_TO_OSS_FALLBACK"
+  },
+  "post_result_prohibitions": "No Sprint 002 performance may be run. Candidate 1 remains rejected as a closed-factor variant; Candidate 2 remains not run. Do not amend the contract, replace a candidate, create a third candidate, or use OSS baseline output as a custom Alpha result."
+}

@@ -140,3 +140,36 @@ FORMAL_CONFIRMATION = FALSE
 STRATEGY_READY = FALSE
 LIVE_READY = FALSE
 ```
+
+## Price/Lifecycle Sprint 002 Checkpoint A · 2026-08-25
+
+No candidate performance was run. The custom path stopped at its independent
+pre-performance review and switched to the OSS fallback required by the
+mission; the OSS benchmark is not a replacement Alpha result.
+
+### HYP-PLS002-001 · REJECTED_AS_VARIANT · market-beta residual momentum
+
+- Reason: beta residualization changes the return representation but retains
+  EXPL-001's closed information-diffusion and momentum mechanism.
+- Artifact: `price-lifecycle-sprint-002-checkpoint-a.json`.
+- Re-entry rule: no residual window, beta window, holding period, cohort, cost,
+  or threshold rescue under this hypothesis ID.
+
+### HYP-PLS002-002 · NOT_RUN · range-volume price acceptance
+
+- Reason: the one-shot custom program stopped at Checkpoint A before any
+  performance exposure. This is not a factor failure and makes no empirical
+  claim about the mechanism.
+- Artifact: `price-lifecycle-sprint-002-checkpoint-a.json`.
+- Re-entry rule: do not run this candidate under Sprint 002 and do not infer
+  failure or success from the OSS benchmark.
+
+```ini
+PROGRAM_STATUS = PRICE_LIFECYCLE_SPRINT_002_STOPPED_AT_CHECKPOINT_A
+CANDIDATES_PREREGISTERED = 2
+CANDIDATES_TESTED = 0
+REJECTED_AS_VARIANT_COUNT = 1
+NOT_RUN_COUNT = 1
+CUSTOM_ALPHA_PATH_EXHAUSTED = TRUE
+OSS_FALLBACK_TRIGGERED = TRUE
+```

@@ -1,0 +1,2 @@
+vectorbt==1.1.0
+pytest>=8,<10
