@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +11,11 @@ from research.exploration.price_alpha_v1 import Bar, PriceDataset, load_dataset
 from research.oss import vbt_alpha_program_001 as program
 from research.oss.vbt_alpha_program_001_preflight import _inputs
 from research.oss.vectorbt_pit_baseline import build_portfolio
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CANDIDATE_1 = ROOT / "research/exploration/vbt-alpha-program-001-candidate-1-result.json"
+HISTORY = ROOT / "research/process/vbt-alpha-program-001-program-history.json"
 
 
 def _dataset(bars: dict[str, dict[int, Bar]]) -> PriceDataset:
@@ -98,3 +106,15 @@ def test_frozen_price_loader_exposes_manifest_bound_high_and_low() -> None:
     assert bar.high is not None and bar.low is not None
     assert bar.high >= max(bar.open, bar.close)
     assert bar.low <= min(bar.open, bar.close)
+
+
+def test_candidate_1_fail_is_recorded_before_candidate_2() -> None:
+    result = json.loads(CANDIDATE_1.read_text(encoding="utf-8"))
+    history = json.loads(HISTORY.read_text(encoding="utf-8"))
+    assert result["candidate_id"] == "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001"
+    assert result["result"] == "TIER1_FAIL"
+    assert result["all_gates_pass"] is False
+    assert history["CANDIDATES_TESTED"] == history["FAIL_COUNT"] == 1
+    assert history["CANDIDATE_2"]["RESULT"].startswith("NOT_RUN_AUTHORIZED")
+    assert history["PARAMETER_RESCUE"] is False
+    assert hashlib.sha256(CANDIDATE_1.read_bytes()).hexdigest() == history["CANDIDATE_1"]["RESULT_SHA256"]

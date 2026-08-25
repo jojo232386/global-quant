@@ -173,3 +173,38 @@ NOT_RUN_COUNT = 1
 CUSTOM_ALPHA_PATH_EXHAUSTED = TRUE
 OSS_FALLBACK_TRIGGERED = TRUE
 ```
+
+## VBT Alpha Program 001 · Candidate 1 · 2026-08-26
+
+Shared binding: Price V1 snapshot `a7d65a92`; bounded PIT cohort and
+Lifecycle V1; vectorbt 1.1.0 research-only computation. The complete
+2021–2023 support is consumed Tier-1 exploration data, not an untouched
+holdout. Candidate 1 ran only after preregistration commit `c2cb866` and
+Checkpoint A PASS.
+
+### HYP-VBT001-001 · TIER1_FAIL · range-volume price acceptance
+
+- Reason: the frozen 30 bps stress result was `-62.26%` with Sharpe `-1.55`
+  and maximum drawdown `-62.94%`; all three calendar diagnostics were
+  negative, median one-way turnover was `1.60 > 1.25`, the predictive IC
+  was not significant, the single neighbor failed, and removing the largest
+  positive contributor retained a negative stress mean.
+- Counter-evidence preserved: top absolute contribution share was only
+  `4.32%`, all 201 scheduled observations were present, and PIT/Lifecycle
+  checks passed with zero post-terminal fills. Those partial positives do
+  not rescue the failed all-gates contract.
+- Artifact: `vbt-alpha-program-001-candidate-1-result.json`; SHA256
+  `eaa9318df402b76f4269ce9507082f9635beea13f73ba6e7c979691ccd185fec`.
+- Re-entry rule: no direction, 20/30-day volume window, five-day holding,
+  cohort, cost, symbol, threshold, or success-criterion rescue under this
+  hypothesis ID.
+
+```ini
+PROGRAM_ID = VBT_ALPHA_PROGRAM_001
+CANDIDATE_1_RESULT = TIER1_FAIL
+PARAMETER_RESCUE = FALSE
+CANDIDATE_2_AUTHORIZED = TRUE
+FORMAL_CONFIRMATION = FALSE
+STRATEGY_READY = FALSE
+LIVE_READY = FALSE
+```
