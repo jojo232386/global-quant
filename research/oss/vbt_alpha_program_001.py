@@ -410,6 +410,8 @@ def _clean(value: Any) -> Any:
         return {key: _clean(current) for key, current in value.items()}
     if isinstance(value, (list, tuple)):
         return [_clean(current) for current in value]
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
     if isinstance(value, (float, np.floating)):
         if not math.isfinite(float(value)):
             return None

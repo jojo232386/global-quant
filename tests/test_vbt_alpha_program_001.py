@@ -74,6 +74,13 @@ def test_hac_direction_is_positive_for_positive_ic_series() -> None:
     assert result["one_sided_normal_p"] < 0.05
 
 
+def test_result_cleaner_preserves_boolean_type() -> None:
+    assert program._clean({"passed": True, "failed": False}) == {
+        "passed": True,
+        "failed": False,
+    }
+
+
 def test_turnover_reads_vectorbt_assets_without_a_grouping_override() -> None:
     inputs = _inputs()
     spec = program.SPECS["1"]
