@@ -121,6 +121,22 @@ def test_master_queries_completed_decision_close_and_exact_execution_open(monkey
     ]
 
 
+def test_event_selection_does_not_validate_unavailable_execution_day_fields(
+    monkeypatch,
+):
+    symbols = tuple(f"S{index:02d}" for index in range(10))
+    data = _dataset(symbols, days=40)
+    for symbol in symbols:
+        execution = data.bars[symbol][25 * DAY]
+        data.bars[symbol][25 * DAY] = Bar(execution.open, math.nan, math.nan)
+    monkeypatch.setattr(sprint, "universe_at", lambda payload, timestamp: symbols)
+    config = sprint.Config(
+        "C", "H", "shock_reversal", None, None, 20, 3, 25 * DAY, 25 * DAY, 28 * DAY
+    )
+    events = sprint.build_events(data, _master(symbols), config)
+    assert len(events) == 1
+
+
 def test_volume_share_uses_same_eligible_cohort_denominators(monkeypatch):
     symbols = tuple(f"S{index:02d}" for index in range(20))
     data = _dataset(symbols, days=50)
@@ -142,7 +158,7 @@ def test_partial_horizon_and_unknown_candidate_fail_closed():
     bad = sprint.Config("C", "H", "shock_reversal", None, None, 20, 3, 0, 0, 2 * DAY)
     with pytest.raises(sprint.SprintDataError, match="partial holding horizon"):
         sprint.build_events(data, master, bad)
-    with pytest.raises(sprint.SprintDataError, match="not preregistered"):
+    with pytest.raises(sprint.SprintDataError, match="bypass frozen sequential order"):
         sprint.run_program(data, master, {"candidates": [], "common_execution_and_accounting": {"frozen_schedules": []}}, candidate="UNKNOWN")
 
 
@@ -150,3 +166,53 @@ def test_pinned_identity_validation_fails_closed_for_missing_file(monkeypatch):
     monkeypatch.setattr(sprint, "_pinned_paths", lambda preregistration: {sprint.ROOT / "missing-pinned-evidence.json": "0" * 64})
     with pytest.raises(sprint.SprintDataError, match="pinned identity differs"):
         sprint.verify_pinned_files({})
+
+
+def test_price_identity_is_mechanically_bound_to_loader_constants():
+    preregistration = sprint.load_preregistration()
+    preregistration["data_contract"]["price_identity"]["snapshot_id"] = "wrong"
+    with pytest.raises(sprint.SprintDataError, match="snapshot identity differs"):
+        sprint._pinned_paths(preregistration)
+
+
+def test_program_enforces_first_pass_order_and_marks_order_two_late(monkeypatch):
+    candidates = [
+        {"candidate_id": "C1", "order": 1},
+        {"candidate_id": "C2", "order": 2},
+    ]
+    preregistration = {
+        "candidates": candidates,
+        "common_execution_and_accounting": {"frozen_schedules": []},
+        "data_contract": {
+            "pit_lifecycle_identity": {},
+            "cohort_id": "COHORT",
+            "support_start_inclusive_utc": "START",
+            "support_end_exclusive_utc": "END",
+        },
+    }
+    seen = []
+
+    def candidate_result(dataset, master, configs, candidate_id):
+        seen.append(candidate_id)
+        return {
+            "candidate_id": candidate_id,
+            "tier1_status": (
+                "TIER1_FAIL" if candidate_id == "C1" else "MECHANISM_WORTH_CONFIRMING"
+            ),
+        }
+
+    monkeypatch.setattr(sprint, "_configurations", lambda payload: {})
+    monkeypatch.setattr(sprint, "_candidate_result", candidate_result)
+    output = sprint.run_program(_dataset(("A",)), {}, preregistration)
+    assert seen == ["C1", "C2"]
+    assert output["first_pass_candidate"] == "C2"
+    assert output["program_accounting"] == {
+        "candidates_preregistered": 2,
+        "candidates_tested": 2,
+        "pass_count": 1,
+        "fail_count": 1,
+        "data_windows_viewed": 8,
+        "variants_viewed": 4,
+        "configurations_viewed": 6,
+        "late_program_pass": True,
+    }

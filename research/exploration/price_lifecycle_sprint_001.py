@@ -34,6 +34,9 @@ from research.data.pit_instrument_master_v1 import (  # noqa: E402
 )
 from research.exploration.price_alpha_v1 import (  # noqa: E402
     DAY_MS,
+    MANIFEST_SHA256 as PRICE_MANIFEST_SHA256,
+    PIT_SHA256 as PRICE_PIT_SHA256,
+    SNAPSHOT_ID as PRICE_SNAPSHOT_ID,
     Bar,
     PriceAlphaError,
     PriceDataset,
@@ -127,6 +130,12 @@ def _pinned_paths(preregistration: Mapping[str, Any]) -> dict[pathlib.Path, str]
         identity["supplemental_terminal_evidence_path"]: identity["supplemental_terminal_evidence_sha256"],
         identity["price_lifecycle_composite_path"]: identity["price_lifecycle_composite_sha256"],
     }
+    if price.get("snapshot_id") != PRICE_SNAPSHOT_ID:
+        raise SprintDataError("DATA_ERROR_STOP: frozen Price V1 snapshot identity differs")
+    if price.get("manifest_sha256") != PRICE_MANIFEST_SHA256:
+        raise SprintDataError("DATA_ERROR_STOP: frozen Price V1 manifest identity differs")
+    if price.get("pit_sha256") != PRICE_PIT_SHA256:
+        raise SprintDataError("DATA_ERROR_STOP: frozen Price V1 PIT identity differs")
     if price.get("price_v1_pit_usage") != (
         "identity and loader validation only; sprint membership comes exclusively from the bounded PIT instrument master universe_at interface"
     ):
@@ -214,6 +223,21 @@ def _bar(dataset: PriceDataset, symbol: str, timestamp: int) -> Bar:
     return value
 
 
+def _execution_open(dataset: PriceDataset, symbol: str, timestamp: int) -> float:
+    """Validate only information observable at the execution boundary."""
+    try:
+        value = dataset.bars[symbol].get(timestamp)
+    except KeyError as error:
+        raise SprintDataError(
+            f"DATA_ERROR_STOP: execution series absent {symbol}:{_iso(timestamp)}"
+        ) from error
+    if value is None or not math.isfinite(value.open) or value.open <= 0:
+        raise SprintDataError(
+            f"DATA_ERROR_STOP: required execution open invalid {symbol}:{_iso(timestamp)}"
+        )
+    return value.open
+
+
 def _universe(master: Mapping[str, Any], timestamp: int) -> tuple[str, ...]:
     try:
         members = universe_at(master, _iso(timestamp))
@@ -245,7 +269,7 @@ def _terminal_timestamp(master: Mapping[str, Any], symbol: str) -> int | None:
 def _forward_return(
     dataset: PriceDataset, master: Mapping[str, Any], symbol: str, execution: int, exit_at: int
 ) -> float:
-    entry = _bar(dataset, symbol, execution).open
+    entry = _execution_open(dataset, symbol, execution)
     terminal = _terminal_timestamp(master, symbol)
     if terminal is not None and execution <= terminal < exit_at:
         final_day = terminal // DAY_MS * DAY_MS
@@ -279,7 +303,7 @@ def build_events(
             # Price inputs are required for every master member at a decision;
             # volume uses zero as the only explicitly permitted eligibility filter.
             _bar(dataset, symbol, decision)
-            _bar(dataset, symbol, execution)
+            _execution_open(dataset, symbol, execution)
             if config.family == "shock_reversal":
                 assert config.sigma_window is not None
                 closes = [_bar(dataset, symbol, decision - offset * DAY_MS).close for offset in range(config.sigma_window + 1)]
@@ -531,8 +555,18 @@ def _candidate_result(dataset: PriceDataset, master: Mapping[str, Any], configs:
         "single_positive_removal": removal.get("passes") is True,
         "median_turnover_at_most_1_25": primary_result["median_one_way_turnover_per_rebalance"] <= 1.25,
         "both_variants_positive": variants_ok,
+        "lifecycle_universe_missingness_checks": True,
     }
-    return {"candidate_id": candidate_id, "primary": primary_result, "variants": variants, "single_symbol_removal": removal, "pass_checks": checks, "tier1_status": "TIER1_PASS" if all(checks.values()) else "TIER1_FAIL"}
+    return {
+        "candidate_id": candidate_id,
+        "primary": primary_result,
+        "variants": variants,
+        "single_symbol_removal": removal,
+        "pass_checks": checks,
+        "tier1_status": (
+            "MECHANISM_WORTH_CONFIRMING" if all(checks.values()) else "TIER1_FAIL"
+        ),
+    }
 
 
 def run_program(
@@ -544,25 +578,34 @@ def run_program(
 ) -> dict[str, object]:
     configs = _configurations(preregistration)
     candidates = sorted(preregistration["candidates"], key=lambda item: item["order"])
-    allowed = {item["candidate_id"] for item in candidates}
-    if candidate != "all" and candidate not in allowed:
-        raise SprintDataError("DATA_ERROR_STOP: candidate is not preregistered")
+    if candidate != "all":
+        raise SprintDataError(
+            "DATA_ERROR_STOP: candidate selection would bypass frozen sequential order"
+        )
     results = []
     for item in candidates:
         candidate_id = item["candidate_id"]
-        if candidate != "all" and candidate_id != candidate:
-            continue
         result = _candidate_result(dataset, master, configs, candidate_id)
         results.append(result)
-        if candidate == "all" and result["tier1_status"] == "TIER1_PASS":
+        if result["tier1_status"] == "MECHANISM_WORTH_CONFIRMING":
             break
+    first_pass_candidate = next(
+        (
+            item["candidate_id"]
+            for item in results
+            if item["tier1_status"] == "MECHANISM_WORTH_CONFIRMING"
+        ),
+        None,
+    )
+    order_by_candidate = {item["candidate_id"]: item["order"] for item in candidates}
     return {
         "program_id": PROGRAM_ID,
         "candidate_selection": candidate,
         "result_semantics": "Tier 1 exploration only; no formal strategy, runtime, live, Funding, or open interest claim",
         "results": results,
-        "first_pass_candidate": next((item["candidate_id"] for item in results if item["tier1_status"] == "TIER1_PASS"), None),
+        "first_pass_candidate": first_pass_candidate,
         "data_identity": {
+            "price_snapshot_id": PRICE_SNAPSHOT_ID,
             "price_snapshot_artifact_path": str(dataset.artifact_path),
             "price_manifest_sha256": dataset.manifest_sha256,
             "price_pit_sha256_identity_only": dataset.pit_sha256,
@@ -581,7 +624,8 @@ def run_program(
             "candidates_preregistered": len(candidates),
             "candidates_tested": len(results),
             "pass_count": sum(
-                item["tier1_status"] == "TIER1_PASS" for item in results
+                item["tier1_status"] == "MECHANISM_WORTH_CONFIRMING"
+                for item in results
             ),
             "fail_count": sum(
                 item["tier1_status"] == "TIER1_FAIL" for item in results
@@ -589,7 +633,10 @@ def run_program(
             "data_windows_viewed": 4 * len(results),
             "variants_viewed": 2 * len(results),
             "configurations_viewed": 3 * len(results),
-            "late_program_pass": False,
+            "late_program_pass": (
+                first_pass_candidate is not None
+                and order_by_candidate[first_pass_candidate] > 1
+            ),
         },
     }
 
