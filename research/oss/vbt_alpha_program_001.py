@@ -336,7 +336,7 @@ def _hac(ics: tuple[float, ...], lag: int = 3) -> dict[str, float]:
 
 
 def _turnover(portfolio: Any, built: CandidateInputs) -> dict[str, Any]:
-    assets = portfolio.assets(group_by=False)
+    assets = portfolio.assets()
     cash = portfolio.cash(group_by=True)
     observations: list[float] = []
     for timestamp in built.schedule:

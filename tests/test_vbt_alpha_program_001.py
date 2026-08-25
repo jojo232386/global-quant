@@ -6,6 +6,8 @@ import pytest
 
 from research.exploration.price_alpha_v1 import Bar, PriceDataset, load_dataset
 from research.oss import vbt_alpha_program_001 as program
+from research.oss.vbt_alpha_program_001_preflight import _inputs
+from research.oss.vectorbt_pit_baseline import build_portfolio
 
 
 def _dataset(bars: dict[str, dict[int, Bar]]) -> PriceDataset:
@@ -70,6 +72,16 @@ def test_hac_direction_is_positive_for_positive_ic_series() -> None:
     result = program._hac(tuple(0.01 + index * 0.0001 for index in range(120)))
     assert result["mean_rank_ic"] > 0
     assert result["one_sided_normal_p"] < 0.05
+
+
+def test_turnover_reads_vectorbt_assets_without_a_grouping_override() -> None:
+    inputs = _inputs()
+    spec = program.SPECS["1"]
+    first = int(inputs.size.index[0].timestamp() * 1000)
+    built = program.CandidateInputs(spec, 20, inputs, (first,), (), "a" * 64)
+    result = program._turnover(build_portfolio(inputs), built)
+    assert result["scheduled_observations"] == 1
+    assert result["median_one_way_turnover"] == pytest.approx(1.0)
 
 
 def test_frozen_price_loader_exposes_manifest_bound_high_and_low() -> None:
