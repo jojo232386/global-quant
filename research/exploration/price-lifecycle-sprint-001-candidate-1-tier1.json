@@ -1,0 +1,12 @@
+{
+  "RESEARCH_TIER": "TIER_1_EXPLORATION",
+  "RECORD_ID": "PRICE_LIFECYCLE_SPRINT_001_CANDIDATE_1_TIER1",
+  "EXPLORATION_ONLY": true,
+  "OUTPUT_CLASS": "EXPLORATION_RESULT",
+  "DATA_LIMITATIONS": "Price V1 is exploration-only, numeric archive vintage remains unverified, Funding is omitted, and the 30 bps series is a coarse trading-cost proxy rather than derivative total return.",
+  "PIT_LIMITATIONS": "Membership uses a historically captured fixed 80-symbol cohort with canonical lifecycle intervals; it is not a complete dynamic market universe and support ends before 2023-11-14T00:00:00Z.",
+  "KNOWN_BIAS": "The fixed cohort and Price V1 archive are bounded and not an untouched holdout; all three time subperiods, including 2023, were consumed as Tier 1 diagnostics.",
+  "RESULT_STATUS": "FAIL",
+  "NEXT_STAGE": "STOP",
+  "READY_FOR_TINY_LIVE": false
+}

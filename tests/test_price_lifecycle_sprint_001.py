@@ -6,6 +6,7 @@ import pytest
 
 from research.exploration import price_lifecycle_sprint_001 as sprint
 from research.exploration.price_alpha_v1 import Bar, PriceDataset
+from research.process.research_tier import validate_tier_record
 
 
 DAY = sprint.DAY_MS
@@ -230,3 +231,47 @@ def test_program_enforces_first_pass_order_and_marks_order_two_late(monkeypatch)
         "configurations_viewed": 6,
         "late_program_pass": True,
     }
+
+
+def test_committed_exhausted_closeout_preserves_all_failures():
+    exploration = sprint.ROOT / "research/exploration"
+    result_path = exploration / "price-lifecycle-sprint-001-result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    closeout = json.loads(
+        (exploration / "price-lifecycle-sprint-001-closeout.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    history = json.loads(
+        (
+            sprint.ROOT
+            / "research/process/price-lifecycle-sprint-001-program-history.json"
+        ).read_text(encoding="utf-8")
+    )
+    digest = sprint.sha256_file(result_path)
+
+    assert digest == closeout["result_sha256"] == history["RESULT_SHA256"]
+    assert result["first_pass_candidate"] is None
+    assert result["program_accounting"]["pass_count"] == 0
+    assert result["program_accounting"]["fail_count"] == 2
+    assert [item["tier1_status"] for item in result["results"]] == [
+        "TIER1_FAIL",
+        "TIER1_FAIL",
+    ]
+    assert closeout["performance_execution_count"] == 1
+    assert closeout["deterministic_replay_count"] == 1
+    assert closeout["deterministic_replay_byte_identical"] is True
+    assert closeout["parameter_rescue"] is False
+    assert closeout["formal_run_created"] is False
+    assert closeout["ready_for_tiny_live"] is False
+    for order in (1, 2):
+        record = json.loads(
+            (
+                exploration
+                / f"price-lifecycle-sprint-001-candidate-{order}-tier1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert validate_tier_record(record)["RESULT_STATUS"] == "FAIL"
+    graveyard = (exploration / "factor-graveyard.md").read_text(encoding="utf-8")
+    assert "HYP-PLS001-001 · TIER1_FAIL" in graveyard
+    assert "HYP-PLS001-002 · TIER1_FAIL" in graveyard

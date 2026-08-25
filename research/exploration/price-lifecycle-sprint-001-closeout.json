@@ -1,0 +1,30 @@
+{
+  "artifact_class": "GMAQ_PRICE_LIFECYCLE_SPRINT_001_CLOSEOUT",
+  "artifact_version": "1.0.0",
+  "program_id": "PRICE_LIFECYCLE_SPRINT_001",
+  "result": "PRICE_LIFECYCLE_SPRINT_001_EXHAUSTED",
+  "preregistration_commit": "4dcd25f9a2ccd723e5dffcf1cb82ddb3560b847a",
+  "approved_implementation_commit": "9d83631aa736d41c404c089e5b8b80c3caa0e434",
+  "result_commit": "d6d376f824900e4029fc393df3ac92b3ec2a75db",
+  "result_artifact": "research/exploration/price-lifecycle-sprint-001-result.json",
+  "result_sha256": "96bae0c27e801c5fcb50118d64f12e76764a45a876ad2b23f9f911b8027e7101",
+  "performance_execution_count": 1,
+  "deterministic_replay_count": 1,
+  "deterministic_replay_byte_identical": true,
+  "candidates_preregistered": 2,
+  "candidates_tested": 2,
+  "candidate_results": {
+    "CAND-PRICE-IDIOSYNCRATIC-SHOCK-REVERSAL-001": "TIER1_FAIL",
+    "CAND-VOLUME-SHARE-MIGRATION-001": "TIER1_FAIL"
+  },
+  "first_pass_candidate": null,
+  "parameter_rescue": false,
+  "holdout_used": false,
+  "new_candidate_after_results": false,
+  "formal_run_created": false,
+  "strategy_or_runtime_created": false,
+  "real_order_count": 0,
+  "ready_for_strategy": false,
+  "ready_for_tiny_live": false,
+  "next_action": "STOP_THIS_PROGRAM; PRESERVE_NEGATIVE_EVIDENCE"
+}
