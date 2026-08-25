@@ -1,0 +1,54 @@
+{
+  "artifact_class": "PRICE_LIFECYCLE_SPRINT_001_HAND_CALCULATED_GOLD_SAMPLE",
+  "program_id": "PRICE_LIFECYCLE_SPRINT_001",
+  "purpose": "Synthetic arithmetic fixtures only. These are not Price V1 observations or candidate performance.",
+  "examples": {
+    "shock_signal": {
+      "completed_one_day_return": 0.1,
+      "sample_standard_deviation_of_20_completed_returns": 0.02,
+      "formula": "-return / sigma",
+      "expected_signal": -5.0
+    },
+    "volume_share_signal": {
+      "symbol_short_volume": 70.0,
+      "cohort_short_volume": 100.0,
+      "symbol_long_volume": 500.0,
+      "cohort_long_volume": 1000.0,
+      "formula": "log(symbol_short/cohort_short)-log(symbol_long/cohort_long)",
+      "expected_signal": 0.3364722366212129
+    },
+    "equal_leg_weights": {
+      "eligible_symbols": 10,
+      "leg_count": 2,
+      "long_weight_each": 0.25,
+      "short_weight_each": -0.25,
+      "gross_long": 0.5,
+      "gross_short": -0.5,
+      "one_way_initial_turnover": 1.0
+    },
+    "terminal_cost_and_drift": {
+      "opening_weights": {"A": 0.5, "B": -0.5},
+      "A_open_to_terminal_close_return": 0.1,
+      "B_open_to_next_open_return": 0.0,
+      "gross_return": 0.05,
+      "entry_turnover": 1.0,
+      "terminal_liquidation_turnover_after_marking": 0.55,
+      "stress_cost": 0.003,
+      "stress_net_return": 0.04535,
+      "post_interval_B_weight": -0.4783087004352619,
+      "formula": "-0.5*(1+0)/(1+0.04535)"
+    },
+    "final_exit": {
+      "gross_return": 0.0,
+      "turnover": 0.4783087004352619,
+      "stress_net_return": -0.0014349261013057858,
+      "metric_window_includes_cost_only_observation": true
+    },
+    "metrics": {
+      "returns": [0.01, -0.02],
+      "geometric_total_return": -0.010199999999999987,
+      "maximum_drawdown": -0.02,
+      "annualized_sharpe": -4.503085362035431
+    }
+  }
+}
