@@ -216,10 +216,19 @@ def _bar(dataset: PriceDataset, symbol: str, timestamp: int) -> Bar:
         value = dataset.bars[symbol][timestamp]
     except KeyError as error:
         raise SprintDataError(f"DATA_ERROR_STOP: required bar absent {symbol}:{_iso(timestamp)}") from error
-    if not all(math.isfinite(item) for item in (value.open, value.close, value.quote_volume)):
-        raise SprintDataError(f"DATA_ERROR_STOP: non-finite bar {symbol}:{_iso(timestamp)}")
-    if value.open <= 0 or value.close <= 0 or value.quote_volume < 0:
-        raise SprintDataError(f"DATA_ERROR_STOP: invalid bar {symbol}:{_iso(timestamp)}")
+    if not all(math.isfinite(item) for item in (value.open, value.close)):
+        raise SprintDataError(f"DATA_ERROR_STOP: non-finite price {symbol}:{_iso(timestamp)}")
+    if value.open <= 0 or value.close <= 0:
+        raise SprintDataError(f"DATA_ERROR_STOP: invalid price {symbol}:{_iso(timestamp)}")
+    return value
+
+
+def _eligible_quote_volume(
+    dataset: PriceDataset, symbol: str, timestamp: int
+) -> float | None:
+    value = _bar(dataset, symbol, timestamp).quote_volume
+    if not math.isfinite(value) or value <= 0:
+        return None
     return value
 
 
@@ -314,9 +323,15 @@ def build_events(
                 signal[symbol] = -(closes[0] / closes[1] - 1.0) / sigma
             else:
                 assert config.short_window is not None and config.long_window is not None
-                values = [_bar(dataset, symbol, decision - offset * DAY_MS).quote_volume for offset in range(config.long_window)]
-                if any(value <= 0 or not math.isfinite(value) for value in values):
+                raw_values = [
+                    _eligible_quote_volume(
+                        dataset, symbol, decision - offset * DAY_MS
+                    )
+                    for offset in range(config.long_window)
+                ]
+                if any(value is None for value in raw_values):
                     continue
+                values = [float(value) for value in raw_values]
                 # Stored order is t, t-1, ...; summation is order independent.
                 short_sum = sum(values[: config.short_window])
                 long_sum = sum(values)

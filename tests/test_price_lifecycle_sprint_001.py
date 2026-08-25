@@ -152,6 +152,20 @@ def test_volume_share_uses_same_eligible_cohort_denominators(monkeypatch):
     assert "S00" in events[0].target
 
 
+def test_invalid_quote_volume_excludes_symbol_before_minimum_check(monkeypatch):
+    symbols = tuple(f"S{index:02d}" for index in range(21))
+    data = _dataset(symbols, days=50)
+    invalid = data.bars["S00"][34 * DAY]
+    data.bars["S00"][34 * DAY] = Bar(invalid.open, invalid.close, math.nan)
+    monkeypatch.setattr(sprint, "universe_at", lambda payload, timestamp: symbols)
+    config = sprint.Config(
+        "C", "V", "volume_share", 7, 28, None, 7, 35 * DAY, 35 * DAY, 42 * DAY
+    )
+    event = sprint.build_events(data, _master(symbols), config)[0]
+    assert "S00" not in event.signal
+    assert len(event.signal) == 20
+
+
 def test_partial_horizon_and_unknown_candidate_fail_closed():
     data = _dataset(("A",), days=5)
     master = _master(("A",))
