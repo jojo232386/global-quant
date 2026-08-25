@@ -23,6 +23,11 @@
     "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
     "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
     "cohort_size": 80,
+    "instrument_master_path": "research/data/pit-instrument-master-v1/pit-instrument-master-v1.json",
+    "instrument_master_sha256": "75184829cc7fb672f0bb3a26fa913c79ced177084303a1198088c76db2ba609d",
+    "price_activity_sha256": "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3",
+    "lifecycle_sidecar_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+    "supplemental_terminal_evidence_sha256": "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8",
     "support_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
     "support_end_exclusive_utc": "2023-11-14T00:00:00.000Z",
     "allowed_fields": [
@@ -46,6 +51,7 @@
       "any unfrozen external data"
     ],
     "holdout_semantics": "No untouched holdout is used. 2021, 2022, and 2023 are one consumed Tier-1 exploration window; calendar-year slices are diagnostics only.",
+    "ohlc_loader_extension": "Before Candidate 1 performance, the existing Price V1 loader must parse high and low from the same manifest-bound curated kline rows. Validate finite positive OHLC, high >= max(open,close), low <= min(open,close), and high >= low. This is a field exposure only; snapshot identity, files, cohort, PIT, and lifecycle remain unchanged.",
     "membership_rule": "At completed decision close t, compute signals only for canonical universe_at(t) members with every frozen required input. At execution open t+1, a canonical lifecycle removal cancels that target into cash without reranking or renormalizing survivors. Any other missing execution open is DATA_ERROR_STOP.",
     "lifecycle_rule": "Never infer a terminal from missing price. Retain a held instrument through its canonical terminal day's open-to-final-close interval, liquidate exactly once at the canonical terminal timestamp, charge exit costs, and leave all later close and valuation cells unavailable without forward fill.",
     "missingness_rule": "Malformed identity, PIT, lifecycle, price, volume, schedule, decision input, unexplained missing bar, or incomplete horizon is DATA_ERROR_STOP. No imputation, current-universe substitution, silent cohort shrinkage, or partial horizon is allowed."
@@ -77,8 +83,15 @@
     "single_symbol_sensitivity": "Identify the symbol with the largest strictly positive stress net PnL, set only that symbol's targets to zero for all rows without reweighting, rerun the frozen stress portfolio, and require a positive mean daily return.",
     "subperiod_rule": "Compute compounded stress returns in calendar 2021, 2022, and 2023 from the same continuous path without resetting or liquidating at year boundaries; at least two must be nonnegative.",
     "independent_observation_rule": "At least 100 scheduled, non-overlapping rebalance observations are required.",
-    "sequential_stop": "Run Candidate 1 first. If it passes every frozen gate, stop and do not run Candidate 2. Run Candidate 2 only after Candidate 1 is recorded TIER1_FAIL in program history and Factor Graveyard. Stop after Candidate 2 regardless of outcome.",
+    "sequential_stop": "Run Candidate 1 first. If it passes every frozen gate, stop and do not run Candidate 2. Run Candidate 2 only after Candidate 1 is recorded TIER1_FAIL in research/process/vbt-alpha-program-001-program-history.json and research/exploration/factor-graveyard.md, and that history-only transition is committed before Candidate 2 performance. Stop after Candidate 2 regardless of outcome.",
     "post_result_prohibitions": "Do not change direction, lookback, threshold, holding period, rebalance, universe, costs, success criteria, filters, symbols, or variants after any performance is exposed."
+  },
+  "pre_performance_simulator_preflight": {
+    "required": true,
+    "artifact": "research/oss/vbt-alpha-program-001-preflight.json",
+    "real_candidate_data_permitted": false,
+    "contract": "Use synthetic prices and targets only. Verify vectorbt target-percent long and short orders, total gross 1.00 and target net 0.00, completed-close valuation with next-open order price, fee and one-side slippage on both long and short transactions, explicit terminal zero target, no post-terminal close/valuation fill, and deterministic replay. The artifact must contain no return, PnL, Sharpe, drawdown, IC, or candidate signal value.",
+    "gate": "Checkpoint A cannot pass and no candidate performance may run until this metric-free preflight is PASS."
   },
   "pass_fail_criteria": {
     "stress_total_return_positive": "30 bps stress total return > 0",
@@ -131,7 +144,7 @@
         "only_change": "Use 30 completed prior quote-volume days excluding t for the median; all other fields are identical."
       },
       "holding_period": "5 calendar days, execution open through the next scheduled UTC open five calendar days later or canonical terminal close when earlier",
-      "rebalance": "Every 5 calendar days from 2021-02-01T00:00:00.000Z through 2023-11-03T00:00:00.000Z; explicit final exit at 2023-11-08T00:00:00.000Z",
+      "rebalance": "Every 5 calendar days from 2021-02-08T00:00:00.000Z through 2023-11-05T00:00:00.000Z; explicit final exit at 2023-11-10T00:00:00.000Z. The later start gives the frozen 30-day neighbor all prior volumes strictly within supported completed daily rows.",
       "universe": "Full canonical universe_at(t) at the completed decision close, with every primary and neighbor input valid; canonical execution availability checked at t+1 only for cancellation into cash.",
       "candidate_missingness": "high must be strictly greater than low; open, high, low, close and execution open must be finite and positive; current and all required prior quote volumes must be finite and strictly positive. Any violation among canonical decision members is DATA_ERROR_STOP.",
       "implementation_contract": "Add high/low exposure to the existing frozen Price V1 Bar loader, implement one signal function, and feed target matrices through the existing vectorbt thin adapter; no new engine or portfolio abstraction."
@@ -142,7 +155,7 @@
       "order": 2,
       "mechanism_family": "cross-sectional correlation crowding",
       "rationale": "Contracts whose recent returns are most synchronized with the equal-weight cohort can reflect crowded common positioning and greater exposure to cohort-wide deleveraging. Less synchronized names are expected to deliver higher subsequent relative returns than the most crowded names.",
-      "signal_formula": "At completed decision t, freeze the canonical decision-eligible set. For each of the previous 20 completed close-to-close return dates, calculate each member return and the equal-weight return across that identical frozen set. signal_i,t=-PearsonCorr(r_i,m). Higher signal means lower cohort synchrony and predicts higher forward relative return.",
+      "signal_formula": "At completed decision t, freeze the canonical decision-eligible set. For lookback L, index k=0..L-1 and define r_i,k=close_i(t-k)/close_i(t-k-1)-1 using only completed closes t-L through t. For each k define m_k as the equal-weight mean of r_j,k across that identical frozen set. signal_i,t=-PearsonCorr((r_i,0..L-1),(m_0..L-1)). Higher signal means lower cohort synchrony and predicts higher forward relative return.",
       "primary_lookback": {
         "correlation_returns": 20
       },

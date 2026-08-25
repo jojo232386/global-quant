@@ -33,6 +33,9 @@ def test_data_timing_and_tier_boundaries_are_fail_closed() -> None:
     assert "next UTC daily open" in common["execution_timestamp"]
     assert "without reranking or renormalizing" in data["membership_rule"]
     assert "without forward fill" in data["lifecycle_rule"]
+    assert len(data["instrument_master_sha256"]) == 64
+    assert len(data["lifecycle_sidecar_sha256"]) == 64
+    assert "high >= max(open,close)" in data["ohlc_loader_extension"]
     assert common["portfolio_path"].endswith(
         "ffill_val_price=false and fillna_close=false."
     )
@@ -41,6 +44,16 @@ def test_data_timing_and_tier_boundaries_are_fail_closed() -> None:
         assert fragment in forbidden
     assert record["framework_role"] == "RESEARCH_ONLY"
     assert record["freqtrade_role"].endswith("UNCHANGED")
+
+
+def test_preperformance_simulator_preflight_is_mandatory_and_metric_free() -> None:
+    preflight = _record()["pre_performance_simulator_preflight"]
+    assert preflight["required"] is True
+    assert preflight["real_candidate_data_permitted"] is False
+    assert "target-percent long and short orders" in preflight["contract"]
+    assert "no candidate performance" in preflight["gate"]
+    for forbidden in ("return", "pnl", "sharpe", "drawdown", "ic"):
+        assert forbidden in preflight["contract"].lower()
 
 
 def test_candidates_are_distinct_and_have_one_neighbor_each() -> None:
@@ -78,3 +91,15 @@ def test_generated_third_idea_is_rejected_before_preregistration() -> None:
     rejected = [item for item in pool if item["selection_status"].startswith("NOT_SELECTED")]
     assert len(rejected) == 1
     assert "OLD_FACTOR_VARIANT_RISK" in rejected[0]["selection_status"]
+
+
+def test_candidate_schedules_and_history_gate_are_exact() -> None:
+    record = _record()
+    first, second = record["candidates"]
+    assert "2021-02-08" in first["rebalance"]
+    assert "2023-11-10" in first["rebalance"]
+    assert "k=0..L-1" in second["signal_formula"]
+    assert "t-L through t" in second["signal_formula"]
+    sequential = record["common_execution_and_evaluation"]["sequential_stop"]
+    assert "vbt-alpha-program-001-program-history.json" in sequential
+    assert "committed before Candidate 2 performance" in sequential
