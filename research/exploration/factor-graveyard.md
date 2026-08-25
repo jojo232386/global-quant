@@ -90,3 +90,53 @@ PROMOTABLE_ALPHA = FALSE
 STRATEGY_READY = FALSE
 LIVE_READY = FALSE
 ```
+
+## Price/Lifecycle Sprint 001 · 2026-08-25
+
+Shared binding: Price V1 snapshot `a7d65a92`; bounded PIT instrument
+cohort `BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z`; canonical
+Lifecycle V1; support strictly before `2023-11-14T00:00:00Z`. The whole
+window, including 2023, was Tier 1 exploration data rather than an untouched
+holdout. Both candidates were tested once in frozen order with no parameter,
+window, universe, or success-criterion rescue.
+
+### HYP-PLS001-001 · TIER1_FAIL · idiosyncratic shock reversal
+
+- Reason: the 30 bps stress mean daily return was negative, annualized
+  Sharpe was below the frozen threshold, maximum drawdown and median turnover
+  breached their limits, all three subperiod returns were negative, both
+  declared variants had negative stress means, and the fixed
+  largest-positive-contributor removal did not pass.
+- Counter-evidence preserved: mean rank IC was positive and the fixed lag-3
+  HAC diagnostic was in the expected direction, while concentration and
+  lifecycle/PIT correctness checks passed. Those partial positives cannot
+  rescue the portfolio-level failure.
+- Artifact: `price-lifecycle-sprint-001-result.json`; SHA256
+  `96bae0c27e801c5fcb50118d64f12e76764a45a876ad2b23f9f911b8027e7101`.
+- Re-entry rule: no sigma window, holding-period, rebalance, cohort, cost, or
+  threshold rescue under this hypothesis ID.
+
+### HYP-PLS001-002 · TIER1_FAIL · volume-share migration
+
+- Reason: the primary stress mean and Sharpe were negative, mean rank IC was
+  negative, only one of three subperiod returns was nonnegative, drawdown and
+  median turnover breached their limits, both declared variants failed the
+  expected direction, and the fixed removal sensitivity did not pass.
+- Interpretation: quote-asset volume remains a turnover and attention proxy;
+  this failure is not evidence about net capital flow.
+- Artifact: `price-lifecycle-sprint-001-result.json`; SHA256
+  `96bae0c27e801c5fcb50118d64f12e76764a45a876ad2b23f9f911b8027e7101`.
+- Re-entry rule: no short/baseline volume window, cohort, cost, or threshold
+  rescue under this hypothesis ID.
+
+```ini
+PROGRAM_STATUS = PRICE_LIFECYCLE_SPRINT_001_EXHAUSTED
+CANDIDATES_PREREGISTERED = 2
+CANDIDATES_TESTED = 2
+PASS_COUNT = 0
+FAIL_COUNT = 2
+FUNDING_NOT_MODELED = TRUE
+FORMAL_CONFIRMATION = FALSE
+STRATEGY_READY = FALSE
+LIVE_READY = FALSE
+```
