@@ -110,6 +110,8 @@ def test_turnover_reads_vectorbt_assets_without_a_grouping_override() -> None:
 
 
 def test_range_overlay_matches_the_unchanged_frozen_price_loader() -> None:
+    if not (ROOT.parent / "gmaq-data/registry.sqlite").is_file():
+        pytest.skip("local immutable Price V1 snapshot is not installed")
     dataset = load_dataset()
     symbol = sorted(dataset.bars)[0]
     overlay = program.load_range_overlay(dataset, (symbol,))
