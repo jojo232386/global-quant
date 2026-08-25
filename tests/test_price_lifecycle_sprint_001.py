@@ -264,6 +264,10 @@ def test_committed_exhausted_closeout_preserves_all_failures():
     assert closeout["parameter_rescue"] is False
     assert closeout["formal_run_created"] is False
     assert closeout["ready_for_tiny_live"] is False
+    assert "HOLDOUT_WINDOWS_CONSUMED" not in history
+    assert history["TIER1_DIAGNOSTIC_WINDOWS_CONSUMED"] == [
+        "GMAQ_2023_ALREADY_CONSUMED_TIER1_DIAGNOSTIC"
+    ]
     for order in (1, 2):
         record = json.loads(
             (
