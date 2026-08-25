@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE_1 = ROOT / "research/exploration/vbt-alpha-program-001-candidate-1-result.json"
 CANDIDATE_2 = ROOT / "research/exploration/vbt-alpha-program-001-candidate-2-result.json"
 PROGRAM_RESULT = ROOT / "research/exploration/vbt-alpha-program-001-result.json"
+CHECKPOINT_B = ROOT / "research/exploration/vbt-alpha-program-001-checkpoint-b.json"
 HISTORY = ROOT / "research/process/vbt-alpha-program-001-program-history.json"
 
 
@@ -134,3 +135,24 @@ def test_both_candidate_failures_and_program_stop_are_recorded() -> None:
     assert history["PARAMETER_RESCUE"] is False
     assert hashlib.sha256(CANDIDATE_1.read_bytes()).hexdigest() == history["CANDIDATE_1"]["RESULT_SHA256"]
     assert hashlib.sha256(CANDIDATE_2.read_bytes()).hexdigest() == history["CANDIDATE_2"]["RESULT_SHA256"]
+
+
+def test_checkpoint_b_independently_approved_the_frozen_closeout() -> None:
+    review = json.loads(CHECKPOINT_B.read_text(encoding="utf-8"))
+    assert review["program_id"] == "VBT_ALPHA_PROGRAM_001"
+    assert review["preregistration_commit"] == "c2cb8661b52625234e9dd11065a05b6655cc8673"
+    assert review["candidate_1_history_gate_commit"].startswith("a741139")
+    assert review["final_verdict"] == "APPROVE"
+    assert review["approve"] is True
+    assert review["request_changes"] == "NONE"
+    assert review["regression_risk"] == "CLEARED"
+    assert all(review["verified"].values()) is False
+    assert review["verified"]["preregistration_preceded_performance"] is True
+    assert review["verified"]["candidate_limit_respected"] is True
+    assert review["verified"]["candidate_1_failure_committed_before_candidate_2"] is True
+    assert review["verified"]["parameter_rescue"] is False
+    assert review["verified"]["holdout_used"] is False
+    assert review["verified"]["freqtrade_runtime_modified"] is False
+    assert review["verified"]["forward_capture_modified"] is False
+    assert review["verified"]["strategy_or_live_promotion"] is False
+    assert review["deterministic_replay"]["result"] == "BYTE_IDENTICAL"
