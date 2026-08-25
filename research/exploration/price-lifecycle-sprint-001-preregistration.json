@@ -50,9 +50,13 @@
     "pit_lifecycle_identity": {
       "instrument_master_path": "research/data/pit-instrument-master-v1/pit-instrument-master-v1.json",
       "instrument_master_sha256": "75184829cc7fb672f0bb3a26fa913c79ced177084303a1198088c76db2ba609d",
+      "price_activity_path": "research/data/pit-instrument-master-v1/price-v1-cohort-activity.json",
       "price_activity_sha256": "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3",
+      "lifecycle_sidecar_path": "research/data/expl-017-lifecycle-v1.json",
       "lifecycle_sidecar_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+      "supplemental_terminal_evidence_path": "research/data/pit-instrument-master-v1/pit-cohort-terminal-evidence-v1.json",
       "supplemental_terminal_evidence_sha256": "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8",
+      "price_lifecycle_composite_path": "research/data/expl-017-price-lifecycle-composite.json",
       "price_lifecycle_composite_sha256": "5511caa8a0839fa9c0296f23e828988e6d1374d9cf3edaa2c8cb075e163050bd",
       "terminal_semantics": "Use universe_at at the completed decision cutoff and execution boundary. The master includes the three supplemental cohort terminals absent from the exception-only Lifecycle V1 sidecar; no missing bar may itself imply termination."
     },
@@ -77,6 +81,7 @@
     },
     "accounting_and_statistics": {
       "daily_return": "For each calendar interval [open d, open d+1), apply the incumbent marked-to-market weights to each symbol's open-to-next-open return. If a canonical terminal occurs first, use that terminal day's open-to-canonical-final-close return, liquidate at that close, charge exit turnover, and hold no future position.",
+      "event_booking": "At an ordinary scheduled open, first charge target-minus-drifted turnover, then apply the new target over the following interval. A canonical terminal inside an interval replaces that symbol's open-to-next-open return with open-to-canonical-final-close return and books its liquidation turnover in that same interval after marking. At the frozen final exit open, book target zero against the drifted incumbent as a final cost-only observation with gross return zero; include that observation in the metric window.",
       "weight_drift": "Between scheduled rebalances, update each position weight by w_i*(1+r_i)/(1+portfolio_net_return), with residual cash absorbing trading costs. At a scheduled open, turnover is sum_i abs(target_weight_i - drifted_incumbent_weight_i).",
       "turnover": "One-way turnover is sum of absolute target-minus-drifted-incumbent weight changes. Initial entry, every scheduled rebalance, terminal liquidation, and scheduled final exit are charged. Median turnover per rebalance includes initial entry and scheduled rebalances, but excludes terminal and final-exit-only events.",
       "net_return": "daily_net_return = daily_gross_return - 0.0030 * same-day one-way turnover for pass/fail; 0.0015 is reported as the base diagnostic. Net always means net of this trading-cost proxy only.",
@@ -88,6 +93,50 @@
       "hac": "Apply the existing Bartlett/Newey-West mean test to the chronological event-IC sequence with fixed lag 3, population-denominator autocovariances, and a one-sided standard-normal p-value for mean IC greater than zero.",
       "symbol_contribution": "Sum each symbol's daily gross PnL contribution over the full metric window; concentration is max absolute contribution divided by the sum of absolute contributions."
     },
+    "frozen_schedules": [
+      {
+        "configuration_id": "HYP-PLS001-001",
+        "first_execution_utc": "2021-01-25T00:00:00Z",
+        "cadence_calendar_days": 3,
+        "final_execution_utc": "2023-11-08T00:00:00Z",
+        "final_exit_utc": "2023-11-11T00:00:00Z"
+      },
+      {
+        "configuration_id": "HYP-PLS001-001-V1",
+        "first_execution_utc": "2021-01-25T00:00:00Z",
+        "cadence_calendar_days": 3,
+        "final_execution_utc": "2023-11-08T00:00:00Z",
+        "final_exit_utc": "2023-11-11T00:00:00Z"
+      },
+      {
+        "configuration_id": "HYP-PLS001-001-V2",
+        "first_execution_utc": "2021-01-25T00:00:00Z",
+        "cadence_calendar_days": 5,
+        "final_execution_utc": "2023-11-06T00:00:00Z",
+        "final_exit_utc": "2023-11-11T00:00:00Z"
+      },
+      {
+        "configuration_id": "HYP-PLS001-002",
+        "first_execution_utc": "2021-02-01T00:00:00Z",
+        "cadence_calendar_days": 7,
+        "final_execution_utc": "2023-11-06T00:00:00Z",
+        "final_exit_utc": "2023-11-13T00:00:00Z"
+      },
+      {
+        "configuration_id": "HYP-PLS001-002-V1",
+        "first_execution_utc": "2021-02-01T00:00:00Z",
+        "cadence_calendar_days": 7,
+        "final_execution_utc": "2023-11-06T00:00:00Z",
+        "final_exit_utc": "2023-11-13T00:00:00Z"
+      },
+      {
+        "configuration_id": "HYP-PLS001-002-V2",
+        "first_execution_utc": "2021-02-01T00:00:00Z",
+        "cadence_calendar_days": 7,
+        "final_execution_utc": "2023-11-06T00:00:00Z",
+        "final_exit_utc": "2023-11-13T00:00:00Z"
+      }
+    ],
     "subperiods": [
       "2021-02-01T00:00:00Z to 2022-01-01T00:00:00Z",
       "2022-01-01T00:00:00Z to 2023-01-01T00:00:00Z",
