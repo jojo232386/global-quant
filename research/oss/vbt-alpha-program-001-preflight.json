@@ -1,0 +1,28 @@
+{
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_PREFLIGHT",
+  "deterministic_input_sha256": "fe53f14e97c0488b6cc69462168bac1a95099232a89ed55e9910f895037987f4",
+  "fees_and_one_side_slippage": {
+    "fee_rate": 0.0005,
+    "slippage": 0.001,
+    "verified": true
+  },
+  "framework": "vectorbt==1.1.0",
+  "metrics_exposed": [],
+  "next_open_order_price": true,
+  "order_contract": [
+    "Buy long",
+    "Sell short",
+    "Sell terminal long",
+    "Buy final short cover"
+  ],
+  "post_terminal_fill_count": 0,
+  "result": "PASS_METRIC_FREE",
+  "synthetic_only": true,
+  "target_percent": {
+    "gross": 1.0,
+    "long": 0.5,
+    "net": 0.0,
+    "short": -0.5
+  },
+  "terminal_exit_once": true
+}

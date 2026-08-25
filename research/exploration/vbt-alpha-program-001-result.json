@@ -1,0 +1,41 @@
+{
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_FINAL_RESULT",
+  "artifact_version": "1.0.0",
+  "program_id": "VBT_ALPHA_PROGRAM_001",
+  "result": "VBT_ALPHA_PROGRAM_001_EXHAUSTED",
+  "research_tier": "TIER_1_EXPLORATION",
+  "research_engine": "vectorbt==1.1.0",
+  "candidates_generated": 3,
+  "candidates_preregistered": 2,
+  "candidates_tested": 2,
+  "pass_count": 0,
+  "fail_count": 2,
+  "variants_viewed": 2,
+  "data_windows_viewed": 1,
+  "first_pass_candidate": null,
+  "candidate_results": [
+    {
+      "candidate_id": "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001",
+      "result": "TIER1_FAIL",
+      "artifact": "research/exploration/vbt-alpha-program-001-candidate-1-result.json",
+      "sha256": "eaa9318df402b76f4269ce9507082f9635beea13f73ba6e7c979691ccd185fec"
+    },
+    {
+      "candidate_id": "CAND-VBT-CORRELATION-CROWDING-001",
+      "result": "TIER1_FAIL",
+      "artifact": "research/exploration/vbt-alpha-program-001-candidate-2-result.json",
+      "sha256": "201a827a1d05ef0912f5702c97e8b43a014453a041aafe456772d8a766aa97b8"
+    }
+  ],
+  "parameter_rescue": false,
+  "late_program_pass": false,
+  "holdout_used": false,
+  "holdout_semantics": "No untouched holdout; all 2021-2023 observations are consumed Tier-1 exploration data.",
+  "confirmation_requirements": "NOT_APPLICABLE_NO_PASS",
+  "next_action": "WAIT_FOR_FORWARD_CAPTURE_DATA_MATURITY_AND_USER_DECISION_ON_ANY_NEW_INDEPENDENT_MECHANISM_PROGRAM",
+  "new_program_authorized": false,
+  "framework_switch_authorized": false,
+  "real_order_count": 0,
+  "ready_for_strategy": false,
+  "ready_for_tiny_live": false
+}

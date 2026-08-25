@@ -1,0 +1,102 @@
+{
+  "all_gates_pass": false,
+  "alpha_promotion": false,
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_RESULT",
+  "artifact_version": "1.0.0",
+  "candidate_id": "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001",
+  "concentration": {
+    "largest_positive_contributor": "AXSUSDT",
+    "top_absolute_share": 0.043239212003,
+    "top_contributor": "LRCUSDT"
+  },
+  "dataset_snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+  "exploration_only": true,
+  "framework": "vectorbt==1.1.0",
+  "framework_role": "RESEARCH_ONLY",
+  "funding_not_modeled": true,
+  "gates": {
+    "concentration": true,
+    "data_and_lifecycle": true,
+    "drawdown": false,
+    "observations": true,
+    "predictive_direction": false,
+    "sanity_neighbor": false,
+    "single_symbol_sensitivity": false,
+    "stress_mean_daily_positive": false,
+    "stress_sharpe": false,
+    "stress_total_return_positive": false,
+    "subperiods": false,
+    "turnover": false
+  },
+  "gross": {
+    "annualized_sharpe": 0.098587906678,
+    "max_drawdown": -0.295233515918,
+    "mean_daily_return": 5.6304699e-05,
+    "total_return": -0.003062361822
+  },
+  "holdout_used": false,
+  "input_sha256": "f3059eab00feda9ad215f289de093c75849af9e5ad3b1bde8778c3e2e94e05b9",
+  "lifecycle": {
+    "canonical_terminal_events": 5,
+    "post_terminal_fill_count": 0
+  },
+  "neighbor_input_sha256": "29bf758eaca7d584cfb72c55db76f488e42aaabbe66b391d64a4bba49d1870d5",
+  "net": {
+    "annualized_sharpe": -0.737158144917,
+    "max_drawdown": -0.431858595981,
+    "mean_daily_return": -0.000424232246,
+    "total_return": -0.385874053342
+  },
+  "predictive": {
+    "hac_lag3_t": 0.715254875649,
+    "mean_rank_ic": 0.007239956506,
+    "observations": 201,
+    "one_sided_normal_p": 0.237225783031
+  },
+  "program_id": "VBT_ALPHA_PROGRAM_001",
+  "ready_for_strategy": false,
+  "ready_for_tiny_live": false,
+  "real_order_count": 0,
+  "research_tier": "TIER_1_EXPLORATION",
+  "result": "TIER1_FAIL",
+  "sanity_neighbor": {
+    "lookback": 30,
+    "predictive": {
+      "hac_lag3_t": -0.146832521716,
+      "mean_rank_ic": -0.001457498577,
+      "observations": 201,
+      "one_sided_normal_p": 0.558367892866
+    },
+    "stress": {
+      "annualized_sharpe": -1.500453583569,
+      "max_drawdown": -0.613661240121,
+      "mean_daily_return": -0.00088507538,
+      "total_return": -0.615002506181
+    }
+  },
+  "schedule": {
+    "final_execution": "2023-11-05T00:00:00.000Z",
+    "final_exit": "2023-11-10T00:00:00.000Z",
+    "first_execution": "2021-02-08T00:00:00.000Z",
+    "rebalance_days": 5
+  },
+  "single_symbol_removal": {
+    "removed_symbol": "AXSUSDT",
+    "stress_mean_daily_return": -0.001000905302
+  },
+  "stress_30bps": {
+    "annualized_sharpe": -1.550546519732,
+    "max_drawdown": -0.629439426759,
+    "mean_daily_return": -0.000905985276,
+    "total_return": -0.622603227609
+  },
+  "subperiod_stress_total_returns": {
+    "2021": -0.264080367847,
+    "2022": -0.39479236421,
+    "2023": -0.152648906854
+  },
+  "turnover": {
+    "median_one_way_turnover": 1.596307724836,
+    "scheduled_observations": 201
+  }
+}

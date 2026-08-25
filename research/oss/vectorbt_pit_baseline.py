@@ -250,7 +250,12 @@ def build_inputs(dataset: PriceDataset, master: Mapping[str, Any]) -> BaselineIn
     return BaselineInputs(dates, symbols, close, valuation, size, price, len(pit_observations), terminal_liquidations, observations)
 
 
-def build_portfolio(inputs: BaselineInputs):
+def build_portfolio(
+    inputs: BaselineInputs,
+    *,
+    fee_rate: float = FEE_RATE,
+    one_side_slippage: float = ONE_SIDE_SLIPPAGE,
+):
     """Build the simulator with no valuation/close forward-fill defaults."""
     return vbt.Portfolio.from_orders(
         close=inputs.close,
@@ -258,8 +263,8 @@ def build_portfolio(inputs: BaselineInputs):
         size_type="targetpercent",
         price=inputs.price,
         val_price=inputs.valuation,
-        fees=FEE_RATE,
-        slippage=ONE_SIDE_SLIPPAGE,
+        fees=fee_rate,
+        slippage=one_side_slippage,
         cash_sharing=True,
         group_by=True,
         call_seq="auto",

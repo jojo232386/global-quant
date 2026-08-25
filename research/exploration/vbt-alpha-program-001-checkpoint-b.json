@@ -1,0 +1,33 @@
+{
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_CHECKPOINT_B",
+  "artifact_version": "1.0.0",
+  "program_id": "VBT_ALPHA_PROGRAM_001",
+  "review_mode": "INDEPENDENT_CODEX_CLI_READ_ONLY_POST_PERFORMANCE",
+  "review_session_id": "01a03b3a-5d89-75a0-987a-ab67d89326b0",
+  "reviewed_head": "0685949567a371678e227841b751a7deff09ea8d",
+  "preregistration_commit": "c2cb8661b52625234e9dd11065a05b6655cc8673",
+  "candidate_1_history_gate_commit": "a7411396dc011435abe84055c2dc2851433ff81f",
+  "final_verdict": "APPROVE",
+  "approve": true,
+  "request_changes": "NONE",
+  "regression_risk": "CLEARED",
+  "verified": {
+    "preregistration_preceded_performance": true,
+    "candidate_limit_respected": true,
+    "candidate_1_failure_committed_before_candidate_2": true,
+    "parameter_rescue": false,
+    "holdout_used": false,
+    "pit_lifecycle_and_cost_contract_preserved": true,
+    "candidate_failures_retained": true,
+    "freqtrade_runtime_modified": false,
+    "forward_capture_modified": false,
+    "strategy_or_live_promotion": false
+  },
+  "deterministic_replay": {
+    "candidate_1_sha256": "eaa9318df402b76f4269ce9507082f9635beea13f73ba6e7c979691ccd185fec",
+    "candidate_2_sha256": "201a827a1d05ef0912f5702c97e8b43a014453a041aafe456772d8a766aa97b8",
+    "result": "BYTE_IDENTICAL"
+  },
+  "local_test_result": "478 passed",
+  "scope": "Tier 1 exploration closeout only; no Tier 2, Formal, Strategy, Freqtrade runtime, dry-run, live, credentials, account, or order authorization"
+}
