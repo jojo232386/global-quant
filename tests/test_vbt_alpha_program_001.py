@@ -15,6 +15,8 @@ from research.oss.vectorbt_pit_baseline import build_portfolio
 
 ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE_1 = ROOT / "research/exploration/vbt-alpha-program-001-candidate-1-result.json"
+CANDIDATE_2 = ROOT / "research/exploration/vbt-alpha-program-001-candidate-2-result.json"
+PROGRAM_RESULT = ROOT / "research/exploration/vbt-alpha-program-001-result.json"
 HISTORY = ROOT / "research/process/vbt-alpha-program-001-program-history.json"
 
 
@@ -108,13 +110,18 @@ def test_frozen_price_loader_exposes_manifest_bound_high_and_low() -> None:
     assert bar.low <= min(bar.open, bar.close)
 
 
-def test_candidate_1_fail_is_recorded_before_candidate_2() -> None:
-    result = json.loads(CANDIDATE_1.read_text(encoding="utf-8"))
+def test_both_candidate_failures_and_program_stop_are_recorded() -> None:
+    first = json.loads(CANDIDATE_1.read_text(encoding="utf-8"))
+    second = json.loads(CANDIDATE_2.read_text(encoding="utf-8"))
     history = json.loads(HISTORY.read_text(encoding="utf-8"))
-    assert result["candidate_id"] == "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001"
-    assert result["result"] == "TIER1_FAIL"
-    assert result["all_gates_pass"] is False
-    assert history["CANDIDATES_TESTED"] == history["FAIL_COUNT"] == 1
-    assert history["CANDIDATE_2"]["RESULT"].startswith("NOT_RUN_AUTHORIZED")
+    result = json.loads(PROGRAM_RESULT.read_text(encoding="utf-8"))
+    assert first["candidate_id"] == "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001"
+    assert second["candidate_id"] == "CAND-VBT-CORRELATION-CROWDING-001"
+    assert first["result"] == second["result"] == "TIER1_FAIL"
+    assert first["all_gates_pass"] is second["all_gates_pass"] is False
+    assert history["CANDIDATES_TESTED"] == history["FAIL_COUNT"] == 2
+    assert history["PROGRAM_RESULT"] == result["result"] == "VBT_ALPHA_PROGRAM_001_EXHAUSTED"
+    assert result["first_pass_candidate"] is None
     assert history["PARAMETER_RESCUE"] is False
     assert hashlib.sha256(CANDIDATE_1.read_bytes()).hexdigest() == history["CANDIDATE_1"]["RESULT_SHA256"]
+    assert hashlib.sha256(CANDIDATE_2.read_bytes()).hexdigest() == history["CANDIDATE_2"]["RESULT_SHA256"]

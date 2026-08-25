@@ -208,3 +208,35 @@ FORMAL_CONFIRMATION = FALSE
 STRATEGY_READY = FALSE
 LIVE_READY = FALSE
 ```
+
+### HYP-VBT001-002 · TIER1_FAIL · cross-sectional correlation crowding
+
+- Reason: the frozen 30 bps stress result was `-55.32%` with Sharpe `-1.28`
+  and maximum drawdown `-59.35%`; mean rank IC was `-0.0833`, significantly
+  opposite to the hypothesis direction; all three calendar diagnostics and
+  the single 30-day neighbor were negative, and the fixed contributor-removal
+  sensitivity retained a negative stress mean.
+- Counter-evidence preserved: median one-way turnover was `0.81 <= 1.25`,
+  top absolute contribution share was `4.36%`, all 144 scheduled observations
+  were present, and PIT/Lifecycle checks passed with zero post-terminal fills.
+  Those partial positives cannot rescue the failed all-gates contract.
+- Artifact: `vbt-alpha-program-001-candidate-2-result.json`; SHA256
+  `201a827a1d05ef0912f5702c97e8b43a014453a041aafe456772d8a766aa97b8`.
+- Re-entry rule: no direction flip, 20/30-day correlation window, seven-day
+  holding, cohort, cost, symbol, threshold, or success-criterion rescue under
+  this hypothesis ID.
+
+```ini
+PROGRAM_STATUS = VBT_ALPHA_PROGRAM_001_EXHAUSTED
+CANDIDATES_GENERATED = 3
+CANDIDATES_PREREGISTERED = 2
+CANDIDATES_TESTED = 2
+PASS_COUNT = 0
+FAIL_COUNT = 2
+VARIANTS_VIEWED = 2
+DATA_WINDOWS_VIEWED = 1
+PARAMETER_RESCUE = FALSE
+FORMAL_CONFIRMATION = FALSE
+STRATEGY_READY = FALSE
+LIVE_READY = FALSE
+```
