@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -121,6 +121,13 @@ def test_allowed_data_timing_and_stop_rules_are_fail_closed() -> None:
     assert common["costs"]["pass_uses"] == "coarse_stress_one_way_turnover_cost"
     assert common["costs"]["funding_omission"].startswith("Funding is not modeled")
     accounting = common["accounting_and_statistics"]
+    assert accounting["daily_return"] == (
+        "For each calendar interval [open d, open d+1), apply the incumbent "
+        "marked-to-market weights to each symbol's open-to-next-open return. If a "
+        "canonical terminal occurs first, use that terminal day's "
+        "open-to-canonical-final-close return, liquidate at that close, charge exit "
+        "turnover, and hold no future position."
+    )
     assert accounting["event_booking"] == (
         "At an ordinary scheduled open, first charge target-minus-drifted turnover, "
         "then apply the new target over the following interval. A canonical terminal "
@@ -136,6 +143,23 @@ def test_allowed_data_timing_and_stop_rules_are_fail_closed() -> None:
         "costs. At a scheduled open, turnover is sum_i "
         "abs(target_weight_i - drifted_incumbent_weight_i)."
     )
+    assert accounting["turnover"] == (
+        "One-way turnover is sum of absolute target-minus-drifted-incumbent weight "
+        "changes. Initial entry, every scheduled rebalance, terminal liquidation, "
+        "and scheduled final exit are charged. Median turnover per rebalance "
+        "includes initial entry and scheduled rebalances, but excludes terminal and "
+        "final-exit-only events."
+    )
+    assert accounting["net_return"] == (
+        "daily_net_return = daily_gross_return - 0.0030 * same-day one-way turnover "
+        "for pass/fail; 0.0015 is reported as the base diagnostic. Net always means "
+        "net of this trading-cost proxy only."
+    )
+    assert accounting["metric_window"] == (
+        "Full-window metrics start at the candidate's first frozen execution open "
+        "and end at its last frozen holding-horizon exit open. No pre-entry or "
+        "post-exit zero-return padding is included."
+    )
     assert accounting["total_return"] == (
         "Compound daily net returns geometrically as product(1+r_d)-1."
     )
@@ -143,11 +167,21 @@ def test_allowed_data_timing_and_stop_rules_are_fail_closed() -> None:
         "Minimum compounded-equity divided by its prior running peak minus 1 over "
         "the same metric window."
     )
+    assert accounting["annualized_sharpe"] == (
+        "Arithmetic mean of daily net returns divided by their sample standard "
+        "deviation, multiplied by sqrt(365); zero sample volatility yields Sharpe 0."
+    )
     assert accounting["rank_ic"] == (
         "At each scheduled decision, compute Pearson correlation of ascending "
         "average ranks of the frozen signal and the same eligible symbols' "
         "fixed-horizon forward returns; canonical symbol order breaks ties. Report "
         "the arithmetic mean of event ICs."
+    )
+    assert accounting["hac"] == (
+        "Apply the existing Bartlett/Newey-West mean test to the chronological "
+        "event-IC sequence with fixed lag 3, population-denominator "
+        "autocovariances, and a one-sided standard-normal p-value for mean IC "
+        "greater than zero."
     )
     assert accounting["symbol_contribution"] == (
         "Sum each symbol's daily gross PnL contribution over the full metric window; "
@@ -185,6 +219,50 @@ def test_allowed_data_timing_and_stop_rules_are_fail_closed() -> None:
 def test_every_primary_and_variant_has_a_complete_frozen_schedule() -> None:
     record = load(PREREGISTRATION)
     schedules = record["common_execution_and_accounting"]["frozen_schedules"]
+    expected_schedules = [
+        {
+            "configuration_id": "HYP-PLS001-001",
+            "first_execution_utc": "2021-01-25T00:00:00Z",
+            "cadence_calendar_days": 3,
+            "final_execution_utc": "2023-11-08T00:00:00Z",
+            "final_exit_utc": "2023-11-11T00:00:00Z",
+        },
+        {
+            "configuration_id": "HYP-PLS001-001-V1",
+            "first_execution_utc": "2021-01-25T00:00:00Z",
+            "cadence_calendar_days": 3,
+            "final_execution_utc": "2023-11-08T00:00:00Z",
+            "final_exit_utc": "2023-11-11T00:00:00Z",
+        },
+        {
+            "configuration_id": "HYP-PLS001-001-V2",
+            "first_execution_utc": "2021-01-25T00:00:00Z",
+            "cadence_calendar_days": 5,
+            "final_execution_utc": "2023-11-06T00:00:00Z",
+            "final_exit_utc": "2023-11-11T00:00:00Z",
+        },
+        {
+            "configuration_id": "HYP-PLS001-002",
+            "first_execution_utc": "2021-02-01T00:00:00Z",
+            "cadence_calendar_days": 7,
+            "final_execution_utc": "2023-11-06T00:00:00Z",
+            "final_exit_utc": "2023-11-13T00:00:00Z",
+        },
+        {
+            "configuration_id": "HYP-PLS001-002-V1",
+            "first_execution_utc": "2021-02-01T00:00:00Z",
+            "cadence_calendar_days": 7,
+            "final_execution_utc": "2023-11-06T00:00:00Z",
+            "final_exit_utc": "2023-11-13T00:00:00Z",
+        },
+        {
+            "configuration_id": "HYP-PLS001-002-V2",
+            "first_execution_utc": "2021-02-01T00:00:00Z",
+            "cadence_calendar_days": 7,
+            "final_execution_utc": "2023-11-06T00:00:00Z",
+            "final_exit_utc": "2023-11-13T00:00:00Z",
+        },
+    ]
     configured_ids = {
         candidate["hypothesis_id"]
         for candidate in record["candidates"]
@@ -194,6 +272,7 @@ def test_every_primary_and_variant_has_a_complete_frozen_schedule() -> None:
         for variant in candidate["sanity_variants"]
     }
 
+    assert schedules == expected_schedules
     assert {schedule["configuration_id"] for schedule in schedules} == configured_ids
     assert len(schedules) == len(configured_ids)
     support_end = utc(record["data_contract"]["support_end_exclusive_utc"])
@@ -205,6 +284,26 @@ def test_every_primary_and_variant_has_a_complete_frozen_schedule() -> None:
         assert (final - first).days % cadence == 0
         assert (exit_at - final).days == cadence
         assert exit_at < support_end
+
+    shock, volume = record["candidates"]
+    assert shock["rebalance_schedule"] == (
+        "every 3 calendar days from 2021-01-25T00:00:00Z through the final execution "
+        "2023-11-08T00:00:00Z; the final scheduled exit is 2023-11-11T00:00:00Z"
+    )
+    assert shock["sanity_variants"][1]["change_from_primary"] == (
+        "Use a 5-calendar-day holding period and 5-calendar-day rebalance schedule "
+        "anchored at 2021-01-25T00:00:00Z, with final execution "
+        "2023-11-06T00:00:00Z and final exit 2023-11-11T00:00:00Z; retain all other "
+        "primary fields."
+    )
+    assert volume["rebalance_schedule"] == (
+        "every 7 calendar days from 2021-02-01T00:00:00Z through the final execution "
+        "2023-11-06T00:00:00Z; the final scheduled exit is 2023-11-13T00:00:00Z"
+    )
+    assert all(
+        variant["change_from_primary"].endswith("retain all other primary fields.")
+        for variant in (shock["sanity_variants"][0], *volume["sanity_variants"])
+    )
 
 
 def test_volume_share_is_never_mislabeled_as_capital_flow() -> None:
