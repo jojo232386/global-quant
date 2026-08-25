@@ -1,0 +1,181 @@
+{
+  "artifact_class": "GMAQ_VBT_ALPHA_PROGRAM_001_PREREGISTRATION",
+  "artifact_version": "1.0.0",
+  "program_id": "VBT_ALPHA_PROGRAM_001",
+  "status": "PREREGISTERED_PRE_PERFORMANCE_CHECKPOINT_A_PENDING",
+  "research_tier": "TIER_1_EXPLORATION",
+  "exploration_only": true,
+  "base_commit": "4f3de9e1024e7fc207b4bbe415da13940fd2c975",
+  "framework": "vectorbt==1.1.0",
+  "framework_role": "RESEARCH_ONLY",
+  "freqtrade_role": "EXECUTION_DRY_RUN_FREQ_UI_ONLY_UNCHANGED",
+  "framework_license_scope": "Apache-2.0 with Commons Clause; local internal research only",
+  "frozen_before_performance": true,
+  "performance_execution_count_at_freeze": 0,
+  "candidates_generated": 3,
+  "candidates_preregistered": 2,
+  "candidate_limit": 2,
+  "result_semantics": "The complete 2021-2023 support is already consumed exploration data. A pass is TIER1_EXPLORATION_PASS only and cannot authorize Tier 2, Formal, Strategy, Dry-run, Live, credentials, accounts, or orders.",
+  "data_contract": {
+    "dataset": "pre2024-usdm-archive-extended-1d",
+    "snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+    "manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+    "pit_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e",
+    "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
+    "cohort_size": 80,
+    "support_start_inclusive_utc": "2021-01-04T19:51:02.039Z",
+    "support_end_exclusive_utc": "2023-11-14T00:00:00.000Z",
+    "allowed_fields": [
+      "completed daily open",
+      "completed daily high",
+      "completed daily low",
+      "completed daily close",
+      "completed daily quote volume",
+      "bounded PIT instrument master universe_at(t)",
+      "canonical Lifecycle V1 terminal evidence",
+      "canonical dataset identities and checksums"
+    ],
+    "forbidden_fields": [
+      "Funding",
+      "open interest",
+      "L2",
+      "news or social sentiment",
+      "unlock data",
+      "Forward Capture observations",
+      "current exchangeInfo or current survivor universe",
+      "any unfrozen external data"
+    ],
+    "holdout_semantics": "No untouched holdout is used. 2021, 2022, and 2023 are one consumed Tier-1 exploration window; calendar-year slices are diagnostics only.",
+    "membership_rule": "At completed decision close t, compute signals only for canonical universe_at(t) members with every frozen required input. At execution open t+1, a canonical lifecycle removal cancels that target into cash without reranking or renormalizing survivors. Any other missing execution open is DATA_ERROR_STOP.",
+    "lifecycle_rule": "Never infer a terminal from missing price. Retain a held instrument through its canonical terminal day's open-to-final-close interval, liquidate exactly once at the canonical terminal timestamp, charge exit costs, and leave all later close and valuation cells unavailable without forward fill.",
+    "missingness_rule": "Malformed identity, PIT, lifecycle, price, volume, schedule, decision input, unexplained missing bar, or incomplete horizon is DATA_ERROR_STOP. No imputation, current-universe substitution, silent cohort shrinkage, or partial horizon is allowed."
+  },
+  "common_execution_and_evaluation": {
+    "decision_timestamp": "All signal inputs are completed by UTC daily close t.",
+    "execution_timestamp": "Target-percent orders execute no earlier than the next UTC daily open t+1.",
+    "position_construction": "Rank the full decision-eligible set ascending with canonical-symbol tie-break; long the highest 20 percent and short the lowest 20 percent, floor one name per leg, equal-weight 0.50 gross per leg, total gross 1.00 and target net 0.00. Require at least 20 eligible names.",
+    "ties": "Average ranks are used for predictive rank IC. Portfolio leg membership uses ascending signal then canonical symbol, including deterministic canonical-symbol resolution at a leg boundary.",
+    "execution_cancellation": "A name canonically unavailable at t+1 is set to zero and its frozen target remains cash; no execution-time reranking or renormalization is permitted.",
+    "portfolio_path": "One continuous vectorbt portfolio per specification. Rebalances set explicit target percentages; terminal rows and final exit set explicit zero targets. ffill_val_price=false and fillna_close=false.",
+    "base_cost": {
+      "fee_rate": 0.0005,
+      "one_side_slippage": 0.001,
+      "total_one_way_rate": 0.0015
+    },
+    "stress_cost": {
+      "fee_rate": 0.0005,
+      "one_side_slippage": 0.0025,
+      "total_one_way_rate": 0.003
+    },
+    "funding_not_modeled": true,
+    "gross_result": "vectorbt run with fee_rate=0 and one_side_slippage=0",
+    "net_result": "vectorbt run with the frozen base cost",
+    "cost_stress": "vectorbt run with the frozen 30 bps one-way stress cost",
+    "predictive_statistic": "Mean cross-sectional Spearman rank IC between decision signal and the instrument return from execution open through the next scheduled execution open, or canonical terminal close when earlier; lag-3 Newey-West one-sided normal p-value.",
+    "turnover": "At each scheduled execution or terminal/final exit, sum absolute target-percent change versus the drifted incumbent immediately before the order row; report the median across scheduled rebalances.",
+    "concentration": "After the explicit final exit, sum vectorbt closed-trade net PnL by symbol. Top contributor share is max absolute symbol PnL divided by sum absolute symbol PnL; zero denominator fails.",
+    "single_symbol_sensitivity": "Identify the symbol with the largest strictly positive stress net PnL, set only that symbol's targets to zero for all rows without reweighting, rerun the frozen stress portfolio, and require a positive mean daily return.",
+    "subperiod_rule": "Compute compounded stress returns in calendar 2021, 2022, and 2023 from the same continuous path without resetting or liquidating at year boundaries; at least two must be nonnegative.",
+    "independent_observation_rule": "At least 100 scheduled, non-overlapping rebalance observations are required.",
+    "sequential_stop": "Run Candidate 1 first. If it passes every frozen gate, stop and do not run Candidate 2. Run Candidate 2 only after Candidate 1 is recorded TIER1_FAIL in program history and Factor Graveyard. Stop after Candidate 2 regardless of outcome.",
+    "post_result_prohibitions": "Do not change direction, lookback, threshold, holding period, rebalance, universe, costs, success criteria, filters, symbols, or variants after any performance is exposed."
+  },
+  "pass_fail_criteria": {
+    "stress_total_return_positive": "30 bps stress total return > 0",
+    "stress_mean_daily_positive": "30 bps stress arithmetic mean daily return > 0",
+    "stress_sharpe": "30 bps stress annualized Sharpe >= 0.50",
+    "predictive_direction": "mean rank IC > 0 and lag-3 HAC one-sided normal p <= 0.05",
+    "drawdown": "30 bps stress maximum drawdown >= -0.35",
+    "turnover": "median one-way turnover per scheduled rebalance <= 1.25",
+    "concentration": "largest absolute symbol contribution share <= 0.20",
+    "single_symbol_sensitivity": "largest strictly positive contributor removal retains positive 30 bps stress mean daily return",
+    "subperiods": "at least two of 2021, 2022, and 2023 stress diagnostic total returns are >= 0",
+    "sanity_neighbor": "the single frozen neighbor has positive 30 bps stress total return, positive stress mean daily return, and positive mean rank IC",
+    "observations": "at least 100 non-overlapping scheduled rebalance observations",
+    "data_and_lifecycle": "all identity, PIT, timing, missingness, cost, deterministic replay, and lifecycle checks pass",
+    "overall": "TIER1_PASS only if every criterion passes; otherwise TIER1_FAIL"
+  },
+  "generated_candidate_pool": [
+    {
+      "candidate_id": "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001",
+      "mechanism_family": "range-volume price acceptance",
+      "selection_status": "PREREGISTERED_CANDIDATE_1",
+      "screening_rationale": "Close location within a completed intraday range, amplified only by an own-history volume surprise, tests directional price acceptance rather than the failed cross-sectional volume-share migration or a momentum lookback."
+    },
+    {
+      "candidate_id": "CAND-VBT-CORRELATION-CROWDING-001",
+      "mechanism_family": "cross-sectional correlation crowding",
+      "selection_status": "PREREGISTERED_CANDIDATE_2",
+      "screening_rationale": "Relative synchrony with the equal-weight cohort is a crowding/participation characteristic rather than return momentum, volatility level, idiosyncratic shock reversal, or volume-share migration."
+    },
+    {
+      "candidate_id": "CAND-VBT-DISPERSION-BREAKOUT-001",
+      "mechanism_family": "cross-sectional dispersion-conditioned continuation",
+      "selection_status": "NOT_SELECTED_OLD_FACTOR_VARIANT_RISK",
+      "screening_rationale": "A dispersion state applied to directional returns risks restating EXPL-017's closed momentum-by-state mechanism and is excluded before preregistration."
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "CAND-VBT-RANGE-VOLUME-ACCEPTANCE-001",
+      "hypothesis_id": "HYP-VBT001-001",
+      "order": 1,
+      "mechanism_family": "range-volume price acceptance",
+      "rationale": "A close near one end of a completed daily range on unusually high own quote volume can represent accepted directional price discovery rather than a transient mark or a change in cross-sectional activity share. The expected relation is continuation over the fixed short horizon.",
+      "signal_formula": "At completed decision t, CLV_i,t=(2*close_i,t-high_i,t-low_i,t)/(high_i,t-low_i,t). volume_surprise_i,t=log(quote_volume_i,t/median(quote_volume_i,t-20:t-1)). signal_i,t=CLV_i,t*volume_surprise_i,t. Higher signal predicts higher forward relative return.",
+      "primary_lookback": {
+        "trailing_quote_volume_median_days_excluding_t": 20
+      },
+      "sanity_neighbor": {
+        "neighbor_id": "HYP-VBT001-001-N1",
+        "only_change": "Use 30 completed prior quote-volume days excluding t for the median; all other fields are identical."
+      },
+      "holding_period": "5 calendar days, execution open through the next scheduled UTC open five calendar days later or canonical terminal close when earlier",
+      "rebalance": "Every 5 calendar days from 2021-02-01T00:00:00.000Z through 2023-11-03T00:00:00.000Z; explicit final exit at 2023-11-08T00:00:00.000Z",
+      "universe": "Full canonical universe_at(t) at the completed decision close, with every primary and neighbor input valid; canonical execution availability checked at t+1 only for cancellation into cash.",
+      "candidate_missingness": "high must be strictly greater than low; open, high, low, close and execution open must be finite and positive; current and all required prior quote volumes must be finite and strictly positive. Any violation among canonical decision members is DATA_ERROR_STOP.",
+      "implementation_contract": "Add high/low exposure to the existing frozen Price V1 Bar loader, implement one signal function, and feed target matrices through the existing vectorbt thin adapter; no new engine or portfolio abstraction."
+    },
+    {
+      "candidate_id": "CAND-VBT-CORRELATION-CROWDING-001",
+      "hypothesis_id": "HYP-VBT001-002",
+      "order": 2,
+      "mechanism_family": "cross-sectional correlation crowding",
+      "rationale": "Contracts whose recent returns are most synchronized with the equal-weight cohort can reflect crowded common positioning and greater exposure to cohort-wide deleveraging. Less synchronized names are expected to deliver higher subsequent relative returns than the most crowded names.",
+      "signal_formula": "At completed decision t, freeze the canonical decision-eligible set. For each of the previous 20 completed close-to-close return dates, calculate each member return and the equal-weight return across that identical frozen set. signal_i,t=-PearsonCorr(r_i,m). Higher signal means lower cohort synchrony and predicts higher forward relative return.",
+      "primary_lookback": {
+        "correlation_returns": 20
+      },
+      "sanity_neighbor": {
+        "neighbor_id": "HYP-VBT001-002-N1",
+        "only_change": "Use 30 completed close-to-close returns; all other fields are identical."
+      },
+      "holding_period": "7 calendar days, execution open through the next scheduled UTC open seven calendar days later or canonical terminal close when earlier",
+      "rebalance": "Every 7 calendar days from 2021-02-08T00:00:00.000Z through 2023-11-06T00:00:00.000Z; explicit final exit at 2023-11-13T00:00:00.000Z",
+      "universe": "Full canonical universe_at(t) at the completed decision close with 31 complete closes for both primary and neighbor, fixed identically across every correlation date; canonical execution availability checked at t+1 only for cancellation into cash.",
+      "candidate_missingness": "Every frozen-set close and return must be finite, all prices positive, and both each symbol's return variance and cohort-market return variance strictly positive. Any violation is DATA_ERROR_STOP.",
+      "implementation_contract": "Implement one correlation signal function and feed target matrices through the existing vectorbt thin adapter; no residual-momentum score, state gate, new engine, or portfolio abstraction."
+    }
+  ],
+  "checkpoint_a": {
+    "status": "PENDING",
+    "allowed_review_scope": [
+      "lookahead",
+      "PIT correctness",
+      "Lifecycle correctness",
+      "old-factor rescue",
+      "parameter freedom",
+      "outcome-based selection",
+      "execution timing",
+      "cost semantics",
+      "vectorbt implementation feasibility",
+      "overengineering"
+    ]
+  },
+  "allowed_program_outcomes": [
+    "FIRST_VBT_TIER1_PASS",
+    "VBT_ALPHA_PROGRAM_001_EXHAUSTED",
+    "DATA_ERROR_STOP",
+    "PROCESS_FAILURE"
+  ]
+}

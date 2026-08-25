@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PATH = ROOT / "research/exploration/vbt-alpha-program-001-preregistration.json"
+
+
+def _record() -> dict:
+    return json.loads(PATH.read_text(encoding="utf-8"))
+
+
+def test_program_is_frozen_before_any_performance() -> None:
+    record = _record()
+    assert record["program_id"] == "VBT_ALPHA_PROGRAM_001"
+    assert record["status"] == "PREREGISTERED_PRE_PERFORMANCE_CHECKPOINT_A_PENDING"
+    assert record["frozen_before_performance"] is True
+    assert record["performance_execution_count_at_freeze"] == 0
+    assert record["candidates_generated"] == 3
+    assert record["candidates_preregistered"] == record["candidate_limit"] == 2
+    assert record["checkpoint_a"]["status"] == "PENDING"
+
+
+def test_data_timing_and_tier_boundaries_are_fail_closed() -> None:
+    record = _record()
+    data = record["data_contract"]
+    common = record["common_execution_and_evaluation"]
+    assert record["research_tier"] == "TIER_1_EXPLORATION"
+    assert record["exploration_only"] is True
+    assert "No untouched holdout" in data["holdout_semantics"]
+    assert "next UTC daily open" in common["execution_timestamp"]
+    assert "without reranking or renormalizing" in data["membership_rule"]
+    assert "without forward fill" in data["lifecycle_rule"]
+    assert common["portfolio_path"].endswith(
+        "ffill_val_price=false and fillna_close=false."
+    )
+    forbidden = " ".join(data["forbidden_fields"]).lower()
+    for fragment in ("funding", "open interest", "forward capture", "exchangeinfo"):
+        assert fragment in forbidden
+    assert record["framework_role"] == "RESEARCH_ONLY"
+    assert record["freqtrade_role"].endswith("UNCHANGED")
+
+
+def test_candidates_are_distinct_and_have_one_neighbor_each() -> None:
+    record = _record()
+    candidates = record["candidates"]
+    assert [item["order"] for item in candidates] == [1, 2]
+    assert len({item["mechanism_family"] for item in candidates}) == 2
+    assert len({item["candidate_id"] for item in candidates}) == 2
+    for item in candidates:
+        assert item["signal_formula"]
+        assert item["primary_lookback"]
+        assert set(item["sanity_neighbor"]) == {"neighbor_id", "only_change"}
+        assert item["holding_period"]
+        assert item["rebalance"]
+        assert item["universe"]
+        assert item["candidate_missingness"]
+        assert item["implementation_contract"]
+
+
+def test_pass_is_all_gates_and_rescue_is_forbidden() -> None:
+    record = _record()
+    gates = record["pass_fail_criteria"]
+    assert gates["overall"] == "TIER1_PASS only if every criterion passes; otherwise TIER1_FAIL"
+    assert "p <= 0.05" in gates["predictive_direction"]
+    assert "at least 100" in gates["observations"]
+    assert "positive 30 bps stress" in gates["sanity_neighbor"]
+    prohibitions = record["common_execution_and_evaluation"]["post_result_prohibitions"]
+    for fragment in ("direction", "lookback", "universe", "costs", "success criteria", "variants"):
+        assert fragment in prohibitions
+
+
+def test_generated_third_idea_is_rejected_before_preregistration() -> None:
+    pool = _record()["generated_candidate_pool"]
+    assert len(pool) == 3
+    rejected = [item for item in pool if item["selection_status"].startswith("NOT_SELECTED")]
+    assert len(rejected) == 1
+    assert "OLD_FACTOR_VARIANT_RISK" in rejected[0]["selection_status"]
