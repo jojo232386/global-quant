@@ -1,0 +1,53 @@
+{
+  "artifact_class": "GMAQ_MAIN_PROTECTION_SPRINT_001_V1",
+  "repository": "jojo232386/global-quant",
+  "canonical_main_at_configuration": "7cbfd12c40dea4cd678e389208934909e7d2ff22",
+  "configured_at_utc": "2026-08-25T08:36:08Z",
+  "method": "REPOSITORY_BRANCH_RULESET",
+  "ruleset": {
+    "id": 21399360,
+    "name": "Protect main",
+    "target": "branch",
+    "target_ref": "refs/heads/main",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "rules": {
+      "require_pull_request": true,
+      "required_approving_review_count": 0,
+      "require_code_owner_review": false,
+      "require_last_push_approval": false,
+      "required_review_thread_resolution": false,
+      "require_extra_approval_for_unattributed_changes": false,
+      "required_status_checks": [
+        {
+          "context": "pytest",
+          "integration_id": 15368,
+          "integration": "github-actions"
+        }
+      ],
+      "strict_required_status_checks_policy": false,
+      "block_force_push": true,
+      "block_deletion": true
+    }
+  },
+  "evidence": {
+    "prior_rulesets": [],
+    "prior_classic_branch_protection": "NOT_CONFIGURED_HTTP_404",
+    "required_check_observed_on_merge_commit": "7cbfd12c40dea4cd678e389208934909e7d2ff22",
+    "required_check_workflow": "test",
+    "required_check_context": "pytest",
+    "required_check_conclusion": "success",
+    "applied_rules_read_back_for_main": true,
+    "dangerous_push_or_deletion_probe_used": false
+  },
+  "scope_exclusions": [
+    "release immutability",
+    "tag protection",
+    "other branches",
+    "signed commits",
+    "linear history",
+    "merge queue",
+    "required deployments",
+    "strict up-to-date branch"
+  ]
+}
