@@ -1,0 +1,158 @@
+{
+  "artifact_class": "GMAQ_DATA_ADMISSION_FAILURE_V1",
+  "data_admission_id": "DATA-ADMISSION-001",
+  "candidate_id": "CAND-DERIVATIVES-POSITIONING-001",
+  "canonical_main": "3353ccde13f43772e351c80e2eb54536a1ca6c09",
+  "contract": {
+    "path": "research/data/data-admission-001-contract.json",
+    "sha256": "f2ed2bdcaebd3eb4c5f4bd8217f72d243c93889761345654adb150089eaa753f",
+    "checkpoint_a": "PASS_AFTER_ONE_REPAIR",
+    "checkpoint_a_lookahead": "PASS"
+  },
+  "fixed_cohort": {
+    "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
+    "size": 80,
+    "supported_interval": "[2021-01-04T19:51:02.039Z,2023-11-14T00:00:00Z)",
+    "pit_status": "PARTIAL_PIT_COHORT_CANDIDATE",
+    "survivor_bias_status": "PARTIALLY_CONTROLLED_FIXED_COHORT_ONLY",
+    "active_count_breakpoints": [
+      ["2021-01-04T19:51:02.039Z", 80],
+      ["2021-12-19T02:00:00Z", 79],
+      ["2022-04-12T09:00:00Z", 78],
+      ["2022-11-15T04:30:00.000Z", 77],
+      ["2022-11-29T09:00:00.000Z", 76],
+      ["2023-03-20T09:00:00.000Z", 75]
+    ],
+    "minimum_active_count": 75
+  },
+  "numeric_vintage_judgments": {
+    "price": {
+      "verdict": "FAIL",
+      "classification": "VINTAGE_UNVERIFIED",
+      "symbols_evaluated": 80,
+      "symbols_passing_vintage": 0,
+      "current_byte_identity": "PASS_FOR_80_FIXED_COHORT_SYMBOLS",
+      "event_timestamp": "Kline open and close times are exchange-event fields; a 1d bar is complete only after its close time.",
+      "exchange_timestamp": "Present in the official Kline schema.",
+      "publication_timestamp": "The official project says daily archives become available the next day, but supplies no per-object first-publication timestamp or proof of availability by the frozen 00:05 UTC deadline.",
+      "collection_timestamp": "No historical project collection receipt is preserved; the local dataset was collected in 2026.",
+      "archive_timestamp": "Only current archive identity and current immutable local snapshots are bound.",
+      "retrieval_timestamp": "2026 local acquisition lineage",
+      "revision_lineage": "The official project states archived files may be replaced and lists some replacements, but the current Price V1 bytes do not preserve a complete object-level vintage chain proving which bytes were available at each historical decision.",
+      "future_fill_policy": "FORBIDDEN; missing bars cannot be repaired with later bytes for admission",
+      "reason": "Current checksums and completed-bar semantics do not prove historical first availability or the as-of bytes used at each frozen decision."
+    },
+    "funding": {
+      "verdict": "FAIL",
+      "classification": "VINTAGE_UNVERIFIED",
+      "symbols_evaluated": 80,
+      "symbols_passing_vintage": 0,
+      "current_byte_identity": "2726_FIXED_FILTERED_SYMBOL_MONTH_ARCHIVES_PRESENT",
+      "filtered_entry_list_sha256": "79faaab5237963ab532565ed65ff471fe359abebd1f9873eace9c29efd7d82b6",
+      "event_timestamp": "Official API defines fundingTime and the local archive contains ordered funding event times and actual rates.",
+      "exchange_timestamp": "Funding event time is available; it is not a publication or arrival timestamp.",
+      "publication_timestamp": "No historical per-event publication or arrival timestamp is preserved.",
+      "collection_timestamp": "No historical project collection receipt is preserved; local files are current-retrieval evidence.",
+      "archive_timestamp": "The monthly archive identity is bound through the shared acquisition manifest, not through historical first-publication records.",
+      "retrieval_timestamp": "2026 local acquisition lineage",
+      "revision_lineage": "No project-bound event-level revision/vintage lineage proves the rate bytes visible before each frozen decision.",
+      "cash_flow_semantics": "Rate alone is not literal cash flow; direction, position notional, timing, and contract-unit accounting are mandatory.",
+      "reason": "Current 2726-object coverage does not prove that each funding event was published and unchanged by the historical decision cutoff."
+    },
+    "open_interest": {
+      "verdict": "FAIL",
+      "classification": "VINTAGE_UNVERIFIED_AND_SCOPE_INCOMPATIBLE",
+      "symbols_evaluated": 80,
+      "symbols_passing_vintage": 0,
+      "current_archive_union_fixed_cohort_symbols": 40,
+      "fixed_cohort_symbols_absent_from_archive_union": 40,
+      "monthly_old_scope_fixed_cohort_overlap_min": 17,
+      "monthly_old_scope_fixed_cohort_overlap_max": 25,
+      "frozen_minimum_active_cross_section": 30,
+      "event_timestamp": "The official API defines timestamp as the period end; local daily metrics rows expose observation/create time.",
+      "exchange_timestamp": "The exact 23:55 UTC observation is the required endpoint.",
+      "publication_timestamp": "No historical per-endpoint publication timestamp is preserved.",
+      "collection_timestamp": "No historical project arrival receipt is preserved; current local file timestamps are 2026 receipts.",
+      "archive_timestamp": "Current Data Vision object identity and checksum only.",
+      "retrieval_timestamp": "2026 local acquisition lineage",
+      "revision_lineage": "No endpoint-level first-availability or revision/vintage chain is preserved; the REST endpoint currently exposes only the latest one month.",
+      "required_endpoint_policy": "Exactly 31 positive endpoints at 23:55 UTC for t-30 through t; 288/288 intraday rows are diagnostic only; any defect invalidates the entire scheduled rebalance.",
+      "archive_scope_defects": {
+        "manifested_daily_archives": 21939,
+        "valid_positive_2355_endpoints": 21908,
+        "all_scope_defects": 31,
+        "nonpositive_on_2022_03_07": 30,
+        "missing_etcusdt_2023_02_07": 1,
+        "fixed_cohort_known_defects": 23,
+        "fixed_cohort_nonpositive_on_2022_03_07": 22,
+        "fixed_cohort_missing_etcusdt_2023_02_07": 1
+      },
+      "reason": "The existing source was built for an older monthly 30-name scope, never covers more than 25 fixed-cohort names in a selection month, omits 40 cohort symbols entirely, and lacks historical arrival/revision evidence."
+    }
+  },
+  "other_gate_judgments": {
+    "signal_availability": {
+      "verdict": "FAIL",
+      "reason": "No family proves publication or arrival by t+1 00:05 UTC; observation/event timestamps cannot substitute for arrival."
+    },
+    "symbol_identity": {
+      "verdict": "PASS",
+      "scope": "FIXED_COHORT_BINDING_ONLY",
+      "reason": "The 80 records bind exact Binance USD-M perpetual symbols, venue, quote/margin asset, and frozen lifecycle intervals; AKROUSDT is outside the cohort. This does not prove numeric vintage or complete contract-specification lineage."
+    },
+    "coverage": {
+      "verdict": "FAIL",
+      "symbols_passing_all_requirements": 0,
+      "maximal_common_supported_interval": "NONE_ADMITTED",
+      "reason": "OI scope never reaches the frozen 30-name floor for the fixed cohort and all numeric families fail vintage."
+    },
+    "cost_model_input_availability": {
+      "verdict": "FAIL",
+      "reason": "The baseline is explicitly PLACEHOLDER_UNVERIFIED except for a current account fee observation; no historically bound executable quote/trade, spread/slippage, fee schedule, complete contract multiplier, or replayable funding cash-flow dataset is bound."
+    },
+    "lookahead_status": {
+      "verdict": "PASS_CONTRACT_FAIL_DATA",
+      "reason": "The frozen contract delays decision and execution and forbids completed post-execution bars, but the data cannot prove timely arrival, so schedules fail closed rather than using future bytes."
+    }
+  },
+  "official_evidence": [
+    {
+      "url": "https://github.com/binance/binance-public-data/blob/master/README.md",
+      "accessed_utc_date": "2026-08-25",
+      "supports": "Daily archives become available the next day; CHECKSUM files verify current integrity; archived files may later be updated."
+    },
+    {
+      "url": "https://github.com/binance/binance-public-data/tree/master/updates",
+      "accessed_utc_date": "2026-08-25",
+      "supports": "The current official update directory is a limited archive-replacement ledger, not per-object first-publication or full vintage storage for the required bytes."
+    },
+    {
+      "url": "https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data",
+      "accessed_utc_date": "2026-08-25",
+      "supports": "Kline open/close fields, fundingTime, OI period-end timestamp, and the current OI history endpoint's latest-one-month limit."
+    }
+  ],
+  "process_integrity": {
+    "candidate_b_performance_accessed_or_generated": false,
+    "unrelated_existing_performance_output_accidentally_displayed": true,
+    "effect_on_decision": "NONE; the contract was already frozen, no Candidate B performance exists or was accessed, and no field, threshold, cohort, window, or symbol rule was changed from performance.",
+    "expl_created": false,
+    "adapter_or_platform_created": false,
+    "real_order_count": 0
+  },
+  "strict_outcome": {
+    "data_admission_status": "FAIL",
+    "symbols_admitted": 0,
+    "admitted_interval": "NONE",
+    "candidate_b_status": "PARKED_DATA_BLOCKED",
+    "free_funding_oi_engineering": "STOP",
+    "frequency_window_cohort_mechanism_rescue": "FORBIDDEN",
+    "vendor_purchase": "NOT_AUTHORIZED_AND_NOT_RECOMMENDED_BY_THIS_RECORD",
+    "next_action": "OPEN_A_SEPARATE_DATA_FIRST_SCREEN_FOR_MECHANISMS_THAT_DO_NOT_REQUIRE_FUNDING_OR_OI; REQUIRE_A_NEW_FORMAL_ADMISSION_OF_PRICE_LIFECYCLE_AND_COHORT_INPUTS_BEFORE_ANY_RESEARCH"
+  },
+  "independent_reviews": {
+    "checkpoint_a": "PASS_AFTER_ONE_REPAIR",
+    "checkpoint_b": "PASS",
+    "checkpoint_c": "PASS_AFTER_ONE_REPAIR"
+  }
+}
