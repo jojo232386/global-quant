@@ -1,0 +1,155 @@
+{
+  "artifact_class": "GMAQ_DATA_ADMISSION_CONTRACT_V1",
+  "data_admission_id": "DATA-ADMISSION-001",
+  "status": "FROZEN_BEFORE_ANALYSIS",
+  "candidate": {
+    "candidate_id": "CAND-DERIVATIVES-POSITIONING-001",
+    "mechanism": "OI stock + adverse funding flow + weak price confirmation -> leveraged crowding -> 3-day reversal",
+    "prediction_horizon_completed_utc_days": 3,
+    "holding_period_completed_utc_days": 3,
+    "rebalance_policy": "NON_OVERLAPPING_3_COMPLETED_UTC_DAYS",
+    "first_formation_endpoint": "2021-02-04T23:55:00Z",
+    "formation_schedule": "Every third completed UTC day from the first formation endpoint; no data-dependent schedule shifts"
+  },
+  "fixed_cohort": {
+    "cohort_id": "BINANCE_USDM_PERPETUAL_TRADING_20210104_195102Z",
+    "size": 80,
+    "master_path": "research/data/pit-instrument-master-v1/pit-instrument-master-v1.json",
+    "master_sha256": "75184829cc7fb672f0bb3a26fa913c79ced177084303a1198088c76db2ba609d",
+    "supported_interval": "[2021-01-04T19:51:02.039Z,2023-11-14T00:00:00Z)",
+    "minimum_active_cross_sectional_symbols": 30,
+    "minimum_common_supported_days": 365,
+    "minimum_valid_scheduled_rebalances": 120
+  },
+  "required_inputs": {
+    "price": {
+      "source": "Binance USD-M public daily Kline archive",
+      "fields": [
+        "symbol",
+        "open_time_utc_ms",
+        "close_time_utc_ms",
+        "open",
+        "close",
+        "quote_asset_volume"
+      ],
+      "frequency": "1d completed UTC bars",
+      "lookback_completed_utc_days": 30
+    },
+    "funding": {
+      "source": "Binance USD-M public monthly fundingRate archive",
+      "fields": [
+        "symbol",
+        "funding_event_time_utc_ms",
+        "funding_rate",
+        "funding_interval",
+        "settlement_direction"
+      ],
+      "frequency": "every actual settled funding event",
+      "lookback_completed_utc_days": 30
+    },
+    "open_interest": {
+      "source": "Binance USD-M public daily metrics archive",
+      "fields": [
+        "symbol",
+        "observation_time_utc_ms",
+        "sum_open_interest",
+        "open_interest_unit"
+      ],
+      "frequency": "exact 23:55 UTC endpoint",
+      "lookback_contract": "t-30 through t inclusive, exactly 31 positive endpoints",
+      "diagnostic_only": "288/288 intraday observations"
+    },
+    "identity_and_lifecycle": {
+      "fields": [
+        "venue",
+        "market_type",
+        "contract_symbol",
+        "base_asset",
+        "quote_asset",
+        "contract_type",
+        "contract_unit_or_multiplier",
+        "listing_state_at_event",
+        "termination_state_at_event"
+      ]
+    }
+  },
+  "timing": {
+    "timezone": "UTC",
+    "day_boundary": "half-open [00:00:00, next 00:00:00)",
+    "formation_day": "t",
+    "latest_input_event_timestamp": "t 23:55:00 UTC OI endpoint; price bar completed before t+1 00:00:00 UTC; funding events have event timestamp before t+1 00:00:00 UTC",
+    "required_publication_or_arrival_deadline": "t+1 00:05:00 UTC",
+    "signal_calculation_timestamp": "t+1 00:05:00 UTC or later",
+    "earliest_legal_decision_timestamp": "t+1 00:05:00 UTC, only if every input has proven historical publication/arrival by then",
+    "assumed_execution_timestamp": "Submit a marketable order no earlier than t+1 00:10:00 UTC; model the fill from the first subsequent contemporaneously observable executable quote or trade, never from a completed [00:10,00:15) bar or its high, low, close, or volume",
+    "unproven_delay_policy": "FAIL_SIGNAL_AVAILABILITY"
+  },
+  "data_quality_policy": {
+    "missingness": "Any missing, duplicate, non-finite, identity-inconsistent required value, or nonpositive required OI endpoint for any otherwise PIT-active preselected cohort member invalidates the entire scheduled rebalance.",
+    "imputation": "FORBIDDEN",
+    "carry_forward": "FORBIDDEN",
+    "symbol_replacement": "FORBIDDEN",
+    "post_hoc_symbol_drop": "FORBIDDEN",
+    "symbol_exclusion": "A symbol is in scope exactly when it belongs to the fixed cohort and its frozen lifecycle record says it is active at the formation endpoint and assumed execution timestamp. A confirmed terminal event excludes it at and after the effective terminal timestamp. No symbol-specific permanent exclusion is permitted for missing numeric data; any such defect invalidates that whole scheduled rebalance. Return, signal strength, IC, Sharpe, drawdown, future performance, and current-survivor status may not be used.",
+    "coverage_interval_rule": "A candidate admitted interval must be one contiguous run of the frozen three-day schedule, must remain inside the fixed cohort supported interval, must contain at least 365 calendar days and 120 scheduled rebalances, and every scheduled rebalance in that run must satisfy every required family for every PIT-active member. Choose the maximal run mechanically; ties choose the earliest. No schedule shifting or hole deletion is permitted.",
+    "minimum_count_policy": "Every scheduled rebalance requires at least 30 PIT-active symbols. The floor, 365-day interval minimum, and 120-rebalance minimum are fixed before any performance access and may not be lowered in this admission. They are not permission to remove defective PIT-active symbols.",
+    "revision_policy": "Each numeric family requires evidence of historical publication/availability and revision or vintage lineage. Current retrievability, schema validity, or checksum integrity alone is insufficient.",
+    "fail_closed": true
+  },
+  "dataset_identities": {
+    "price": {
+      "dataset": "pre2024-usdm-archive-extended-1d",
+      "raw_snapshot_id": "7dda814dcec63b72eb0703e7a7631540e959c1c989ba25f52cd294a1d73135d0",
+      "raw_manifest_sha256": "1e63caca16ff1f6217ebf28b2182995d00fa97a09c0e5d417e365e9a1369053b",
+      "validated_snapshot_id": "35748e9335118346ac0c598e6ef291099e0a033a9625b5e4416efe2f23f7152a",
+      "curated_snapshot_id": "a7d65a9223d5b66baa93826c1706a6eeb718718211a0d7fe94371d03ded4ec9b",
+      "curated_manifest_sha256": "cd2ae988fac8bca1b4c67d5985d93d3dcc145c7b7c598a9e5a0377c7c49bf166",
+      "pit_linkage_sha256": "b006eae7dde9514e656156749d9891edf5fe70c2e12811b0395e15e1b4ef643e"
+    },
+    "funding": {
+      "acquisition_run_id": "acquisition-attempt-001",
+      "shared_price_funding_manifest_path": "/Users/ASUS/Desktop/gmaq-data/snapshots/pre2024-usdm-current-survivors/raw/canonical-manifest.json",
+      "shared_price_funding_manifest_sha256": "1644a236766be0774bdd29a7a2d71e2d697f112f7850a5498e59b804100ecb43",
+      "frozen_entry_filter": "entries where kind == funding, symbol is a fixed-cohort member, and the archive month intersects that member's frozen active interval and at least one frozen formation lookback or holding interval",
+      "entry_identity": "key + symbol + month + sha256",
+      "scope_note": "The previously reported 819 archives belong to an older 73-name price scope and are not accepted as fixed-cohort coverage. The exact filtered entry count and ordered entry-list SHA-256 must be produced by the admission audit before this family can pass."
+    },
+    "open_interest": {
+      "dataset": "pre2024-usdm-funding-oi-v1",
+      "source_manifest_sha256": "0a7f9d73cb7619c8660940a8c0d388d3cbb6be4a438dc74d580f7fea70349d5f",
+      "coverage_summary_sha256": "ec0fdf4ed3927dce93bb3dfb374dee16e237e36bbc7099064fff7039e8ad9d9d",
+      "manifested_daily_archives": 21939,
+      "valid_required_endpoints": 21908,
+      "defective_required_endpoints": 31
+    },
+    "lifecycle": {
+      "price_activity_sha256": "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3",
+      "lifecycle_sidecar_sha256": "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc",
+      "supplemental_terminal_evidence_sha256": "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8"
+    }
+  },
+  "required_cost_inputs": [
+    "taker_or_maker_fee_schedule applicable at each execution",
+    "actual funding cash-flow timestamp, direction, rate, and position notional",
+    "bid-ask spread proxy available at the assumed execution timestamp",
+    "slippage proxy available at the assumed execution timestamp",
+    "turnover and entry/exit side accounting",
+    "position entry, funding accrual, and exit timing",
+    "contract unit or multiplier semantics"
+  ],
+  "execution_and_cost_dataset_binding": {
+    "executable_quote_or_trade_dataset": "NO_DATASET_BOUND_AT_FREEZE",
+    "historical_fee_schedule_dataset": "NO_DATASET_BOUND_AT_FREEZE",
+    "spread_slippage_proxy_dataset": "NO_DATASET_BOUND_AT_FREEZE",
+    "contract_specification_vintage_dataset": "NO_COMPLETE_DATASET_BOUND_AT_FREEZE",
+    "rule": "Each missing binding is a mandatory cost-input failure. A later record may bind an immutable identity and checksum only if it was found without changing this contract or reading performance."
+  },
+  "admission_rule": "PASS only if PIT cohort, Price vintage, Funding vintage, OI vintage, signal availability, symbol identity, coverage, cost inputs, and independent review all PASS; otherwise FAIL with zero admitted symbols.",
+  "prohibitions": [
+    "performance access or generation",
+    "return, IC, Sharpe, drawdown, or backtest analysis",
+    "mechanism, frequency, window, cohort, or threshold rescue",
+    "EXPL creation",
+    "adapter or platform construction after a vintage blocker is established"
+  ]
+}

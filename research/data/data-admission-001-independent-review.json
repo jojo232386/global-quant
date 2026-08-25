@@ -1,0 +1,58 @@
+{
+  "artifact_class": "GMAQ_DATA_ADMISSION_INDEPENDENT_REVIEW_V1",
+  "data_admission_id": "DATA-ADMISSION-001",
+  "candidate_id": "CAND-DERIVATIVES-POSITIONING-001",
+  "review_mechanism": "Independent non-interactive Codex CLI invocations",
+  "checkpoint_a": {
+    "status": "PASS_AFTER_ONE_REPAIR",
+    "first_review": {
+      "status": "REQUEST_CHANGES",
+      "findings": [
+        "Funding scope was not deterministically frozen.",
+        "Coverage, exclusion, and formation-schedule rules were under-specified.",
+        "Execution could have been modeled from a completed post-decision 5-minute bar and required cost datasets were unbound."
+      ]
+    },
+    "repair_scope": "Contract-only repair before numeric analysis; no mechanism, cohort, threshold, or performance field changed.",
+    "final_output": {
+      "CHECKPOINT_A": "PASS",
+      "FINDINGS": "NONE",
+      "LOOKAHEAD": "PASS with inputs gated by proven arrival, decision delayed to 00:05 UTC, and execution using only subsequent observable data",
+      "CONTRACT_STRICTNESS": "ACCEPTABLE"
+    }
+  },
+  "checkpoint_b": {
+    "status": "PASS",
+    "final_output": {
+      "CHECKPOINT_B": "PASS",
+      "PRICE_EVIDENCE": "SUPPORTED",
+      "FUNDING_EVIDENCE": "SUPPORTED",
+      "OI_EVIDENCE": "SUPPORTED",
+      "HISTORICAL_AVAILABILITY_CLAIMS": "PASS",
+      "FINDINGS": "NONE"
+    },
+    "interpretation": "PRICE_EVIDENCE, FUNDING_EVIDENCE, and OI_EVIDENCE equal SUPPORTED, and HISTORICAL_AVAILABILITY_CLAIMS equals PASS, only because the evidence supports the recorded claims that historical availability is unproven. These labels do not mean historical availability or any numeric family passed admission."
+  },
+  "checkpoint_c": {
+    "status": "PASS_AFTER_ONE_REPAIR",
+    "first_review": {
+      "status": "REQUEST_CHANGES",
+      "findings": [
+        "The next-action wording overstated Price, lifecycle, and partial-PIT cohort proof.",
+        "Checkpoint B's historical-availability PASS label needed explicit fail-claim semantics.",
+        "The test did not require synchronized Checkpoint C state across the failure and review artifacts."
+      ]
+    },
+    "repair_scope": "Record and test consistency only; the frozen contract and admission decision were unchanged.",
+    "final_output": {
+      "CHECKPOINT_C": "PASS",
+      "LOOKAHEAD": "PASS",
+      "SURVIVOR_BIAS": "PASS",
+      "OUTCOME_SELECTION": "PASS",
+      "PARAMETER_RESCUE": "PASS",
+      "VINTAGE_CLAIMS": "PASS",
+      "SCOPE": "PASS",
+      "FINDINGS": "NONE"
+    }
+  }
+}
