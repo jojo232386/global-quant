@@ -1,0 +1,49 @@
+{
+  "artifact_class": "GMAQ_PRICE_LIFECYCLE_SPRINT_001_CHECKPOINT_A",
+  "artifact_version": "1.0.0",
+  "program_id": "PRICE_LIFECYCLE_SPRINT_001",
+  "review_mode": "INDEPENDENT_READ_ONLY_PRE_PERFORMANCE",
+  "review_session_id": "01a03813-4de8-7260-a0a4-9bc8aa346c16",
+  "iterations": [
+    {
+      "reviewed_commit": "21350537e95553398af967d862c03435d5078802",
+      "verdict": "REQUEST_CHANGES",
+      "finding_classes": [
+        "missing cross-file identity hashes",
+        "incomplete final schedules",
+        "incomplete accounting and metric freeze",
+        "ambiguous single-symbol removal rule",
+        "tests did not enforce the repaired contract"
+      ]
+    },
+    {
+      "reviewed_commit": "776ab030c6c0bcf5167956a9635e7d98aec053e2",
+      "verdict": "REQUEST_CHANGES",
+      "finding_classes": [
+        "cross-file identities and schedules were declared but not mechanically enforced",
+        "accounting and terminal semantics were declared but not mechanically enforced"
+      ]
+    },
+    {
+      "reviewed_commit": "1e7e197b29361edc6265247130db7001c257d05a",
+      "verdict": "REQUEST_CHANGES",
+      "finding_classes": [
+        "several accounting definitions remained outside exact test assertions",
+        "schedule tests checked arithmetic but not exact configuration values and declaration correspondence"
+      ]
+    },
+    {
+      "reviewed_commit": "4dcd25f9a2ccd723e5dffcf1cb82ddb3560b847a",
+      "verdict": "PASS",
+      "focused_test": "5 passed",
+      "test_enforcement": "PASS",
+      "frozen_candidates": "UNCHANGED",
+      "findings": []
+    }
+  ],
+  "final_verdict": "PASS",
+  "preregistration_commit": "4dcd25f9a2ccd723e5dffcf1cb82ddb3560b847a",
+  "performance_run_before_pass": false,
+  "performance_artifacts_read_by_reviewer": false,
+  "scope": "Tier 1 exploration only; no formal, runtime, strategy, dry-run, or live authorization"
+}
