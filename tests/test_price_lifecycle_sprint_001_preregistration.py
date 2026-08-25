@@ -86,10 +86,42 @@ def test_allowed_data_timing_and_stop_rules_are_fail_closed() -> None:
         "current exchangeInfo",
         "post-support observations",
     ]
+    assert contract["pit_lifecycle_identity"] == {
+        **contract["pit_lifecycle_identity"],
+        "instrument_master_sha256": (
+            "75184829cc7fb672f0bb3a26fa913c79ced177084303a1198088c76db2ba609d"
+        ),
+        "price_activity_sha256": (
+            "05c36891885bd48686b54af8967a6808ba311ed42579e8abbeb66192a0d121d3"
+        ),
+        "lifecycle_sidecar_sha256": (
+            "c7f0f9eaeee364a4c3ec07c65fcda767845845c77f3dfa8cfd07f5fe4f6c18dc"
+        ),
+        "supplemental_terminal_evidence_sha256": (
+            "5ec5624bf75006581d461cce92cb288c7aec27db9ea9b09791f48ec85b5c38e8"
+        ),
+    }
     assert "completed" in common["decision_information_cutoff"]
     assert "UTC open of t+1" in common["execution"]
     assert "not an untouched holdout" in common["holdout_disclosure"]
     assert common["costs"]["pass_uses"] == "coarse_stress_one_way_turnover_cost"
+    assert common["costs"]["funding_omission"].startswith("Funding is not modeled")
+    accounting = common["accounting_and_statistics"]
+    assert "drifted-incumbent" in accounting["turnover"]
+    assert "0.0030" in accounting["net_return"]
+    assert "sqrt(365)" in accounting["annualized_sharpe"]
+    assert "fixed lag 3" in accounting["hac"]
+    assert "largest strictly positive" in common["single_symbol_removal_rule"]
+    assert record["candidates"][0]["rebalance_schedule"].endswith(
+        "the final scheduled exit is 2023-11-11T00:00:00Z"
+    )
+    assert record["candidates"][1]["rebalance_schedule"].endswith(
+        "the final scheduled exit is 2023-11-13T00:00:00Z"
+    )
+    assert all(
+        "partial horizons are forbidden" in candidate["execution_assumption"]
+        for candidate in record["candidates"]
+    )
     assert all(
         candidate["tier_1_pass_fail_criteria"]["fail_rule"].startswith(
             "Any failed condition"
