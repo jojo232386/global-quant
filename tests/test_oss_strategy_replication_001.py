@@ -6,6 +6,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCREENING = ROOT / "research/exploration/oss-strategy-replication-001-screening.json"
+CHECKPOINT_A = ROOT / "research/exploration/oss-strategy-replication-001-checkpoint-a.json"
+RESULT = ROOT / "research/exploration/oss-strategy-replication-001-result.json"
+HISTORY = ROOT / "research/process/oss-strategy-replication-001-program-history.json"
 
 
 def _record() -> dict:
@@ -63,3 +66,31 @@ def test_consumed_window_is_not_relabelled_as_holdout() -> None:
     assert record["research_tier"] == "TIER_1_EXPLORATION"
     assert "consumed exploration data" in record["data_window_semantics"]
     assert "not a holdout" in record["data_window_semantics"]
+
+
+def test_checkpoint_a_passes_only_to_stop_performance() -> None:
+    checkpoint = json.loads(CHECKPOINT_A.read_text(encoding="utf-8"))
+    assert checkpoint["checkpoint_a"] == "PASS"
+    assert checkpoint["admission_decision"] == "NO_ADMISSIBLE_OSS_CANDIDATE"
+    assert checkpoint["performance_authorization"] == "DENIED"
+    assert checkpoint["request_changes"] == "NONE"
+    assert checkpoint["performance_run_before_review"] is False
+    assert checkpoint["source_semantic_parity_run"] is False
+
+
+def test_result_and_program_history_close_without_empirical_failures() -> None:
+    result = json.loads(RESULT.read_text(encoding="utf-8"))
+    history = json.loads(HISTORY.read_text(encoding="utf-8"))
+    assert result["result"] == history["PROGRAM_RESULT"] == "NO_ADMISSIBLE_OSS_CANDIDATE"
+    assert result["candidates_tested"] == history["CANDIDATES_TESTED"] == 0
+    assert result["pass_count"] == result["fail_count"] == 0
+    assert history["PASS_COUNT"] == history["FAIL_COUNT"] == 0
+    assert result["data_windows_viewed"] == history["DATA_WINDOWS_VIEWED"] == 0
+    assert result["source_semantic_parity"] == "NOT_RUN_NO_ADMISSIBLE_CANDIDATE"
+    assert result["factor_graveyard_updated"] is False
+    assert history["THIRD_PARTY_CODE_COMMITTED"] is False
+    assert history["NEW_INFRASTRUCTURE_WRITTEN"] is False
+    assert history["VECTORBT_NEW_CODE_LOC"] == 0
+    assert history["REAL_ORDER_COUNT"] == 0
+    assert history["READY_FOR_STRATEGY"] is False
+    assert history["READY_FOR_TINY_LIVE"] is False
