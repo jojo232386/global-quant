@@ -1,0 +1,28 @@
+{
+  "artifact_class": "GMAQ_OSS_STRATEGY_REPLICATION_001_CHECKPOINT_B",
+  "artifact_version": "1.0.0",
+  "program_id": "OSS_STRATEGY_REPLICATION_001",
+  "review_mode": "INDEPENDENT_CODEX_CLI_READ_ONLY_FINAL_REVIEW",
+  "review_session_id": "01a03b81-fd6e-7c01-a077-2d325cfa13ae",
+  "reviewed_head": "7c24b4dd8ea85c78c2f28d6fb3c07fdbd32a1907",
+  "approve": true,
+  "request_changes": "NONE",
+  "regression_risk": "CLEARED",
+  "program_result": "NO_ADMISSIBLE_OSS_CANDIDATE",
+  "verified": {
+    "screening_limits_respected": true,
+    "zero_candidates_admitted_preregistered_or_tested": true,
+    "performance_not_run": true,
+    "upstream_performance_not_used_for_selection": true,
+    "source_and_license_metadata_recorded": true,
+    "third_party_source_committed": false,
+    "parameter_timeframe_or_direction_rescue": false,
+    "holdout_used": false,
+    "pit_lifecycle_or_research_tier_changed": false,
+    "runtime_freqtrade_or_forward_capture_changed": false,
+    "factor_graveyard_empirical_failure_added": false,
+    "alpha_promotion": false,
+    "new_infrastructure_written": false
+  },
+  "local_test_result_before_review": "486 passed"
+}

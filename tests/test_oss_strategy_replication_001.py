@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCREENING = ROOT / "research/exploration/oss-strategy-replication-001-screening.json"
 CHECKPOINT_A = ROOT / "research/exploration/oss-strategy-replication-001-checkpoint-a.json"
+CHECKPOINT_B = ROOT / "research/exploration/oss-strategy-replication-001-checkpoint-b.json"
 RESULT = ROOT / "research/exploration/oss-strategy-replication-001-result.json"
 HISTORY = ROOT / "research/process/oss-strategy-replication-001-program-history.json"
 
@@ -94,3 +95,24 @@ def test_result_and_program_history_close_without_empirical_failures() -> None:
     assert history["REAL_ORDER_COUNT"] == 0
     assert history["READY_FOR_STRATEGY"] is False
     assert history["READY_FOR_TINY_LIVE"] is False
+
+
+def test_checkpoint_b_approves_the_fail_closed_record() -> None:
+    checkpoint = json.loads(CHECKPOINT_B.read_text(encoding="utf-8"))
+    verified = checkpoint["verified"]
+    assert checkpoint["approve"] is True
+    assert checkpoint["request_changes"] == "NONE"
+    assert checkpoint["regression_risk"] == "CLEARED"
+    assert checkpoint["program_result"] == "NO_ADMISSIBLE_OSS_CANDIDATE"
+    assert verified["screening_limits_respected"] is True
+    assert verified["zero_candidates_admitted_preregistered_or_tested"] is True
+    assert verified["performance_not_run"] is True
+    assert verified["upstream_performance_not_used_for_selection"] is True
+    assert verified["source_and_license_metadata_recorded"] is True
+    assert verified["third_party_source_committed"] is False
+    assert verified["parameter_timeframe_or_direction_rescue"] is False
+    assert verified["holdout_used"] is False
+    assert verified["runtime_freqtrade_or_forward_capture_changed"] is False
+    assert verified["factor_graveyard_empirical_failure_added"] is False
+    assert verified["alpha_promotion"] is False
+    assert verified["new_infrastructure_written"] is False
