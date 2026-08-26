@@ -1,0 +1,262 @@
+{
+  "artifact_class": "GMAQ_OSS_STRATEGY_REPLICATION_001_SCREENING",
+  "artifact_version": "1.0.0",
+  "program_id": "OSS_STRATEGY_REPLICATION_001",
+  "status": "BLIND_SCREENING_COMPLETE_NO_ADMISSIBLE_CANDIDATE",
+  "canonical_main": "38298d6b2afcb40a7cf09614459e19815b17449f",
+  "research_tier": "TIER_1_EXPLORATION",
+  "data_window_semantics": "The whole 2021-2023 Price/Lifecycle window is consumed exploration data, not a holdout.",
+  "screening_limits": {
+    "repositories_maximum": 8,
+    "strategy_files_maximum": 30,
+    "shortlist_maximum": 5,
+    "preregistration_maximum": 2
+  },
+  "screening_counts": {
+    "repositories_screened": 8,
+    "strategy_files_screened": 30,
+    "candidates_shortlisted": 5,
+    "candidates_admitted": 0,
+    "candidates_preregistered": 0,
+    "candidates_tested": 0
+  },
+  "performance_firewall": {
+    "gmaq_performance_run": false,
+    "gmaq_result_read": false,
+    "upstream_performance_files_read": false,
+    "performance_claims_incidentally_present_in_source_or_search": true,
+    "upstream_performance_used_for_selection": false,
+    "classification": "UNTRUSTED_UPSTREAM_PERFORMANCE_CLAIM_IGNORED"
+  },
+  "repositories": [
+    {
+      "repository": "https://github.com/freqtrade/freqtrade-strategies",
+      "upstream_commit": "eff78d3ce3456b52c68a4e9a33cc055a56b801ff",
+      "license": "GPL-3.0",
+      "archived": false,
+      "last_repository_push": "2026-08-12T04:41:25Z",
+      "strategy_files_screened": [
+        "user_data/strategies/PatternRecognition.py",
+        "user_data/strategies/GodStra.py",
+        "user_data/strategies/Heracles.py",
+        "user_data/strategies/hlhb.py",
+        "user_data/strategies/MultiMa.py",
+        "user_data/strategies/berlinguyinca/AverageStrategy.py"
+      ],
+      "repository_disposition": "NO_ADMISSIBLE_FILE"
+    },
+    {
+      "repository": "https://github.com/iterativv/NostalgiaForInfinity",
+      "upstream_commit": "071ad315f8fcc9b78c4b45e5a6ffea33b5c5e7c5",
+      "license": "GPL-3.0",
+      "archived": false,
+      "last_repository_push": "2026-08-25T15:10:10Z",
+      "strategy_files_screened": [
+        "NostalgiaForInfinityX3.py",
+        "NostalgiaForInfinityX4.py",
+        "NostalgiaForInfinityX5.py",
+        "NostalgiaForInfinityX6.py",
+        "NostalgiaForInfinityX7.py"
+      ],
+      "repository_disposition": "REJECT_TIMEFRAME_AND_COMPLEX_CALLBACK_STATE"
+    },
+    {
+      "repository": "https://github.com/scrtlabs/catalyst",
+      "upstream_commit": "2e8029780f2381da7a0729f7b52505e5db5f535b",
+      "license": "Apache-2.0",
+      "archived": true,
+      "last_repository_push": "2022-11-26T14:07:55Z",
+      "strategy_files_screened": [
+        "catalyst/examples/buy_btc_simple.py",
+        "catalyst/examples/buy_and_hodl.py",
+        "catalyst/examples/talib_simple.py",
+        "catalyst/examples/buy_low_sell_high.py",
+        "catalyst/examples/portfolio_optimization.py",
+        "catalyst/examples/mean_reversion_simple.py"
+      ],
+      "repository_disposition": "NO_ADMISSIBLE_FILE"
+    },
+    {
+      "repository": "https://github.com/tradingstrategy-ai/getting-started",
+      "upstream_commit": "86de9d09b6b5f4554b418ea4409ac0f6a6864bae",
+      "license": "UNKNOWN_LICENSE",
+      "archived": false,
+      "last_repository_push": "2026-08-21T10:17:57Z",
+      "strategy_files_screened": [
+        "notebooks/single-backtest/bitcoin-ma.ipynb",
+        "notebooks/single-backtest/eth-10-days-high.ipynb",
+        "notebooks/single-backtest/momentum-basket.ipynb",
+        "notebooks/single-backtest/multipair-breakout-atr.ipynb"
+      ],
+      "repository_disposition": "REJECT_UNKNOWN_LICENSE"
+    },
+    {
+      "repository": "https://github.com/whittlem/pycryptobot",
+      "upstream_commit": "1fa9aaef141725623899230daa585e17fa7ba007",
+      "license": "Apache-2.0",
+      "archived": false,
+      "last_repository_push": "2026-03-26T03:53:20Z",
+      "strategy_files_screened": [
+        "models/Strategy.py",
+        "models/Strategy_CS.py",
+        "examples/chatgpt/bbands_fib_strategy.py"
+      ],
+      "repository_disposition": "REJECT_COMPLEX_CONFIG_STATE_OR_HINDSIGHT_RANGE"
+    },
+    {
+      "repository": "https://github.com/EstebanSP23/crypto_systematic_research",
+      "upstream_commit": "d722857a70331f9605481ef8f32df85b990d351d",
+      "license": "MIT",
+      "archived": false,
+      "last_repository_push": "2026-05-20T04:10:07Z",
+      "strategy_files_screened": [
+        "2_strategies/01_quattro_donchian/backtest.py",
+        "2_strategies/02_apex_no_pyramid/walkforward.py",
+        "2_strategies/03_five_ema_filter/backtest.py"
+      ],
+      "repository_disposition": "REJECT_PYRAMIDING_TIMEFRAME_OR_OLD_TREND_FAMILY"
+    },
+    {
+      "repository": "https://github.com/zevrichards/freqtrade-strategies",
+      "upstream_commit": "9dc9ef238325c4d29fa0b8e64346db96fe96343c",
+      "license": "UNKNOWN_LICENSE",
+      "archived": false,
+      "last_repository_push": "2026-08-20T23:40:01Z",
+      "strategy_files_screened": [
+        "DCAStrategy.py",
+        "DCAStrategy_4h.py"
+      ],
+      "repository_disposition": "REJECT_UNKNOWN_LICENSE_DCA_AND_TIMEFRAME"
+    },
+    {
+      "repository": "https://github.com/jesse-ai/example-strategies",
+      "upstream_commit": "7c91e0a37bf62165790120d730442e4f6eb00364",
+      "license": "MIT",
+      "archived": false,
+      "last_repository_push": "2024-03-21T10:22:48Z",
+      "strategy_files_screened": [
+        "KDJstrategy/__init__.py"
+      ],
+      "repository_disposition": "NO_ADMISSIBLE_FILE"
+    }
+  ],
+  "shortlist": [
+    {
+      "screening_id": "OSS-SCREEN-FREQTRADE-PATTERN-RECOGNITION-001",
+      "repository": "https://github.com/freqtrade/freqtrade-strategies",
+      "upstream_commit": "eff78d3ce3456b52c68a4e9a33cc055a56b801ff",
+      "source_path": "user_data/strategies/PatternRecognition.py",
+      "source_sha256": "cce61e4af8ed3cb8e78a5d9713aba7891ec08d1bdb1da9911c3f550424db795d",
+      "license": "GPL-3.0",
+      "last_meaningful_source_update": "2022-07-10T13:14:30Z",
+      "maintainer_activity": "Repository active; selected source file unchanged since 2022.",
+      "strategy_timeframe": "1d",
+      "required_inputs": ["OHLCV", "TA-Lib candlestick pattern functions"],
+      "number_of_tunable_parameters": "More than one categorical pattern choice plus ROI, stoploss, and trailing state.",
+      "mechanism_family": "CANDLESTICK_PATTERN_RECOGNITION",
+      "original_portfolio_construction": "Per-pair long-only Freqtrade position with timed ROI, stoploss, and trailing exit state.",
+      "original_execution_assumption": "Freqtrade daily signal processing plus framework-managed order and trade state.",
+      "original_cost_assumption": "Not fixed in the source file.",
+      "known_upstream_caveats": "Hyperopt-oriented source, many pattern functions, and no explicit signal exit; framework ROI/trailing state is essential.",
+      "gmaq_compatibility": "FAIL",
+      "estimated_replication_loc": ">150 plus a new trade-state/ROI/trailing implementation",
+      "disposition": "REJECT_COMPLEX_FREQTRADE_STATE_AND_HYPEROPT"
+    },
+    {
+      "screening_id": "OSS-SCREEN-CATALYST-MAX-SHARPE-001",
+      "repository": "https://github.com/scrtlabs/catalyst",
+      "upstream_commit": "2e8029780f2381da7a0729f7b52505e5db5f535b",
+      "source_path": "catalyst/examples/portfolio_optimization.py",
+      "source_sha256": "fa859dff93a1798fc7b6ad5b23d83c7473a1d9b0c83b12a1e5875a56134d7cc7",
+      "license": "Apache-2.0",
+      "last_meaningful_source_update": "2018-05-29T12:20:50Z",
+      "maintainer_activity": "Repository archived.",
+      "strategy_timeframe": "1d history; 30-day rebalance",
+      "required_inputs": ["daily close", "five fixed crypto assets"],
+      "number_of_tunable_parameters": "180-day window, 30-day rebalance, and 50,000 random portfolios",
+      "mechanism_family": "STOCHASTIC_MAX_SHARPE_ALLOCATION",
+      "original_portfolio_construction": "Long-only weights selected from random portfolios over five hard-coded assets.",
+      "original_execution_assumption": "Framework target-percent orders at each rebalance.",
+      "original_cost_assumption": "No explicit cost contract in the source file.",
+      "known_upstream_caveats": "No random seed, hard-coded universe, and non-deterministic selected weights.",
+      "gmaq_compatibility": "FAIL",
+      "estimated_replication_loc": "<100 signal/allocation LOC but exact deterministic parity is impossible without changing the source semantics",
+      "disposition": "REJECT_NONDETERMINISTIC_HARDCODED_UNIVERSE"
+    },
+    {
+      "screening_id": "OSS-SCREEN-CATALYST-BUY-LOW-SELL-HIGH-001",
+      "repository": "https://github.com/scrtlabs/catalyst",
+      "upstream_commit": "2e8029780f2381da7a0729f7b52505e5db5f535b",
+      "source_path": "catalyst/examples/buy_low_sell_high.py",
+      "source_sha256": "a7c63dbe1b024016bbf1acb04e38c832446d4bc39fb5049be4d457b58ff19580",
+      "license": "Apache-2.0",
+      "last_meaningful_source_update": "2018-07-04T13:09:20Z",
+      "maintainer_activity": "Repository archived.",
+      "strategy_timeframe": "1d",
+      "required_inputs": ["daily close", "RSI", "open orders", "position cost basis", "cash"],
+      "number_of_tunable_parameters": "RSI bands, incremental order sizes, target position, profit target, and limit-price offsets",
+      "mechanism_family": "STATEFUL_BUY_THE_DIP_DCA",
+      "original_portfolio_construction": "Repeated incremental buys below cost basis in one hard-coded asset, followed by profit-target liquidation.",
+      "original_execution_assumption": "Stateful limit orders with unresolved-order blocking.",
+      "original_cost_assumption": "Two-percent limit-price allowance; no unified fee contract.",
+      "known_upstream_caveats": "DCA, hard-coded BTC pair, and framework order/cost-basis state.",
+      "gmaq_compatibility": "FAIL",
+      "estimated_replication_loc": ">200 plus a new order/position state engine",
+      "disposition": "REJECT_DCA_STATE_LIMIT_ORDERS_AND_HARDCODED_PAIR"
+    },
+    {
+      "screening_id": "OSS-SCREEN-QUATTRO-DONCHIAN-PYRAMID-001",
+      "repository": "https://github.com/EstebanSP23/crypto_systematic_research",
+      "upstream_commit": "d722857a70331f9605481ef8f32df85b990d351d",
+      "source_path": "2_strategies/01_quattro_donchian/backtest.py",
+      "source_sha256": "fb1e14dcba5330d1ddd35e6f3fe5fd8ecd757fcb3bee6007a0b467de962a208f",
+      "license": "MIT",
+      "last_meaningful_source_update": "2026-05-19T22:28:01Z",
+      "maintainer_activity": "Repository active at the pinned commit.",
+      "strategy_timeframe": "4h entries with 1d context",
+      "required_inputs": ["4h OHLCV", "daily OHLCV", "ATR", "Donchian ranges", "position units"],
+      "number_of_tunable_parameters": "Breakout, ATR, risk, pyramid step, trailing stop, and hard-stop parameters",
+      "mechanism_family": "DONCHIAN_TREND_WITH_PYRAMIDING",
+      "original_portfolio_construction": "Single hard-coded BTC pair with Turtle-style position additions and shared trailing stops.",
+      "original_execution_assumption": "Next 4h open entries with intrabar wick-based stop evaluation.",
+      "original_cost_assumption": "Per-leg fee in source; no GMAQ stress contract.",
+      "known_upstream_caveats": "Pyramiding, unavailable 4h history, intrabar stop ordering, hard-coded pair, and an old trend family.",
+      "gmaq_compatibility": "FAIL",
+      "estimated_replication_loc": ">250 plus a new intrabar stop and multi-unit state engine",
+      "disposition": "REJECT_PYRAMIDING_4H_AND_OLD_TREND_FAMILY"
+    },
+    {
+      "screening_id": "OSS-SCREEN-JESSE-KDJ-001",
+      "repository": "https://github.com/jesse-ai/example-strategies",
+      "upstream_commit": "7c91e0a37bf62165790120d730442e4f6eb00364",
+      "source_path": "KDJstrategy/__init__.py",
+      "source_sha256": "ba655717de751c9aab82bc2042f128b4c3a99203ec096f50d51f93f985fc8c8c",
+      "license": "MIT",
+      "last_meaningful_source_update": "2021-06-20T00:07:57Z",
+      "maintainer_activity": "Repository not archived but last pushed in 2024.",
+      "strategy_timeframe": "1d",
+      "required_inputs": ["daily OHLCV", "Jesse KDJ defaults", "ATR(14)", "position PnL state"],
+      "number_of_tunable_parameters": "Implicit Jesse KDJ defaults, ATR(14), 5% risk, and 2x ATR stop",
+      "mechanism_family": "KDJ_OSCILLATOR_WITH_STATEFUL_EXIT",
+      "original_portfolio_construction": "Long-only risk-sized position with ATR stop and PnL-dependent exits.",
+      "original_execution_assumption": "Jesse strategy lifecycle and stop-order semantics.",
+      "original_cost_assumption": "Not specified in the source file.",
+      "known_upstream_caveats": "Indicator defaults are not pinned in this repository, boolean expressions do not match their comments, and exact exits require position-PnL and stop state.",
+      "gmaq_compatibility": "FAIL",
+      "estimated_replication_loc": ">150 plus a new stop/PnL state path and external dependency freeze",
+      "disposition": "REJECT_INCOMPLETE_DEPENDENCY_SEMANTICS_AND_NEW_STATE_ENGINE"
+    }
+  ],
+  "admission_decision": {
+    "result": "NO_ADMISSIBLE_OSS_CANDIDATE",
+    "candidate_ids": [],
+    "preregistration_required": false,
+    "checkpoint_a_required_before_performance": false,
+    "source_semantic_parity_required": false,
+    "performance_authorized": false,
+    "parameter_rescue": false,
+    "third_party_code_committed": false,
+    "new_infrastructure_written": false,
+    "next_action": "STOP_AND_KEEP_FORWARD_CAPTURE_RUNNING_UNTIL_USER_DECIDES_ON_A_PROSPECTIVE_WINDOW"
+  }
+}

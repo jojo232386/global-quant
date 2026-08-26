@@ -1,0 +1,15 @@
+{
+  "artifact_class": "GMAQ_OSS_STRATEGY_REPLICATION_001_CHECKPOINT_A",
+  "artifact_version": "1.0.0",
+  "program_id": "OSS_STRATEGY_REPLICATION_001",
+  "review_mode": "INDEPENDENT_CODEX_CLI_READ_ONLY_PRE_PERFORMANCE",
+  "review_session_id": "01a03b7f-9754-7192-bc5f-cf912541a56f",
+  "screening_commit": "dcdba10c9cede1611634192894b179a3a369be94",
+  "checkpoint_a": "PASS",
+  "admission_decision": "NO_ADMISSIBLE_OSS_CANDIDATE",
+  "performance_authorization": "DENIED",
+  "request_changes": "NONE",
+  "performance_run_before_review": false,
+  "source_semantic_parity_run": false,
+  "reason": "All five shortlisted sources failed at least one frozen admission rule, so preregistration, parity execution, and performance are prohibited."
+}
