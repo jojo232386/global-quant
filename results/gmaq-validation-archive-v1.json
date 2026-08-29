@@ -1,25 +1,16 @@
 {
-  "archive_integrity": "PASS",
-  "bound_evidence": {
-    "configs/LIVE_READINESS.md": "e0262dcd26baa5d9d8c628533fb1f18be00c1c85015db425c4e5d0a13c7d7c66",
-    "research/exploration/expl-017-formal-003-result.json": "c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f",
-    "research/exploration/factor-graveyard.md": "8cc1bb770b79d42d268d957820836a2a628eead9db82b7f050f4170c6ac07bb0",
-    "research/process/oss-strategy-replication-001-program-history.json": "b3d5ffb9b706370bd6175fb65006db21f03d0603657facdf3aec5129a786a731",
-    "research/process/vbt-alpha-program-001-program-history.json": "b3609443852b9694d3dc244b2a648346dcc709db0d1f7d3b4a7289e860325b98"
+  "ci_acceptance": {
+    "external_data_checks_skipped": 5,
+    "portable_tests_passed": 482,
+    "status": "FAIL"
   },
-  "contract": {
-    "freeze_commit": "8e1fc13deda460b90526dd071960a646ec832f56",
-    "path": "docs/ARCHIVE_RELEASE.md",
-    "sha256": "56365ac179de24884882bb03e13701a12ad0930e7c0696943ef06446ad347884"
-  },
-  "critical_controls": {
+  "failure_class": "PROCESS_DEFECT_PORTABILITY",
+  "failure_reason": "The frozen v1 contract required 487 passed tests, but GitHub CI has no local immutable Data Layer warehouse and produced 482 passed plus 5 data-bound skips.",
+  "github_run_id": 33253093383,
+  "local_acceptance": {
+    "result_sha256": "fad57ee210aca8fe8ff11eeb811be43c4e2046784d11e17c2b7cb1c71875d1ba",
     "status": "PASS",
-    "tests": 109
-  },
-  "fail_closed_controls": "PASS",
-  "full_contract_suite": {
-    "status": "PASS",
-    "tests": 487
+    "tests_passed": 487
   },
   "profitability_claim": false,
   "promoted_alpha": 0,
@@ -27,10 +18,5 @@
   "ready_for_tiny_live": false,
   "real_orders": 0,
   "release": "GMAQ_VALIDATION_ARCHIVE_V1",
-  "reproducibility": "PASS",
-  "research_artifacts": "PASS",
-  "research_closeout_ancestor": true,
-  "status": "ARCHIVE_RELEASED",
-  "validation_benchmark": "PASS",
-  "verifier_sha256": "144cd99336308be8836d602ecf65d44ca5bc98d5ea928b7dcb50dc3d522e8e17"
+  "status": "NOT_RELEASED"
 }
