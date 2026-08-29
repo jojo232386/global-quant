@@ -24,7 +24,7 @@ jobs:
       - name: Validate tracked diff
         run: git diff --check
       - name: Verify archive release
-        run: python scripts/gmaq-verify-archive --check results/gmaq-validation-archive-v1.json
+        run: python scripts/gmaq-verify-archive --check results/gmaq-validation-archive-v2.json
       - name: Check executable syntax
         run: |
           bash -n scripts/gmaq scripts/reliability-soak

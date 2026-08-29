@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the frozen GMAQ archive and emit a deterministic release result."""
+"""Verify the portable GMAQ archive and emit a deterministic release result."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RESEARCH_CLOSEOUT = "db45f4e9f434d7a391b33ebdda4cc1e1d6672e30"
-CONTRACT_FREEZE = "8e1fc13deda460b90526dd071960a646ec832f56"
-CONTRACT_PATH = "docs/ARCHIVE_RELEASE.md"
-CONTRACT_SHA256 = "56365ac179de24884882bb03e13701a12ad0930e7c0696943ef06446ad347884"
+CONTRACT_FREEZE = "3424468af6b5396f5954cba1868dc394759df027"
+CONTRACT_PATH = "docs/ARCHIVE_RELEASE_V2.md"
+CONTRACT_SHA256 = "ec284bcd9932dcfc139725d54d2222315d57f4fafbd0d83e379a67b9a0594503"
 BOUND_EVIDENCE = {
     "configs/LIVE_READINESS.md": "e0262dcd26baa5d9d8c628533fb1f18be00c1c85015db425c4e5d0a13c7d7c66",
     "research/exploration/expl-017-formal-003-result.json": "c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f",
@@ -34,6 +34,13 @@ FOCUSED_TESTS = (
     "tests/test_runtime_contract.py",
     "tests/test_entry_gate_behavior.py",
 )
+ALLOWED_EXTERNAL_DATA_SKIPS = {
+    "tests/test_expl_017_formal_consumer.py::test_real_snapshot_can_bind_to_sidecar_without_reading_performance": "local immutable Price V1 snapshot is not installed",
+    "tests/test_expl_017_lifecycle_v1.py::test_real_price_v1_structure_scope_is_read_only_when_local_snapshot_is_available": "local immutable Price V1 snapshot is not installed",
+    "tests/test_ls_tsmom_contract.py::test_verified_curated_snapshot_binding_loads_real_v1_dataset": "local Data Layer V1 warehouse is unavailable",
+    "tests/test_spot_perp_carry_contract.py::test_real_bound_dataset_replays_verified": "local Data Layer V1 warehouse is unavailable",
+    "tests/test_vbt_alpha_program_001.py::test_range_overlay_matches_the_unchanged_frozen_price_loader": "local immutable Price V1 snapshot is not installed",
+}
 
 
 class ArchiveVerificationError(RuntimeError):
@@ -76,9 +83,9 @@ def no_proxy_environment() -> dict[str, str]:
     return env
 
 
-def run_pytest(paths: tuple[str, ...], expected: int, label: str, timeout: int) -> None:
+def pytest_output(arguments: tuple[str, ...], timeout: int) -> str:
     process = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", *paths],
+        [sys.executable, "-m", "pytest", *arguments],
         cwd=ROOT,
         env=no_proxy_environment(),
         capture_output=True,
@@ -87,19 +94,50 @@ def run_pytest(paths: tuple[str, ...], expected: int, label: str, timeout: int) 
     )
     output = process.stdout + process.stderr
     if process.returncode != 0:
-        raise ArchiveVerificationError(f"{label} failed\n{output}")
-    match = re.search(r"\b(\d+) passed\b", output)
-    require(match is not None, f"{label}: pytest pass count missing")
-    require(int(match.group(1)) == expected, f"{label}: expected {expected} passed, got {match.group(1)}")
+        raise ArchiveVerificationError(f"pytest failed\n{output}")
+    require(not re.search(r"\b\d+ (?:xfailed|xpassed|failed|error)s?\b", output), "pytest reported a non-pass outcome")
+    return output
+
+
+def count_outcome(output: str, outcome: str) -> int:
+    match = re.search(rf"\b(\d+) {outcome}\b", output)
+    return int(match.group(1)) if match else 0
+
+
+def verify_critical_controls() -> None:
+    output = pytest_output(("-q", *FOCUSED_TESTS), timeout=180)
+    require(count_outcome(output, "passed") == 109, "critical controls must report 109 passed")
+    require(count_outcome(output, "skipped") == 0, "critical controls must not skip")
+
+
+def verify_full_suite() -> None:
+    output = pytest_output(("-vv", "-r", "s"), timeout=600)
+    passed = count_outcome(output, "passed")
+    skipped = count_outcome(output, "skipped")
+    require(passed + skipped == 487, f"full suite must collect 487 tests, got {passed + skipped}")
+    if passed == 487 and skipped == 0:
+        return
+    require(passed == 482 and skipped == 5, f"portable suite expected 482 passed and 5 skipped, got {passed} and {skipped}")
+    observed = {
+        match.group(1): match.group(2)
+        for match in re.finditer(r"^(tests/\S+::\S+)\s+SKIPPED\b(.*)$", output, re.MULTILINE)
+    }
+    require(set(observed) == set(ALLOWED_EXTERNAL_DATA_SKIPS), f"unexpected skipped tests: {tuple(sorted(observed))}")
+    for node, reason in ALLOWED_EXTERNAL_DATA_SKIPS.items():
+        require(reason in observed[node], f"{node}: skip reason changed")
 
 
 def verify_artifacts() -> None:
-    require(digest(ROOT / CONTRACT_PATH) == CONTRACT_SHA256, "acceptance contract SHA mismatch")
-    require(git_ancestor(CONTRACT_FREEZE), "acceptance freeze commit is not an ancestor")
+    require(digest(ROOT / CONTRACT_PATH) == CONTRACT_SHA256, "v2 acceptance contract SHA mismatch")
+    require(git_ancestor(CONTRACT_FREEZE), "v2 acceptance freeze is not an ancestor")
     require(git_ancestor(RESEARCH_CLOSEOUT), "research closeout is not an ancestor")
 
     for relative_path, expected_sha in BOUND_EVIDENCE.items():
         require(digest(ROOT / relative_path) == expected_sha, f"{relative_path}: SHA mismatch")
+
+    v1 = read_object("results/gmaq-validation-archive-v1.json")
+    require(v1.get("status") == "NOT_RELEASED", "v1 failure status changed")
+    require(v1.get("failure_class") == "PROCESS_DEFECT_PORTABILITY", "v1 failure class changed")
 
     oss = read_object("research/process/oss-strategy-replication-001-program-history.json")
     require(oss.get("PROGRAM_RESULT") == "NO_ADMISSIBLE_OSS_CANDIDATE", "OSS result changed")
@@ -134,29 +172,39 @@ def verify_artifacts() -> None:
 
 def build_result() -> dict:
     verify_artifacts()
-    run_pytest(FOCUSED_TESTS, 109, "critical controls", timeout=180)
-    run_pytest((), 487, "full contract suite", timeout=600)
+    verify_critical_controls()
+    verify_full_suite()
     return {
         "archive_integrity": "PASS",
         "bound_evidence": BOUND_EVIDENCE,
+        "collected_tests": 487,
         "contract": {
             "freeze_commit": CONTRACT_FREEZE,
             "path": CONTRACT_PATH,
             "sha256": CONTRACT_SHA256,
         },
         "critical_controls": {"status": "PASS", "tests": 109},
+        "external_data_check_nodes": sorted(ALLOWED_EXTERNAL_DATA_SKIPS),
+        "external_data_checks": 5,
         "fail_closed_controls": "PASS",
-        "full_contract_suite": {"status": "PASS", "tests": 487},
+        "full_contract_suite": {
+            "collected": 487,
+            "external_data_checks": 5,
+            "portable_tests": 482,
+            "status": "PASS_PORTABLE",
+        },
+        "portable_tests": 482,
         "profitability_claim": False,
         "promoted_alpha": 0,
         "ready_for_strategy": False,
         "ready_for_tiny_live": False,
         "real_orders": 0,
-        "release": "GMAQ_VALIDATION_ARCHIVE_V1",
+        "release": "GMAQ_VALIDATION_ARCHIVE_V2",
         "reproducibility": "PASS",
         "research_artifacts": "PASS",
         "research_closeout_ancestor": True,
         "status": "ARCHIVE_RELEASED",
+        "v1_status": "NOT_RELEASED_PROCESS_DEFECT_PORTABILITY",
         "validation_benchmark": "PASS",
         "verifier_sha256": digest(pathlib.Path(__file__)),
     }
