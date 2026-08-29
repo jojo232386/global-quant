@@ -38,7 +38,7 @@
       <g>
         <rect width="250" height="54" rx="12" fill="#0f172a" stroke="#38bdf8" stroke-opacity="0.55"/>
         <circle cx="28" cy="27" r="7" fill="#38bdf8"/>
-        <text x="48" y="33" fill="#e0f2fe" font-size="15" font-weight="700">FROZEN ARCHIVE</text>
+        <text x="48" y="33" fill="#e0f2fe" font-size="15" font-weight="700">ARCHIVE RELEASED</text>
       </g>
       <g transform="translate(268 0)">
         <rect width="180" height="54" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-opacity="0.55"/>

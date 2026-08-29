@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml"><img src="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12 or newer">
+  <img src="https://img.shields.io/badge/Validation%20Archive%20v1-PASS-16A34A" alt="Validation Archive v1 passed">
   <img src="https://img.shields.io/badge/status-frozen%20validation%20archive-7C3AED" alt="Frozen validation archive">
   <img src="https://img.shields.io/badge/real%20orders-0-0EA5E9" alt="Zero real orders">
 </p>
@@ -14,13 +15,15 @@
 GMAQ combines point-in-time data controls, preregistered research, adversarial review, and a fail-closed Freqtrade runtime. It verifies whether each result survives data lineage checks, realistic costs, holdout evidence, and operational identity binding.
 
 > [!IMPORTANT]
-> GMAQ is a `FROZEN_VALIDATION_ARCHIVE`. The team closed active strategy development after no candidate met the promotion standard. This repository documents the validator, the rejected hypotheses, and the runtime safeguards. It makes no profitability or live-readiness claim.
+> GMAQ Validation Archive v1 passed its frozen release contract. The team closed active strategy development after no candidate met the promotion standard. This repository documents the released validator, the rejected hypotheses, and the runtime safeguards. It makes no profitability or live-readiness claim.
 
 ## Closeout in one screen
 
 | Measure | Verified closeout |
 | --- | --- |
 | Project role | Alpha validation and quant risk governance |
+| Validation Archive v1 | `ARCHIVE_RELEASED` |
+| Critical fail-closed controls | `109 passed` |
 | Promoted Alpha | `0` |
 | Ready for strategy deployment | `NO` |
 | Ready for tiny live | `NO` |
@@ -67,7 +70,7 @@ flowchart LR
 - **Holdout gates closed EXPL-017.** The frozen formal run retained attractive intermediate behavior, then failed final holdout, stress, regime, and concentration requirements. The team recorded `HYPOTHESIS_FAIL` and prohibited a rerun.
 - **Native strategy semantics exposed a screening flaw.** The OSS review examined 8 repositories, 30 strategy files, and 5 shortlisted candidates. GMAQ admitted none because its daily/PIT/vectorbt contract changed or excluded the original Freqtrade semantics. That result drove the successor design toward native-framework screening.
 
-Read the full [engineering case study](docs/CASE_STUDY.md) or inspect the [Factor Graveyard](research/exploration/factor-graveyard.md).
+Read the [release contract](docs/ARCHIVE_RELEASE.md), inspect its [machine-readable PASS result](results/gmaq-validation-archive-v1.json), or open the full [engineering case study](docs/CASE_STUDY.md).
 
 ## Repository guide
 
@@ -84,17 +87,17 @@ Read the full [engineering case study](docs/CASE_STUDY.md) or inspect the [Facto
 
 ## Reproduce the archive
 
-The CI workflow pins the dependency set by hash and runs the full contract suite on Python 3.12.
+The CI workflow pins the dependency set by hash and reproduces the released result on Python 3.12.
 
 ```sh
 uv venv --python 3.12 /tmp/gmaq-venv
 uv pip sync --python /tmp/gmaq-venv/bin/python \
   research/oss/requirements-vectorbt-poc.txt
-NO_PROXY=127.0.0.1,localhost \
-  /tmp/gmaq-venv/bin/python -m pytest -q
+/tmp/gmaq-venv/bin/python scripts/gmaq-verify-archive \
+  --check results/gmaq-validation-archive-v1.json
 ```
 
-The `NO_PROXY` setting keeps localhost Control Room tests away from desktop HTTP proxies. The repository needs no exchange credentials for tests.
+The verifier checks immutable evidence, forces localhost tests away from desktop HTTP proxies, runs 109 critical controls, and then runs the full 487-test suite. The repository needs no exchange credentials for verification.
 
 ## Design decisions
 
