@@ -39,11 +39,16 @@
   "ready_for_tiny_live": false,
   "real_orders": 0,
   "release": "GMAQ_VALIDATION_ARCHIVE_V2",
+  "release_attempts": {
+    "failed_ci_runs": [
+      33253546757
+    ]
+  },
   "reproducibility": "PASS",
   "research_artifacts": "PASS",
   "research_closeout_ancestor": true,
   "status": "ARCHIVE_RELEASED",
   "v1_status": "NOT_RELEASED_PROCESS_DEFECT_PORTABILITY",
   "validation_benchmark": "PASS",
-  "verifier_sha256": "8191c509f00d0e404aac95f41ef322f0ea6d74317f71ade018262b191b8dc060"
+  "verifier_sha256": "cce71a523b754f28b323bcfa2d40a9020feb2f7aa79dad4f6aa0d386903ca153"
 }
