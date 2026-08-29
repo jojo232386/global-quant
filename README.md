@@ -1,200 +1,113 @@
-# GMAQ
+<p align="center">
+  <img src="docs/assets/gmaq-hero.svg" alt="GMAQ, evidence-gated alpha validation" width="100%">
+</p>
 
-GMAQ is a Freqtrade-based quantitative trading project focused on automated
-cryptocurrency futures research, dry-run validation, and controlled live
-deployment.
+<p align="center">
+  <a href="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml"><img src="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12 or newer">
+  <img src="https://img.shields.io/badge/Validation%20Archive%20v2-PASS-16A34A" alt="Validation Archive v2 passed">
+  <img src="https://img.shields.io/badge/status-frozen%20validation%20archive-7C3AED" alt="Frozen validation archive">
+  <img src="https://img.shields.io/badge/real%20orders-0-0EA5E9" alt="Zero real orders">
+</p>
 
-## Current stack
+<p align="center"><strong>An evidence-gated research and risk system for deciding which strategies deserve capital.</strong></p>
 
-- Freqtrade 2026.7 as the single active trading runtime
-- GMAQ Control Room as the default read-only operator interface
-- FreqUI as the lower-level runtime interface
-- Binance USD-M Futures
-- Docker and Compose, with Colima supported on macOS
+GMAQ combines point-in-time data controls, preregistered research, adversarial review, and a fail-closed Freqtrade runtime. It verifies whether each result survives data lineage checks, realistic costs, holdout evidence, and operational identity binding.
 
-## Current status
+> [!IMPORTANT]
+> GMAQ Validation Archive v2 passed its frozen portable release contract. V1 passed locally and failed GitHub CI portability because five checks require an external immutable data warehouse; the project preserved that failure and created v2 under a new contract. This repository makes no profitability or live-readiness claim.
 
-- Binance public market data and dry-run trading verified
-- `ETH/USDT:USDT`, isolated margin, 1x leverage
-- GMAQ Control Room uses `http://127.0.0.1:8090`; the isolated FreqUI uses
-  `http://127.0.0.1:8082`
-- persistence, restart recovery, and stopped-database backup/restore verified
-- live credentials are not configured or stored in this repository
-- live trading is not enabled
+## Closeout in one screen
 
-`LiveExecutionCanaryStrategy` is a runtime canary, not proven alpha.
+| Measure | Verified closeout |
+| --- | --- |
+| Project role | Alpha validation and quant risk governance |
+| Validation Archive v2 | `ARCHIVE_RELEASED` |
+| Critical fail-closed controls | `109 passed` |
+| Promoted Alpha | `0` |
+| Ready for strategy deployment | `NO` |
+| Ready for tiny live | `NO` |
+| Real orders | `0` |
+| Portable contract suite | `482 passed`; 5 named external-data checks |
+| Full local collection | `487 passed` with immutable warehouse present |
+| Canonical closeout | `main@db45f4e9` |
 
-## Quick start
+GMAQ revoked weak historical passes, stopped process-defective runs before performance, and rejected candidates whose edge disappeared under point-in-time or cost controls. No unsupported result reached a capital path.
 
-Requirements: Docker with Compose, plus Python 3.12 or newer for local tests.
+## System map
 
-```sh
-./scripts/gmaq up
+```mermaid
+flowchart LR
+    A[Raw evidence] --> B[Data Layer V1]
+    B --> C[Preregistered research]
+    C --> D{Frozen gates}
+    D -->|Fail| E[Factor Graveyard]
+    D -->|Survive| F[Confirmation]
+    F --> G{Live admission}
+    G -->|Missing proof| H[BLOCKED]
+    G -->|Complete proof| I[Tiny-live review]
+
+    classDef evidence fill:#111827,stroke:#38bdf8,color:#e5e7eb;
+    classDef gate fill:#312e81,stroke:#a78bfa,color:#f5f3ff;
+    classDef stop fill:#3f1d2e,stroke:#fb7185,color:#fff1f2;
+    class A,B,C,F evidence;
+    class D,G gate;
+    class E,H stop;
 ```
 
-The first start creates random local FreqUI/API credentials in the ignored
-`.env` file. The values stay on the local machine. Start the read-only Control
-Room and open <http://127.0.0.1:8090>:
+## What the system enforces
+
+| Layer | Evidence contract |
+| --- | --- |
+| Data | Immutable snapshots, file hashes, schemas, PIT instrument identity, lifecycle checks |
+| Research | Preregistration, cost stress, train/OOS/holdout separation, no parameter rescue |
+| Program governance | Multiple-testing history, independent review, Factor Graveyard |
+| Runtime | Dry-run default, credential rejection, reconciliation, audit continuity, kill controls |
+| Admission | Exact Git/config/data/soak identity; synthetic or caller-authored PASS claims stay blocked |
+
+## Evidence that changed the decision
+
+- **Point-in-time reconstruction overturned attractive results.** Two cross-sectional passes depended on a present-day universe and concentrated outliers. PIT replay removed the promotion case.
+- **Holdout gates closed EXPL-017.** The frozen formal run retained attractive intermediate behavior, then failed final holdout, stress, regime, and concentration requirements. The team recorded `HYPOTHESIS_FAIL` and prohibited a rerun.
+- **Native strategy semantics exposed a screening flaw.** The OSS review examined 8 repositories, 30 strategy files, and 5 shortlisted candidates. GMAQ admitted none because its daily/PIT/vectorbt contract changed or excluded the original Freqtrade semantics. That result drove the successor design toward native-framework screening.
+
+Read the [v2 release contract](docs/ARCHIVE_RELEASE_V2.md), inspect its [machine-readable PASS result](results/gmaq-validation-archive-v2.json), or open the full [engineering case study](docs/CASE_STUDY.md). The [v1 result](results/gmaq-validation-archive-v1.json) preserves the portability failure.
+
+## Repository guide
+
+| Path | Purpose |
+| --- | --- |
+| [`research/backtests/`](research/backtests/) | Preregistrations, manifests, immutable results, verdicts |
+| [`research/exploration/`](research/exploration/) | Cheap screens, formal freezes, Factor Graveyard |
+| [`research/process/`](research/process/) | Research tiers, program history, data capability reviews |
+| [`gmaq_data/`](gmaq_data/) | Snapshot creation and deterministic verification |
+| [`gmaq_live/`](gmaq_live/) | Non-ordering, fail-closed admission contracts |
+| [`control_room/`](control_room/) | Local read-only evidence dashboard |
+| [`configs/`](configs/) | Cost, control-plane, soak, and live-readiness contracts |
+| [`tests/`](tests/) | Data, research, runtime, security, and admission contracts |
+
+## Reproduce the archive
+
+The CI workflow pins the dependency set by hash and reproduces the released result on Python 3.12.
 
 ```sh
-./scripts/gmaq-ui start
+uv venv --python 3.12 /tmp/gmaq-venv
+uv pip sync --python /tmp/gmaq-venv/bin/python \
+  research/oss/requirements-vectorbt-poc.txt
+/tmp/gmaq-venv/bin/python scripts/gmaq-verify-archive \
+  --check results/gmaq-validation-archive-v2.json
 ```
 
-Useful commands:
+The verifier checks immutable evidence, forces localhost tests away from desktop HTTP proxies, runs 109 critical controls, and validates the 487-test collection in either warehouse-present or repository-portable mode. Portable mode accepts only five named external-data skips and rejects every other skip. The repository needs no exchange credentials for verification.
 
-```sh
-./scripts/gmaq status
-./scripts/gmaq logs
-./scripts/gmaq restart
-./scripts/gmaq down
-./scripts/gmaq-ui status
-./scripts/gmaq-ui stop
-```
+## Design decisions
 
-The Control Room is localhost-only and exposes observation pages for runtime,
-risk reconciliation, research evidence, and readiness blockers. Every mutating
-HTTP method is rejected. It has no arm, order, exit, pause, or kill action and
-does not replace explicit authorization or the control-plane commands.
+- GMAQ preserves failed experiments and frozen contracts instead of rewriting history after results arrive.
+- The runtime starts in credential-free dry-run mode and keeps live admission structurally blocked until independent exchange evidence exists.
+- Legacy research engines remain available for historical replay. They cannot create new formal evidence.
 
-## Safety
+The project’s closeout informed a separate Freqtrade-native successor: screen public strategies in their original framework, then send the small survivor set into strict confirmation.
 
-- the committed configuration is dry-run by default;
-- Binance key and secret fields are empty;
-- the startup wrapper refuses non-dry-run or credential-bearing exchange config;
-- the initial scope is one pair, isolated margin, 1x, one open trade maximum;
-- the strategy carries inner protections (StoplossGuard, MaxDrawdown,
-  CooldownPeriod);
-- the control plane (`configs/CONTROL_PLANE.md`, `scripts/gmaq-control`)
-  provides armed states, an order state machine, dry-run reconciliation, an
-  append-only audit manifest, health metrics, alerts, and an independent kill
-  switch — all dry-run scope;
-- `scripts/gmaq-live-admission` provides a non-ordering candidate gate and a
-  keyless Binance REST/user-stream truth contract. It cannot arm or submit;
-  exchange-bound client identity remains blocked on a reviewed adapter;
-- live deployment requires a separate configuration and explicit review;
-- no active SQLite database should be copied or queried directly.
+## Safety and scope
 
-## Control plane
-
-```sh
-./scripts/gmaq-control preflight   # fail-closed readiness check
-./scripts/gmaq-control health      # heartbeat, clock offset, counts
-./scripts/gmaq-control reconcile   # bot view vs. audit journal
-./scripts/gmaq-control audit verify
-./scripts/gmaq-control alert-test  # verify operator alert channels
-./scripts/gmaq-control kill        # independent kill switch
-```
-
-Operator alerts (webhook / Telegram) are configured with `GMAQ_ALERT_WEBHOOK_URL`,
-`GMAQ_TELEGRAM_BOT_TOKEN`, and `GMAQ_TELEGRAM_CHAT_ID` in the local `.env`;
-fail verdicts dispatch automatically and every delivery is audit-logged.
-
-## Exchange preflight (read-only, credential-free)
-
-```sh
-./scripts/gmaq-exchange-preflight
-```
-
-Queries Binance USD-M public market data only and writes a same-day manifest
-to `user_data/audit/exchange-preflight.json`: contract status, precision and
-filters, minimum notional, implied leverage headroom, funding, spread, and
-depth. Account-mode, permission, and fee items are reported as
-`UNVERIFIED_REQUIRES_AUTH` and keep live readiness BLOCKED until a separately
-authorized read-only session verifies them.
-
-## Live-candidate admission (no order capability)
-
-`scripts/gmaq-auth-preflight` can bind a separately authorized GET-only account
-snapshot to an exact candidate and proposed configuration digest. The snapshot,
-captured broker truth, and operational evidence can then be evaluated with:
-
-```sh
-./scripts/gmaq-live-admission evaluate \
-  --account-evidence /path/to/account-evidence.json \
-  --broker-evidence /path/to/broker-evidence.json \
-  --readiness /path/to/readiness.json \
-  --soak-evidence /path/to/completed-soak-evidence-dir \
-  --strategy-result research/backtests/<study>/results.json \
-  --data-root /path/to/existing/gmaq-data \
-  --config /path/to/non-secret-live-config.json
-```
-
-Missing or stale evidence returns `BLOCKED`. Complete synthetic fixtures also
-remain `BLOCKED`: they cannot prove authenticated capture, an exchange-bound
-submission adapter, or that live credentials belong to the verified account.
-The strategy result must be committed under `research/backtests/`; its dataset
-binding is replayed against the existing Data Layer V1 registry as
-`VERIFIED / curated / PASS`. A caller-authored PASS string is never accepted.
-The result's recorded implementation commit must also be an ancestor of the
-candidate commit; unrelated or missing research-engine provenance is blocked.
-The declared soak digest is replayed from the complete 48–72h evidence package;
-missing files, symlinks, wrong candidate identity, incomplete exercise coverage,
-non-zero final state, broken audit continuity, or modified package bytes block.
-Entry authorization and order submission are always false. The repository
-still has no live configuration, live arm, or order command.
-Both candidate commands also require a clean, committed worktree; uncommitted
-code cannot reuse the same Git SHA evidence. Proposed configs are hashed from
-local bytes and recursively reject embedded keys, secrets, passwords, tokens,
-private material, and passphrases.
-
-## Execution cost and liquidity
-
-```sh
-./scripts/gmaq-liquidity
-```
-
-Walks the public order book to model market-order fills (VWAP, slippage,
-partial fills), spread, funding carry, and liquidation distance under depth,
-spread, latency, and funding stress. See `configs/EXECUTION_COST_MODEL.md`.
-A 2026-08-16 authorized read-only snapshot reported taker fee 5 bps and
-tier-1 MMR 0.4%. Those values are not same-day evidence for a future
-candidate, so committed cost inputs remain marked as placeholders; the
-snapshot itself does not authorize live trading.
-
-## Research boundary
-
-Formal research must consume a Data Layer V1 snapshot verified as curated and
-PASS, and bind the dataset ID, snapshot-manifest SHA, and input-file SHAs. The
-old direct-file engines are preserved byte-for-byte under
-`legacy_research_engines/` for historical result replay only. Their former
-`scripts/gmaq-research-*` entrypoints now stop before reading data or writing
-results; they must not be used to create new evidence.
-
-Every study lives under `research/backtests/` with a locked
-preregistration, data checklist, run manifest, results, and an honest
-PASS/REJECT verdict. Research results do not authorize live trading.
-Post-result engine corrections and remaining promotion blockers are recorded
-in `configs/RESEARCH_REMEDIATION.md`; old studies are never silently rewritten.
-
-## Validate
-
-```sh
-python3 -m pytest -q
-docker-compose run --rm freqtrade list-strategies \
-  --config /freqtrade/user_data/config.json
-```
-
-The next bounded reliability run is:
-
-```sh
-./scripts/reliability-soak 72 --authorization-id <dry-run-authorization-id>
-```
-
-It accepts 48–72 hours and exercises runtime controls, restart, a short network
-interruption, stopped-database backup/restore, FreqUI reconnection, duplicate
-identity checks, and a final dry-run `forceexit all`.
-
-## Project structure
-
-- `user_data/strategies/`: GMAQ strategy logic
-- `user_data/config.json`: credential-free dry-run configuration
-- `research/`: preregistration, data availability, run manifests, cost model
-  baseline, and PASS/REJECT evaluation gate for future strategy research
-- `configs/`: live-readiness policy, control-plane spec, and planning
-- `tests/`: focused configuration and custom-behavior contracts
-- `scripts/`: safe product, reliability, and control-plane commands
-- `control_room/`: localhost-only read-only operator UI and status API
-- `gmaq_live/`: credential-free candidate-admission and broker-truth contracts
-
-Earlier architecture remains recoverable from Git history and the published
-historical tag; it is not part of the active runtime.
+GMAQ contains no live configuration or enabled order path. Account evidence, credentials, and runtime state stay outside Git. The repository is research software, not financial advice.

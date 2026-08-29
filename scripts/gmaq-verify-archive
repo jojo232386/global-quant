@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Verify the portable GMAQ archive and emit a deterministic release result."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+RESEARCH_CLOSEOUT = "db45f4e9f434d7a391b33ebdda4cc1e1d6672e30"
+CONTRACT_FREEZE = "3424468af6b5396f5954cba1868dc394759df027"
+CONTRACT_PATH = "docs/ARCHIVE_RELEASE_V2.md"
+CONTRACT_SHA256 = "ec284bcd9932dcfc139725d54d2222315d57f4fafbd0d83e379a67b9a0594503"
+BOUND_EVIDENCE = {
+    "configs/LIVE_READINESS.md": "e0262dcd26baa5d9d8c628533fb1f18be00c1c85015db425c4e5d0a13c7d7c66",
+    "research/exploration/expl-017-formal-003-result.json": "c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f",
+    "research/exploration/factor-graveyard.md": "8cc1bb770b79d42d268d957820836a2a628eead9db82b7f050f4170c6ac07bb0",
+    "research/process/oss-strategy-replication-001-program-history.json": "b3d5ffb9b706370bd6175fb65006db21f03d0603657facdf3aec5129a786a731",
+    "research/process/vbt-alpha-program-001-program-history.json": "b3609443852b9694d3dc244b2a648346dcc709db0d1f7d3b4a7289e860325b98",
+}
+FOCUSED_TESTS = (
+    "tests/test_data_layer_contract.py",
+    "tests/test_control_room_contract.py",
+    "tests/test_live_admission.py",
+    "tests/test_expl_017_formal_003_freeze.py",
+    "tests/test_research_tier.py",
+    "tests/test_runtime_contract.py",
+    "tests/test_entry_gate_behavior.py",
+)
+ALLOWED_EXTERNAL_DATA_SKIPS = {
+    "tests/test_expl_017_formal_consumer.py::test_real_snapshot_can_bind_to_sidecar_without_reading_performance": "local immutable Price V1 snapshot is not installed",
+    "tests/test_expl_017_lifecycle_v1.py::test_real_price_v1_structure_scope_is_read_only_when_local_snapshot_is_available": "local immutable Price V1 snapshot is not installed",
+    "tests/test_ls_tsmom_contract.py::test_verified_curated_snapshot_binding_loads_real_v1_dataset": "local Data Layer V1 warehouse is unavailable",
+    "tests/test_spot_perp_carry_contract.py::test_real_bound_dataset_replays_verified": "local Data Layer V1 warehouse is unavailable",
+    "tests/test_vbt_alpha_program_001.py::test_range_overlay_matches_the_unchanged_frozen_price_loader": "local immutable Price V1 snapshot is not installed",
+}
+
+
+class ArchiveVerificationError(RuntimeError):
+    pass
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ArchiveVerificationError(message)
+
+
+def digest(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def read_object(relative_path: str) -> dict:
+    value = json.loads((ROOT / relative_path).read_text())
+    require(isinstance(value, dict), f"{relative_path}: expected JSON object")
+    return value
+
+
+def git_ancestor(ancestor: str) -> bool:
+    process = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        timeout=10,
+    )
+    return process.returncode == 0
+
+
+def no_proxy_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    existing = [item.strip() for item in env.get("NO_PROXY", "").split(",") if item.strip()]
+    for host in ("127.0.0.1", "localhost", "::1"):
+        if host not in existing:
+            existing.append(host)
+    env["NO_PROXY"] = ",".join(existing)
+    env["no_proxy"] = env["NO_PROXY"]
+    return env
+
+
+def pytest_output(arguments: tuple[str, ...], timeout: int) -> str:
+    process = subprocess.run(
+        [sys.executable, "-m", "pytest", *arguments],
+        cwd=ROOT,
+        env=no_proxy_environment(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    output = process.stdout + process.stderr
+    if process.returncode != 0:
+        raise ArchiveVerificationError(f"pytest failed\n{output}")
+    require(not re.search(r"\b\d+ (?:xfailed|xpassed|failed|error)s?\b", output), "pytest reported a non-pass outcome")
+    return output
+
+
+def count_outcome(output: str, outcome: str) -> int:
+    match = re.search(rf"\b(\d+) {outcome}\b", output)
+    return int(match.group(1)) if match else 0
+
+
+def verify_critical_controls() -> None:
+    output = pytest_output(("-q", *FOCUSED_TESTS), timeout=180)
+    require(count_outcome(output, "passed") == 109, "critical controls must report 109 passed")
+    require(count_outcome(output, "skipped") == 0, "critical controls must not skip")
+
+
+def verify_full_suite() -> None:
+    output = pytest_output(("-vv", "-r", "s"), timeout=600)
+    passed = count_outcome(output, "passed")
+    skipped = count_outcome(output, "skipped")
+    require(passed + skipped == 487, f"full suite must collect 487 tests, got {passed + skipped}")
+    if passed == 487 and skipped == 0:
+        return
+    require(passed == 482 and skipped == 5, f"portable suite expected 482 passed and 5 skipped, got {passed} and {skipped}")
+    observed = {
+        match.group(1): match.group(2)
+        for match in re.finditer(r"^(tests/\S+::\S+)\s+SKIPPED\b(.*)$", output, re.MULTILINE)
+    }
+    require(set(observed) == set(ALLOWED_EXTERNAL_DATA_SKIPS), f"unexpected skipped tests: {tuple(sorted(observed))}")
+    expected_reason_counts = {
+        "local immutable Price V1 snapshot is not installed": 3,
+        "local Data Layer V1 warehouse is unavailable": 2,
+    }
+    for reason, expected_count in expected_reason_counts.items():
+        require(output.count(reason) >= expected_count, f"skip reason missing: {reason}")
+
+
+def verify_artifacts() -> None:
+    require(digest(ROOT / CONTRACT_PATH) == CONTRACT_SHA256, "v2 acceptance contract SHA mismatch")
+    require(git_ancestor(CONTRACT_FREEZE), "v2 acceptance freeze is not an ancestor")
+    require(git_ancestor(RESEARCH_CLOSEOUT), "research closeout is not an ancestor")
+
+    for relative_path, expected_sha in BOUND_EVIDENCE.items():
+        require(digest(ROOT / relative_path) == expected_sha, f"{relative_path}: SHA mismatch")
+
+    v1 = read_object("results/gmaq-validation-archive-v1.json")
+    require(v1.get("status") == "NOT_RELEASED", "v1 failure status changed")
+    require(v1.get("failure_class") == "PROCESS_DEFECT_PORTABILITY", "v1 failure class changed")
+
+    oss = read_object("research/process/oss-strategy-replication-001-program-history.json")
+    require(oss.get("PROGRAM_RESULT") == "NO_ADMISSIBLE_OSS_CANDIDATE", "OSS result changed")
+    require(oss.get("REPOSITORIES_SCREENED") == 8, "OSS repository count changed")
+    require(oss.get("STRATEGY_FILES_SCREENED") == 30, "OSS strategy-file count changed")
+    require(oss.get("CANDIDATES_SHORTLISTED") == 5, "OSS shortlist count changed")
+    require(oss.get("REAL_ORDER_COUNT") == 0, "OSS real-order count changed")
+    require(oss.get("READY_FOR_STRATEGY") is False, "OSS strategy readiness changed")
+    require(oss.get("READY_FOR_TINY_LIVE") is False, "OSS tiny-live readiness changed")
+
+    vbt = read_object("research/process/vbt-alpha-program-001-program-history.json")
+    require(vbt.get("PROGRAM_RESULT") == "VBT_ALPHA_PROGRAM_001_EXHAUSTED", "VBT result changed")
+    require(vbt.get("REAL_ORDER_COUNT") == 0, "VBT real-order count changed")
+    require(vbt.get("READY_FOR_STRATEGY") is False, "VBT strategy readiness changed")
+    require(vbt.get("READY_FOR_TINY_LIVE") is False, "VBT tiny-live readiness changed")
+
+    formal = read_object("research/exploration/expl-017-formal-003-result.json")
+    require(formal.get("formal_run_id") == "EXPL-017-FORMAL-003", "formal run ID changed")
+    require(formal.get("formal_run_count") == 1, "formal run count changed")
+    verdict = formal.get("verdict")
+    require(isinstance(verdict, dict), "formal verdict missing")
+    require(verdict.get("classification") == "HYPOTHESIS_FAIL", "formal verdict changed")
+
+    graveyard = (ROOT / "research/exploration/factor-graveyard.md").read_text()
+    require("ALPHA_STATUS = HYPOTHESIS_FAIL" in graveyard, "Factor Graveyard lost EXPL-017 status")
+    require("no rerun of FORMAL-003" in graveyard, "Factor Graveyard lost the no-rerun rule")
+
+    readiness = (ROOT / "configs/LIVE_READINESS.md").read_text()
+    require("## Current blockers" in readiness, "live-readiness blocker section missing")
+    require("LIVE_READINESS_BLOCKER" in readiness, "live-readiness fail-closed rule missing")
+
+
+def build_result() -> dict:
+    verify_artifacts()
+    verify_critical_controls()
+    verify_full_suite()
+    return {
+        "archive_integrity": "PASS",
+        "bound_evidence": BOUND_EVIDENCE,
+        "collected_tests": 487,
+        "contract": {
+            "freeze_commit": CONTRACT_FREEZE,
+            "path": CONTRACT_PATH,
+            "sha256": CONTRACT_SHA256,
+        },
+        "critical_controls": {"status": "PASS", "tests": 109},
+        "external_data_check_nodes": sorted(ALLOWED_EXTERNAL_DATA_SKIPS),
+        "external_data_checks": 5,
+        "fail_closed_controls": "PASS",
+        "full_contract_suite": {
+            "collected": 487,
+            "external_data_checks": 5,
+            "portable_tests": 482,
+            "status": "PASS_PORTABLE",
+        },
+        "portable_tests": 482,
+        "profitability_claim": False,
+        "promoted_alpha": 0,
+        "ready_for_strategy": False,
+        "ready_for_tiny_live": False,
+        "real_orders": 0,
+        "release": "GMAQ_VALIDATION_ARCHIVE_V2",
+        "release_attempts": {"failed_ci_runs": [33253546757]},
+        "reproducibility": "PASS",
+        "research_artifacts": "PASS",
+        "research_closeout_ancestor": True,
+        "status": "ARCHIVE_RELEASED",
+        "v1_status": "NOT_RELEASED_PROCESS_DEFECT_PORTABILITY",
+        "validation_benchmark": "PASS",
+        "verifier_sha256": digest(pathlib.Path(__file__)),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", type=pathlib.Path, help="require exact match with a committed result")
+    args = parser.parse_args(argv)
+    try:
+        result = build_result()
+        if args.check:
+            expected = json.loads(args.check.read_text())
+            require(expected == result, f"result mismatch: {args.check}")
+    except (ArchiveVerificationError, OSError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+        print(f"GMAQ archive release blocked: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,22 @@
+{
+  "ci_acceptance": {
+    "external_data_checks_skipped": 5,
+    "portable_tests_passed": 482,
+    "status": "FAIL"
+  },
+  "failure_class": "PROCESS_DEFECT_PORTABILITY",
+  "failure_reason": "The frozen v1 contract required 487 passed tests, but GitHub CI has no local immutable Data Layer warehouse and produced 482 passed plus 5 data-bound skips.",
+  "github_run_id": 33253093383,
+  "local_acceptance": {
+    "result_sha256": "fad57ee210aca8fe8ff11eeb811be43c4e2046784d11e17c2b7cb1c71875d1ba",
+    "status": "PASS",
+    "tests_passed": 487
+  },
+  "profitability_claim": false,
+  "promoted_alpha": 0,
+  "ready_for_strategy": false,
+  "ready_for_tiny_live": false,
+  "real_orders": 0,
+  "release": "GMAQ_VALIDATION_ARCHIVE_V1",
+  "status": "NOT_RELEASED"
+}
