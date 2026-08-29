@@ -40,7 +40,7 @@ The Freqtrade runtime defaults to credential-free dry-run. GMAQ adds entry gatin
 
 | Objective | Result |
 | --- | --- |
-| Validation Archive v1 release contract | `ARCHIVE_RELEASED` |
+| Validation Archive v2 portable release contract | `ARCHIVE_RELEASED` |
 | Critical fail-closed controls | `109 passed` |
 | Reproducible validation infrastructure | Delivered |
 | Data lineage and PIT controls | Delivered |
@@ -50,7 +50,7 @@ The Freqtrade runtime defaults to credential-free dry-run. GMAQ adds entry gatin
 | Tiny-live readiness | `NO` |
 | Real orders | `0` |
 
-The engineering stack succeeded at rejecting weak evidence. The frozen archive release reproduces that result through its [acceptance contract](ARCHIVE_RELEASE.md) and [machine-readable PASS artifact](../results/gmaq-validation-archive-v1.json). The original strategy-production goal missed its target. GMAQ records both facts.
+The engineering stack succeeded at rejecting weak evidence. V1 passed locally and failed its GitHub portability gate, so the team preserved it as `NOT_RELEASED`. V2 reproduces the repository-complete result through its [portable acceptance contract](ARCHIVE_RELEASE_V2.md) and [machine-readable PASS artifact](../results/gmaq-validation-archive-v2.json). The original strategy-production goal missed its target. GMAQ records both facts.
 
 ## Lessons applied to the successor
 

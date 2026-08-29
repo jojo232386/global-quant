@@ -1,0 +1,49 @@
+{
+  "archive_integrity": "PASS",
+  "bound_evidence": {
+    "configs/LIVE_READINESS.md": "e0262dcd26baa5d9d8c628533fb1f18be00c1c85015db425c4e5d0a13c7d7c66",
+    "research/exploration/expl-017-formal-003-result.json": "c55a4ddc5e8919f5ddd87b19d810d009851661c0a6828a283a285e87b08e347f",
+    "research/exploration/factor-graveyard.md": "8cc1bb770b79d42d268d957820836a2a628eead9db82b7f050f4170c6ac07bb0",
+    "research/process/oss-strategy-replication-001-program-history.json": "b3d5ffb9b706370bd6175fb65006db21f03d0603657facdf3aec5129a786a731",
+    "research/process/vbt-alpha-program-001-program-history.json": "b3609443852b9694d3dc244b2a648346dcc709db0d1f7d3b4a7289e860325b98"
+  },
+  "collected_tests": 487,
+  "contract": {
+    "freeze_commit": "3424468af6b5396f5954cba1868dc394759df027",
+    "path": "docs/ARCHIVE_RELEASE_V2.md",
+    "sha256": "ec284bcd9932dcfc139725d54d2222315d57f4fafbd0d83e379a67b9a0594503"
+  },
+  "critical_controls": {
+    "status": "PASS",
+    "tests": 109
+  },
+  "external_data_check_nodes": [
+    "tests/test_expl_017_formal_consumer.py::test_real_snapshot_can_bind_to_sidecar_without_reading_performance",
+    "tests/test_expl_017_lifecycle_v1.py::test_real_price_v1_structure_scope_is_read_only_when_local_snapshot_is_available",
+    "tests/test_ls_tsmom_contract.py::test_verified_curated_snapshot_binding_loads_real_v1_dataset",
+    "tests/test_spot_perp_carry_contract.py::test_real_bound_dataset_replays_verified",
+    "tests/test_vbt_alpha_program_001.py::test_range_overlay_matches_the_unchanged_frozen_price_loader"
+  ],
+  "external_data_checks": 5,
+  "fail_closed_controls": "PASS",
+  "full_contract_suite": {
+    "collected": 487,
+    "external_data_checks": 5,
+    "portable_tests": 482,
+    "status": "PASS_PORTABLE"
+  },
+  "portable_tests": 482,
+  "profitability_claim": false,
+  "promoted_alpha": 0,
+  "ready_for_strategy": false,
+  "ready_for_tiny_live": false,
+  "real_orders": 0,
+  "release": "GMAQ_VALIDATION_ARCHIVE_V2",
+  "reproducibility": "PASS",
+  "research_artifacts": "PASS",
+  "research_closeout_ancestor": true,
+  "status": "ARCHIVE_RELEASED",
+  "v1_status": "NOT_RELEASED_PROCESS_DEFECT_PORTABILITY",
+  "validation_benchmark": "PASS",
+  "verifier_sha256": "8191c509f00d0e404aac95f41ef322f0ea6d74317f71ade018262b191b8dc060"
+}

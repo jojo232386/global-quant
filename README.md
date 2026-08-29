@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml"><img src="https://github.com/jojo232386/global-quant/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12 or newer">
-  <img src="https://img.shields.io/badge/Validation%20Archive%20v1-PASS-16A34A" alt="Validation Archive v1 passed">
+  <img src="https://img.shields.io/badge/Validation%20Archive%20v2-PASS-16A34A" alt="Validation Archive v2 passed">
   <img src="https://img.shields.io/badge/status-frozen%20validation%20archive-7C3AED" alt="Frozen validation archive">
   <img src="https://img.shields.io/badge/real%20orders-0-0EA5E9" alt="Zero real orders">
 </p>
@@ -15,20 +15,21 @@
 GMAQ combines point-in-time data controls, preregistered research, adversarial review, and a fail-closed Freqtrade runtime. It verifies whether each result survives data lineage checks, realistic costs, holdout evidence, and operational identity binding.
 
 > [!IMPORTANT]
-> GMAQ Validation Archive v1 passed its frozen release contract. The team closed active strategy development after no candidate met the promotion standard. This repository documents the released validator, the rejected hypotheses, and the runtime safeguards. It makes no profitability or live-readiness claim.
+> GMAQ Validation Archive v2 passed its frozen portable release contract. V1 passed locally and failed GitHub CI portability because five checks require an external immutable data warehouse; the project preserved that failure and created v2 under a new contract. This repository makes no profitability or live-readiness claim.
 
 ## Closeout in one screen
 
 | Measure | Verified closeout |
 | --- | --- |
 | Project role | Alpha validation and quant risk governance |
-| Validation Archive v1 | `ARCHIVE_RELEASED` |
+| Validation Archive v2 | `ARCHIVE_RELEASED` |
 | Critical fail-closed controls | `109 passed` |
 | Promoted Alpha | `0` |
 | Ready for strategy deployment | `NO` |
 | Ready for tiny live | `NO` |
 | Real orders | `0` |
-| Contract suite | `487 passed` on Python 3.12 reproduction |
+| Portable contract suite | `482 passed`; 5 named external-data checks |
+| Full local collection | `487 passed` with immutable warehouse present |
 | Canonical closeout | `main@db45f4e9` |
 
 GMAQ revoked weak historical passes, stopped process-defective runs before performance, and rejected candidates whose edge disappeared under point-in-time or cost controls. No unsupported result reached a capital path.
@@ -70,7 +71,7 @@ flowchart LR
 - **Holdout gates closed EXPL-017.** The frozen formal run retained attractive intermediate behavior, then failed final holdout, stress, regime, and concentration requirements. The team recorded `HYPOTHESIS_FAIL` and prohibited a rerun.
 - **Native strategy semantics exposed a screening flaw.** The OSS review examined 8 repositories, 30 strategy files, and 5 shortlisted candidates. GMAQ admitted none because its daily/PIT/vectorbt contract changed or excluded the original Freqtrade semantics. That result drove the successor design toward native-framework screening.
 
-Read the [release contract](docs/ARCHIVE_RELEASE.md), inspect its [machine-readable PASS result](results/gmaq-validation-archive-v1.json), or open the full [engineering case study](docs/CASE_STUDY.md).
+Read the [v2 release contract](docs/ARCHIVE_RELEASE_V2.md), inspect its [machine-readable PASS result](results/gmaq-validation-archive-v2.json), or open the full [engineering case study](docs/CASE_STUDY.md). The [v1 result](results/gmaq-validation-archive-v1.json) preserves the portability failure.
 
 ## Repository guide
 
@@ -94,10 +95,10 @@ uv venv --python 3.12 /tmp/gmaq-venv
 uv pip sync --python /tmp/gmaq-venv/bin/python \
   research/oss/requirements-vectorbt-poc.txt
 /tmp/gmaq-venv/bin/python scripts/gmaq-verify-archive \
-  --check results/gmaq-validation-archive-v1.json
+  --check results/gmaq-validation-archive-v2.json
 ```
 
-The verifier checks immutable evidence, forces localhost tests away from desktop HTTP proxies, runs 109 critical controls, and then runs the full 487-test suite. The repository needs no exchange credentials for verification.
+The verifier checks immutable evidence, forces localhost tests away from desktop HTTP proxies, runs 109 critical controls, and validates the 487-test collection in either warehouse-present or repository-portable mode. Portable mode accepts only five named external-data skips and rejects every other skip. The repository needs no exchange credentials for verification.
 
 ## Design decisions
 
