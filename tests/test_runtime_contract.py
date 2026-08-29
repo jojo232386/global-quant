@@ -31,7 +31,12 @@ def load_strategy():
     spec = importlib.util.spec_from_file_location("gmaq_canary", STRATEGY_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
-    spec.loader.exec_module(module)
+    strategy_dir = str(STRATEGY_PATH.parent)
+    sys.path.insert(0, strategy_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(strategy_dir)
     return module.LiveExecutionCanaryStrategy
 
 
