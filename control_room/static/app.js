@@ -40,6 +40,7 @@ function renderRisk(reconcile, audit, gate) {
   text("unknownOutcomes", (reconcile.unknown_outcomes || []).length);
   const conditions = [
     ["REST 与 SQLite 身份一致", reconcile.matches_database === true],
+    ["开放持仓为零", reconcile.open_trades === 0],
     ["开放订单为零", reconcile.open_orders === 0],
     ["部分成交为零", reconcile.partial_orders === 0],
     ["未知结果为零", (reconcile.unknown_outcomes || []).length === 0],
@@ -141,6 +142,10 @@ function render(snapshot) {
     && gate.identity_verdict === "VERIFIED"
     && health.verdict === "HEALTHY"
     && reconcile.verdict === "MATCH"
+    && reconcile.open_trades === 0
+    && reconcile.open_orders === 0
+    && reconcile.partial_orders === 0
+    && (reconcile.unknown_outcomes || []).length === 0
     && audit.verdict === "VERIFIED"
     && repo.clean === true
     && config.credential_free === true;

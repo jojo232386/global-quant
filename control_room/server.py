@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -105,9 +106,9 @@ def local_api_get(path: str, token: str) -> object | None:
         headers={"Authorization": f"Basic {token}"},
     )
     try:
-        with urllib.request.build_opener(NoRedirectHandler()).open(
-            request, timeout=CONTROL.NETWORK_TIMEOUT_S
-        ) as response:
+        with urllib.request.build_opener(
+            NoRedirectHandler(), urllib.request.ProxyHandler({})
+        ).open(request, timeout=CONTROL.NETWORK_TIMEOUT_S) as response:
             if response.status != 200:
                 return None
             return json.loads(response.read())
@@ -158,10 +159,16 @@ def runtime_probe() -> dict:
         )
         heartbeat_age = None
         if isinstance(health_payload, dict) and health_payload.get("last_process_ts"):
-            heartbeat_age = max(0.0, time.time() - float(health_payload["last_process_ts"]))
-        clock_offset = CONTROL.exchange_time_offset_s()
+            age = time.time() - float(health_payload["last_process_ts"])
+            if math.isfinite(age) and age >= -CONTROL.CLOCK_OFFSET_LIMIT_S:
+                heartbeat_age = max(0.0, age)
+        clock_assessment = (
+            CONTROL.health_clock_assessment()
+            if hasattr(CONTROL, "health_clock_assessment")
+            else None
+        )
         db_payload = CONTROL.bot_db_snapshot(env)
-    except (OSError, TypeError, ValueError):
+    except (AttributeError, OSError, TypeError, ValueError):
         return unavailable_runtime("runtime_probe_error")
 
     if rest_payload is not None and db_payload is not None:
@@ -182,6 +189,37 @@ def runtime_probe() -> dict:
             "matches_database": False,
         }
 
+    clock_passed = False
+    clock_detail = None
+    clock_unit = None
+    if isinstance(clock_assessment, dict):
+        offset = clock_assessment.get("estimate_offset_s")
+        if (
+            isinstance(offset, (int, float))
+            and not isinstance(offset, bool)
+            and math.isfinite(offset)
+        ):
+            clock_offset = float(offset)
+            clock_passed = (
+                clock_assessment.get("passed") is True
+                and abs(clock_offset) <= CONTROL.CLOCK_OFFSET_LIMIT_S
+            )
+            clock_detail = round(clock_offset, 3)
+            clock_unit = "seconds"
+        elif (
+            clock_assessment.get("status") == "NOT_REQUIRED_DISARMED"
+            and clock_assessment.get("passed") is True
+        ):
+            clock_passed = True
+            clock_detail = clock_assessment.get("detail")
+        else:
+            clock_passed = False
+            clock_detail = clock_assessment.get("detail") or "failed"
+
+    clock_check: dict[str, object] = {"name": "Clock", "passed": clock_passed, "detail": clock_detail}
+    if clock_unit:
+        clock_check["unit"] = clock_unit
+
     health_checks = [
         {"name": "API", "passed": ping, "detail": "pong" if ping else "unreachable"},
         {
@@ -190,12 +228,7 @@ def runtime_probe() -> dict:
             "detail": round(heartbeat_age, 1) if heartbeat_age is not None else None,
             "unit": "seconds",
         },
-        {
-            "name": "Clock",
-            "passed": clock_offset is not None and abs(clock_offset) <= CONTROL.CLOCK_OFFSET_LIMIT_S,
-            "detail": round(clock_offset, 3) if clock_offset is not None else None,
-            "unit": "seconds",
-        },
+        clock_check,
     ]
     if all(item["passed"] for item in health_checks):
         health_verdict = "HEALTHY"
