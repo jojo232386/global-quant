@@ -645,13 +645,25 @@ def exchange_clock_assessment() -> dict:
     )
 
 
+class NoBotApiRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def bot_api_opener():
+    """Keep Basic credentials on the configured bot API path, never on a proxy or redirect."""
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoBotApiRedirect()
+    )
+
+
 def api_request(path: str, env: dict, token: str | None = None) -> tuple[int, object]:
     headers = {}
     if token:
         headers["Authorization"] = f"Basic {token}"
     request = urllib.request.Request(f"{API_BASE}{path}", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+        with bot_api_opener().open(request, timeout=NETWORK_TIMEOUT_S) as response:
             body = response.read().decode()
     except urllib.error.HTTPError as error:
         return error.code, None
@@ -685,7 +697,7 @@ def api_post(path: str, token: str, payload: dict | None = None) -> tuple[int, o
         headers={"Authorization": f"Basic {token}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_S) as response:
+        with bot_api_opener().open(request, timeout=NETWORK_TIMEOUT_S) as response:
             return response.status, json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
         return error.code, None

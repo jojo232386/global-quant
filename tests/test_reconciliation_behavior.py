@@ -2,6 +2,8 @@ import importlib.util
 import http.client
 import json
 import pathlib
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.machinery import SourceFileLoader
 
 
@@ -142,13 +144,76 @@ def test_zero_proof_requires_rest_db_match_and_no_unknowns() -> None:
 
 def test_api_disconnect_is_fail_closed_instead_of_crashing(monkeypatch) -> None:
     control = load_control("gmaq_control_disconnect_test")
+    real_opener = control.bot_api_opener
 
-    def disconnect(*args, **kwargs):
-        raise http.client.RemoteDisconnected("peer closed without a response")
+    class DisconnectOpener:
+        def open(self, *_args, **_kwargs):
+            raise http.client.RemoteDisconnected("peer closed without a response")
 
-    monkeypatch.setattr(control.urllib.request, "urlopen", disconnect)
+    monkeypatch.setattr(control, "bot_api_opener", lambda: DisconnectOpener())
     assert control.api_request("/api/v1/ping", {}, "opaque") == (0, None)
     assert control.api_post("/api/v1/stopentry", "opaque") == (0, None)
+    monkeypatch.setattr(control, "bot_api_opener", real_opener)
+
+    seen = {"origin": [], "proxy": []}
+
+    class Origin(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen["origin"].append((self.command, self.headers.get("Authorization")))
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{proxy.server_port}/redirected")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"pong"}')
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            seen["origin"].append((self.command, self.headers.get("Authorization")))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+
+        def log_message(self, *_args):
+            pass
+
+    class Proxy(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen["proxy"].append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        do_POST = do_GET
+
+        def log_message(self, *_args):
+            pass
+
+    origin = ThreadingHTTPServer(("127.0.0.1", 0), Origin)
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+    threads = [threading.Thread(target=httpd.serve_forever, daemon=True) for httpd in (origin, proxy)]
+    for thread in threads:
+        thread.start()
+    try:
+        monkeypatch.setattr(control, "API_BASE", f"http://127.0.0.1:{origin.server_port}")
+        monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.server_port}")
+        monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        monkeypatch.delenv("no_proxy", raising=False)
+        assert control.api_request("/api/v1/ping", {}, "opaque") == (200, {"status": "pong"})
+        assert control.api_post("/api/v1/stopentry", "opaque") == (200, {"status": "ok"})
+        assert control.api_request("/redirect", {}, "opaque")[0] == 302
+        assert seen == {
+            "origin": [("GET", "Basic opaque"), ("POST", "Basic opaque"), ("GET", "Basic opaque")],
+            "proxy": [],
+        }
+    finally:
+        for httpd in (origin, proxy):
+            httpd.shutdown()
+            httpd.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
 
 
 def test_health_api_failure_disarms_audits_and_alerts(monkeypatch) -> None:
